@@ -37,4 +37,11 @@ See the full test [here](test/series.js).
 
 ### How's it work?
 
-Well, it's a combination of `async.auto` and `jsonpath`.  Async auto builds an execution graph for async tasks, but you have to describe the dependencies yourself.  But if we make the assumption that you describe your inputs using `jsonpath`, we can infer your dependencies for you.  The result is there's no duplicated code and it feels similar to writing a SQL query.
+Well, it's a combination of `async.auto` and `jsonpath`.  Async auto builds an execution graph for async tasks, but you have to describe the dependencies yourself.  But we make the assumption that you describe your inputs using `jsonpath`, so we can infer your dependencies for you.  The end result is a terse JSON DSL for running queries.
+
+### Generating complex relationships
+
+For more complex relationships, like if you want to seed a relational database, `loopback-factory` is designed to work well with a service composition tool called [microql](https://github.com/TorchlightSoftware/microql).
+
+[Here's an example.](docs/microql-seed.md)
+
