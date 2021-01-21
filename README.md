@@ -1,13 +1,16 @@
 # MicroQL
 
+![Yo dawg, I heard you like JSON](/joke.jpg)
+
 Sort of inspired by GraphQL.  But what if you have regular old JSON REST APIs which may be yours or third parties, and you want to compose them and return some kind of result?  This lets you do that, and also integrate other sync and async tasks declaratively.
 
-I probably just reinvented lisp or something.  Oh well.
+I probably just reinvented prolog.  Oh well.
+
 
 ```js
 query({
   debug: true,
-  input: {creatureType: 'Monkey'},
+  input: {car: 'Monkey'},
   services: {fieldAgent, truck},
   jobs: {
 
