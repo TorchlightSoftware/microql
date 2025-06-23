@@ -132,7 +132,6 @@ const myService = {
 
 - `@` - Previous result in a chain
 - `@.field` - Access field of previous result
-- `@fieldName` - Access named field of previous result
 
 ## Migration from v0.1
 

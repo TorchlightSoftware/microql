@@ -79,14 +79,11 @@ const resolveArgs = (args, source, chainResult = null) => {
       if (value === '@') {
         return chainResult
       }
-      // Handle @.field, @categories, etc.
-      if (chainResult && value.startsWith('@.')) {
+      // Handle @.field
+      if (value.startsWith('@.')) {
         const path = value.replace('@', '$')
         return retrieve(path, chainResult)
       }
-      // Handle @fieldName
-      const fieldName = value.substring(1)
-      return chainResult?.[fieldName] || retrieve(value.replace('@', '$.chainResult'), { chainResult })
     }
     
     // Handle regular JSONPath
