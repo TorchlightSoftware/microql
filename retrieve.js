@@ -1,35 +1,37 @@
-const jp = require('jsonpath')
+import jp from 'jsonpath'
 
-// jsonpath docs:
-// https://github.com/dchester/jsonpath
-//
-// Custom extension: using flags after | character to do post-processing
-function retrieve(path, source) {
-  // if it's not a path, just return the string
+/**
+ * Retrieve value from source using JSONPath with optional post-processing
+ * Custom extension: using flags after | character to do post-processing
+ */
+export default function retrieve(path, source) {
+  // If it's not a path, just return the string
   if (!/^\$/.test(path)) return path
 
-  let [query, opts] = path.split('|')
-  opts || (opts = '1')
+  const [query, opts = '1'] = path.split('|')
 
-  var findings
   try {
-    findings = jp.query(source, query)
-    opts.split('').forEach((o) => {
-      switch (o) {
+    let findings = jp.query(source, query)
+    
+    // Apply post-processing options
+    for (const option of opts) {
+      switch (option) {
         case 'a':
+          // Keep as array
           break
         case 'f':
-          findings = _.flatten(findings)
+          // Flatten array
+          findings = findings.flat()
           break
         case '1':
+          // Take first element
           findings = findings[0]
           break
       }
-    })
+    }
+    
+    return findings
   } catch (e) {
-    findings = {error: e.message, reason: 'alias', path}
+    return { error: e.message, reason: 'jsonpath', path }
   }
-  return findings
 }
-
-module.exports = retrieve
