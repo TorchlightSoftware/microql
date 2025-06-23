@@ -106,7 +106,8 @@ await query({
   services: {},           // Available services  
   methods: [],            // Services that support method syntax
   query: {},              // Jobs to execute (was 'jobs' in v0.1)
-  select: 'resultName'    // What to return
+  select: 'resultName',   // What to return
+  timeouts: {}            // Timeout configuration (optional)
 }
 ```
 
@@ -132,6 +133,57 @@ const myService = {
 
 - `@` - Previous result in a chain
 - `@.field` - Access field of previous result
+
+## Timeouts
+
+MicroQL provides comprehensive timeout support to prevent hanging service calls:
+
+### Configuration
+
+```js
+await query({
+  given: { data: 'example' },
+  services: { api, database },
+  timeouts: {
+    default: 3000,    // 3 second default for all services
+    api: 10000,       // 10 seconds for API calls
+    database: 5000    // 5 seconds for database calls
+  },
+  query: {
+    result: ['api', 'getData', { id: '$.given.data' }]
+  }
+})
+```
+
+### Timeout Priority (highest to lowest)
+
+1. **Argument-level timeout** - Set `timeout` in service call arguments
+2. **Service-specific timeout** - Set in `timeouts.serviceName`
+3. **Default timeout** - Set in `timeouts.default`
+4. **No timeout** - Service runs indefinitely
+
+### Argument-Level Timeouts
+
+```js
+query: {
+  // This call will timeout after 500ms regardless of config
+  urgentCall: ['api', 'getData', { 
+    id: '$.given.id',
+    timeout: 500
+  }],
+  
+  // This call uses service/default timeout from config
+  normalCall: ['api', 'getData', { id: '$.given.id' }]
+}
+```
+
+### Timeout Behavior
+
+- Timeouts apply to individual service calls, not entire queries
+- Service chains: each step gets its own timeout
+- Parallel execution: each service call gets its own timeout
+- The `timeout` argument is passed through to services for their own use
+- Timeout errors include service name and duration for debugging
 
 ## Migration from v0.1
 

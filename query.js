@@ -4,6 +4,24 @@ const DEP_REGEX = /\$\.(\w+)/
 const AT_REGEX = /^@/
 
 /**
+ * Wrap a promise with a timeout
+ */
+const withTimeout = (promise, timeoutMs, serviceName, action) => {
+  if (!timeoutMs || timeoutMs <= 0) {
+    return promise
+  }
+  
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => {
+        reject(new Error(`Service '${serviceName}.${action}' timed out after ${timeoutMs}ms`))
+      }, timeoutMs)
+    })
+  ])
+}
+
+/**
  * Auto-wrap service objects to make them compatible with function-based services
  */
 const wrapServiceObject = (serviceObj) => {
@@ -113,25 +131,76 @@ const resolveArgs = (args, source, chainResult = null) => {
 /**
  * Execute a single service call
  */
-const executeService = async (serviceName, action, args, services, source, chainResult = null) => {
+const executeService = async (serviceName, action, args, services, source, chainResult = null, timeouts = {}) => {
   const service = services[serviceName]
   if (!service) {
     throw new Error(`Service '${serviceName}' not found`)
   }
   
-  const finalArgs = resolveArgs(args, source, chainResult)
-  return await service(action, finalArgs)
+  let finalArgs
+  
+  // For util service, provide special handling
+  if (serviceName === 'util') {
+    if (args.template) {
+      finalArgs = { ...args }
+      // Only resolve non-template arguments
+      for (const [key, value] of Object.entries(args)) {
+        if (key !== 'template') {
+          finalArgs[key] = resolveArgs(value, source, chainResult)
+        }
+      }
+    } else {
+      finalArgs = resolveArgs(args, source, chainResult)
+    }
+    
+    // Provide util service with access to other services and context
+    finalArgs._services = services
+    finalArgs._context = source
+  } else {
+    finalArgs = resolveArgs(args, source, chainResult)
+  }
+  
+  // Handle timeout logic
+  let timeoutMs = null
+  let argsWithoutTimeout = finalArgs
+  
+  // Extract timeout from arguments if present
+  if (finalArgs && typeof finalArgs === 'object' && finalArgs.timeout !== undefined) {
+    timeoutMs = finalArgs.timeout
+    // Create new args object without timeout for service execution
+    argsWithoutTimeout = { ...finalArgs }
+    delete argsWithoutTimeout.timeout
+  }
+  
+  // Use service-specific timeout if no arg timeout provided
+  if (timeoutMs === null && timeouts[serviceName] !== undefined) {
+    timeoutMs = timeouts[serviceName]
+  }
+  
+  // Use default timeout if no other timeout specified
+  if (timeoutMs === null && timeouts.default !== undefined) {
+    timeoutMs = timeouts.default
+  }
+  
+  // Add timeout back to args so service can see it
+  if (timeoutMs !== null && argsWithoutTimeout && typeof argsWithoutTimeout === 'object') {
+    argsWithoutTimeout.timeout = timeoutMs
+  }
+  
+  // Execute service with timeout
+  const servicePromise = service(action, argsWithoutTimeout)
+  return await withTimeout(servicePromise, timeoutMs, serviceName, action)
 }
 
 /**
  * Execute a chain of service calls
  */
-const executeChain = async (chain, services, source) => {
+const executeChain = async (chain, services, source, timeouts = {}) => {
   let result = null
   
   for (const descriptor of chain) {
     const [serviceName, action, args] = descriptor
-    result = await executeService(serviceName, action, args, services, source, result)
+    result = await executeService(serviceName, action, args, services, source, result, timeouts)
   }
   
   return result
@@ -164,7 +233,7 @@ const getDependencies = (args) => {
  * Promise-based query execution
  */
 export default async function query(config) {
-  const { services, given, query: jobs, methods = [], select } = config
+  const { services, given, query: jobs, methods = [], select, timeouts = {} } = config
   
   // Prepare services (auto-wrap objects)
   const preparedServices = prepareServices(services)
@@ -204,7 +273,7 @@ export default async function query(config) {
       
       tasks.set(jobName, {
         deps: Array.from(allDeps),
-        execute: () => executeChain(chain, preparedServices, results)
+        execute: () => executeChain(chain, preparedServices, results, timeouts)
       })
       continue
     }
@@ -228,7 +297,7 @@ export default async function query(config) {
           // Resolve the data source first
           const data = dataSource.startsWith('$.') ? retrieve(dataSource, results) : dataSource
           const finalArgs = { ...args, on: data }
-          return await executeService(serviceName, action, finalArgs, preparedServices, results)
+          return await executeService(serviceName, action, finalArgs, preparedServices, results, null, timeouts)
         }
       })
       continue
@@ -241,7 +310,7 @@ export default async function query(config) {
       
       tasks.set(jobName, {
         deps,
-        execute: () => executeService(serviceName, action, args, preparedServices, results)
+        execute: () => executeService(serviceName, action, args, preparedServices, results, null, timeouts)
       })
       continue
     }
