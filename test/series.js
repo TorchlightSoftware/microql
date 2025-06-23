@@ -8,33 +8,48 @@ const assert = (condition, message) => {
   console.log('✓', message || 'Test passed')
 }
 
-// Test services (function-based)
-const fieldAgent = async (action, { animal }) => {
-  if (action === 'findAnimal') return animal
-  if (action === 'tranquilize') return `Sleepy ${animal}`
+// Test services (function-based) - E-commerce example
+const orders = async (action, { id, customerId }) => {
+  if (action === 'getOrder') return { 
+    id, 
+    customerId, 
+    total: 99.99, 
+    items: ['Widget', 'Gadget'] 
+  }
   throw new Error(`Unknown action: ${action}`)
 }
 
-const truck = async (action, { animal }) => {
-  if (action === 'bringHome') return `Friendly ${animal}`
+const payments = async (action, { customerId, amount }) => {
+  if (action === 'chargeCard') return { 
+    transactionId: 'TXN-12345',
+    amount,
+    status: 'approved'
+  }
+  throw new Error(`Unknown action: ${action}`)
+}
+
+const shipping = async (action, { order, paymentId }) => {
+  if (action === 'createLabel') return {
+    trackingNumber: '1Z999AA1012345678',
+    status: 'ready',
+    estimatedDelivery: '3-5 days'
+  }
   throw new Error(`Unknown action: ${action}`)
 }
 
 // Test services (object-based)
-const util = {
-  async map({ on, fn }) {
-    if (!Array.isArray(on)) return []
-    return Promise.all(on.map(item => {
-      // Execute the function service call on each item
-      const [serviceName, action, args] = fn
-      // This would need the services context, simplified for test
-      return `${action}(${item})`
-    }))
-  },
-  
+const dataService = {
   async filter({ on, predicate }) {
     if (!Array.isArray(on)) return []
     return on.filter(item => item.includes(predicate))
+  },
+  
+  async validate({ email }) {
+    return email.includes('@') && email.includes('.')
+  },
+  
+  async normalize({ email }) {
+    return email.toLowerCase().trim()
   }
 }
 
@@ -42,33 +57,40 @@ async function runTests() {
   console.log('Running MicroQL Tests...\n')
   
   // Test 1: Basic series execution with new syntax
-  console.log('Test 1: Basic series execution')
+  console.log('Test 1: E-commerce order processing pipeline')
   try {
     const result = await query({
-      given: { creatureType: 'Monkey' },
-      services: { fieldAgent, truck },
+      given: { orderId: 'ORDER-123', customerId: 'CUST-456' },
+      services: { orders, payments, shipping },
       query: {
-        monkey: ['fieldAgent', 'findAnimal', { animal: '$.given.creatureType' }],
-        caged: ['fieldAgent', 'tranquilize', { animal: '$.monkey' }],
-        pet: ['truck', 'bringHome', { animal: '$.caged' }],
+        order: ['orders', 'getOrder', { id: '$.given.orderId' }],
+        payment: ['payments', 'chargeCard', { 
+          customerId: '$.given.customerId',
+          amount: '$.order.total' 
+        }],
+        shipment: ['shipping', 'createLabel', {
+          order: '$.order',
+          paymentId: '$.payment.transactionId'
+        }],
       },
-      select: 'pet'
+      select: 'shipment'
     })
     
-    assert(result === 'Friendly Sleepy Monkey', 'Should return "Friendly Sleepy Monkey"')
+    assert(result.trackingNumber === '1Z999AA1012345678', 'Should return tracking number')
+    assert(result.status === 'ready', 'Should have ready status')
   } catch (error) {
     console.error('Test 1 failed:', error.message)
     process.exit(1)
   }
   
   // Test 2: Service object auto-wrapping
-  console.log('Test 2: Service object auto-wrapping')
+  console.log('\nTest 2: Service object auto-wrapping')
   try {
     const result = await query({
       given: { items: ['apple', 'banana', 'cherry'] },
-      services: { util },
+      services: { dataService },
       query: {
-        filtered: ['util', 'filter', { on: '$.given.items', predicate: 'a' }]
+        filtered: ['dataService', 'filter', { on: '$.given.items', predicate: 'a' }]
       },
       select: 'filtered'
     })
@@ -81,42 +103,51 @@ async function runTests() {
   }
   
   // Test 3: Method syntax (basic)
-  console.log('Test 3: Method syntax')
+  console.log('\nTest 3: Method syntax')
   try {
     const result = await query({
-      given: { items: ['test1', 'test2'] },
-      services: { util },
-      methods: ['util'],
+      given: { emails: ['test@example.com', 'admin@example.org', 'invalid-email'] },
+      services: { dataService },
+      methods: ['dataService'],
       query: {
-        filtered: ['$.given.items', 'util:filter', { predicate: '1' }]
+        filtered: ['$.given.emails', 'dataService:filter', { predicate: '.com' }]
       },
       select: 'filtered'
     })
     
     assert(Array.isArray(result), 'Should return an array')
-    assert(result.length === 1, 'Should filter to 1 item containing "1"')
+    assert(result.length === 1, 'Should filter to 1 item containing ".com"')
   } catch (error) {
     console.error('Test 3 failed:', error.message)
     process.exit(1)
   }
   
   // Test 4: Service chains
-  console.log('Test 4: Service chains')
+  console.log('\nTest 4: Service chains with @ symbol')
   try {
+    const emailService = {
+      async extract({ text }) {
+        // Simple email extraction
+        const match = text.match(/[\w.-]+@[\w.-]+\.\w+/)
+        return match ? match[0] : null
+      }
+    }
+    
     const result = await query({
-      given: { creatureType: 'Cat' },
-      services: { fieldAgent, truck },
+      given: { 
+        rawText: 'Contact us at John.Doe@EXAMPLE.COM for more info' 
+      },
+      services: { emailService, dataService },
       query: {
-        petChain: [
-          ['fieldAgent', 'findAnimal', { animal: '$.given.creatureType' }],
-          ['fieldAgent', 'tranquilize', { animal: '@' }],
-          ['truck', 'bringHome', { animal: '@' }]
+        processedEmail: [
+          ['emailService', 'extract', { text: '$.given.rawText' }],
+          ['dataService', 'normalize', { email: '@' }]
         ]
       },
-      select: 'petChain'
+      select: 'processedEmail'
     })
     
-    assert(result === 'Friendly Sleepy Cat', 'Should chain operations with @ symbol')
+    assert(result === 'john.doe@example.com', 'Should extract and normalize email')
   } catch (error) {
     console.error('Test 4 failed:', error.message)
     process.exit(1)

@@ -14,17 +14,27 @@ MicroQL lets you compose multiple async services (APIs, databases, etc.) declara
 import query from 'microql'
 
 const result = await query({
-  given: { car: 'Monkey' },
-  services: { fieldAgent, truck },
+  given: { orderId: 'ORDER-123', customerId: 'CUST-456' },
+  services: { orders, payments, shipping },
   query: {
-    // result       service        action            args
-    monkey:    ['fieldAgent', 'findAnimal',     { animal: '$.given.car' }],
-    caged:     ['fieldAgent', 'tranquilize',    { animal: '$.monkey' }],
-    pet:       ['truck',      'bringHome',      { animal: '$.caged' }],
+    // Fetch order details
+    order: ['orders', 'getOrder', { id: '$.given.orderId' }],
+    
+    // Process payment using order total
+    payment: ['payments', 'chargeCard', { 
+      customerId: '$.given.customerId',
+      amount: '$.order.total' 
+    }],
+    
+    // Create shipment after payment succeeds
+    shipment: ['shipping', 'createLabel', {
+      order: '$.order',
+      paymentId: '$.payment.transactionId'
+    }],
   },
-  select: 'pet'
+  select: 'shipment'
 })
-// Returns: "Friendly Sleepy Monkey"
+// Returns: { trackingNumber: "1Z999AA1012345678", status: "ready" }
 ```
 
 ## New Features
@@ -34,16 +44,21 @@ const result = await query({
 You can now provide service objects that get automatically wrapped:
 
 ```js
-const util = {
-  async map({ on, fn }) { /* implementation */ },
-  async filter({ on, predicate }) { /* implementation */ }
+const dataService = {
+  async validate({ email }) { 
+    return email.includes('@') && email.includes('.')
+  },
+  async normalize({ email }) { 
+    return email.toLowerCase().trim()
+  }
 }
 
 await query({
-  given: { items: ['apple', 'banana', 'cherry'] },
-  services: { util },
+  given: { userEmail: 'John.Doe@EXAMPLE.COM' },
+  services: { dataService },
   query: {
-    filtered: ['util', 'filter', { on: '$.given.items', predicate: 'a' }]
+    isValid: ['dataService', 'validate', { email: '$.given.userEmail' }],
+    normalized: ['dataService', 'normalize', { email: '$.given.userEmail' }]
   }
 })
 ```
@@ -54,11 +69,11 @@ Use method syntax for cleaner queries:
 
 ```js
 await query({
-  given: { items: ['test1', 'test2'] },
-  services: { util },
-  methods: ['util'],  // Enable method syntax for util
+  given: { items: ['laptop', 'mouse', 'keyboard'] },
+  services: { inventory },
+  methods: ['inventory'],  // Enable method syntax for inventory
   query: {
-    filtered: ['$.given.items', 'util:filter', { predicate: '1' }]
+    inStock: ['$.given.items', 'inventory:checkStock', { warehouse: 'east' }]
   }
 })
 ```
@@ -69,13 +84,13 @@ Chain operations using the `@` symbol:
 
 ```js
 await query({
-  given: { creatureType: 'Cat' },
-  services: { fieldAgent, truck },
+  given: { documentUrl: 'https://example.com/report.pdf' },
+  services: { downloader, parser, analyzer },
   query: {
-    petChain: [
-      ['fieldAgent', 'findAnimal', { animal: '$.given.creatureType' }],
-      ['fieldAgent', 'tranquilize', { animal: '@' }],  // @ refers to previous result
-      ['truck', 'bringHome', { animal: '@' }]
+    processedDoc: [
+      ['downloader', 'fetch', { url: '$.given.documentUrl' }],
+      ['parser', 'extractText', { data: '@' }],  // @ refers to downloaded data
+      ['analyzer', 'getSummary', { text: '@', maxLength: 500 }]
     ]
   }
 })
@@ -100,14 +115,16 @@ await query({
 **Function Services:**
 ```js
 const myService = async (action, args) => {
-  if (action === 'doSomething') return 'result'
+  if (action === 'getData') return await fetchData(args.id)
+  if (action === 'saveData') return await saveData(args.data)
 }
 ```
 
 **Object Services (auto-wrapped):**
 ```js
 const myService = {
-  async doSomething(args) { return 'result' }
+  async getData({ id }) { return await fetchData(id) },
+  async saveData({ data }) { return await saveData(data) }
 }
 ```
 
