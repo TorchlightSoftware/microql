@@ -1,7 +1,5 @@
 # MicroQL
 
-![Yo dawg, I heard you like JSON](/joke.jpg)
-
 A query language for composing microservices using promises and modern JavaScript.
 
 ## Overview
