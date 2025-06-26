@@ -15,6 +15,7 @@
  */
 
 import retrieve from './retrieve.js'
+import { withOnParameter, validateContextIndex } from './utils.js'
 
 /** @type {RegExp} JSONPath dependency pattern for $.taskName references */
 const DEP_REGEX = /\$\.(\w+)/
@@ -43,6 +44,36 @@ const withTimeout = (promise, timeoutMs, serviceName, action) => {
       }, timeoutMs)
     })
   ])
+}
+
+/**
+ * Execute a function with retry logic
+ * @param {Function} fn - The function to execute
+ * @param {number} retries - Number of retry attempts (0 = no retry, just run once)
+ * @param {string} serviceName - Service name for error context
+ * @param {string} action - Action name for error context
+ * @returns {Promise} Result from successful execution
+ */
+const withRetry = async (fn, retries, serviceName, action) => {
+  let lastError
+  
+  // Try up to retries + 1 times (initial attempt + retries)
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn()
+    } catch (error) {
+      lastError = error
+      
+      if (attempt < retries) {
+        console.log(`Service '${serviceName}.${action}' failed (attempt ${attempt + 1}/${retries + 1}), retrying...`)
+        // Optional: Add exponential backoff here if desired
+        // await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 100))
+      }
+    }
+  }
+  
+  // All attempts failed
+  throw lastError
 }
 
 /**
@@ -92,6 +123,7 @@ const prepareServices = (services) => {
 /**
  * Parse method syntax: ['@data', 'service:method', {...}] or ['$.path', 'service:method', {...}]
  */
+
 /**
  * Transform method syntax to regular service call syntax
  * Core normalization function that enables elegant method syntax sugar
@@ -129,7 +161,7 @@ const transformMethodSyntax = (descriptor) => {
     serviceName,
     action, 
     dataSource,
-    transformedDescriptor: [serviceName, action, { on: dataSource, ...args }]
+    transformedDescriptor: [serviceName, action, withOnParameter(args, dataSource)]
   }
 }
 
@@ -156,7 +188,7 @@ const parseMethodCall = (descriptor, methods) => {
     serviceName: transformed.serviceName,
     action: transformed.action,
     dataSource: transformed.dataSource,
-    args: { on: transformed.dataSource, ...descriptor[2] }
+    args: withOnParameter(descriptor[2], transformed.dataSource)
   }
 }
 
@@ -240,9 +272,7 @@ export const resolveArgsWithContext = (args, source, chainResult = null, context
         // Pure @ symbols - use absolute indexing
         const contextIndex = atCount - 1 // @ = index 0, @@ = index 1, etc.
         
-        if (contextIndex >= contextStack.length) {
-          throw new Error(`${'@'.repeat(atCount)} used but only ${contextStack.length} context levels available (@ through ${'@'.repeat(contextStack.length)})`)
-        }
+        validateContextIndex(atCount, contextIndex, contextStack)
         
         return contextStack[contextIndex] || null
       }
@@ -252,9 +282,7 @@ export const resolveArgsWithContext = (args, source, chainResult = null, context
         const fieldPath = value.slice(atCount + 1) // Remove @ symbols and dot
         const contextIndex = atCount - 1 // @ = index 0, @@ = index 1, etc.
         
-        if (contextIndex >= contextStack.length) {
-          throw new Error(`${'@'.repeat(atCount)} used but only ${contextStack.length} context levels available (@ through ${'@'.repeat(contextStack.length)})`)
-        }
+        validateContextIndex(atCount, contextIndex, contextStack)
         
         const contextItem = contextStack[contextIndex] || null
         
@@ -314,7 +342,6 @@ const guardServiceExecution = async (serviceName, action, args, service, taskCon
     const serviceInfo = `${serviceName}.${action}`
     const argsInfo = `Args: ${JSON.stringify(args, null, 2)}`
     
-    // Create a more helpful error message focusing on the query location
     const enhancedMessage = `Error in service ${serviceInfo}${taskInfo}: ${error.message}\n${argsInfo}`
     const enhancedError = new Error(enhancedMessage)
     enhancedError.originalError = error
@@ -380,16 +407,26 @@ const executeService = async (serviceName, action, args, services, source, chain
     finalArgs._context = source
   }
   
-  // Handle timeout logic
+  // Handle timeout and retry logic
   let timeoutMs = null
-  let argsWithoutTimeout = finalArgs
+  let retryCount = 0
+  let argsWithoutReserved = finalArgs
   
-  // Extract timeout from arguments if present
-  if (finalArgs && typeof finalArgs === 'object' && finalArgs.timeout !== undefined) {
-    timeoutMs = finalArgs.timeout
-    // Create new args object without timeout for service execution
-    argsWithoutTimeout = { ...finalArgs }
-    delete argsWithoutTimeout.timeout
+  // Extract timeout and retry from arguments if present
+  if (finalArgs && typeof finalArgs === 'object') {
+    if (finalArgs.timeout !== undefined) {
+      timeoutMs = finalArgs.timeout
+    }
+    if (finalArgs.retry !== undefined) {
+      retryCount = Math.max(0, parseInt(finalArgs.retry) || 0)
+    }
+    
+    // Create new args object without reserved fields for service execution
+    if (finalArgs.timeout !== undefined || finalArgs.retry !== undefined) {
+      argsWithoutReserved = { ...finalArgs }
+      delete argsWithoutReserved.timeout
+      delete argsWithoutReserved.retry
+    }
   }
   
   // Use service-specific timeout if no arg timeout provided
@@ -402,14 +439,23 @@ const executeService = async (serviceName, action, args, services, source, chain
     timeoutMs = timeouts.default
   }
   
-  // Add timeout back to args so service can see it
-  if (timeoutMs !== null && argsWithoutTimeout && typeof argsWithoutTimeout === 'object') {
-    argsWithoutTimeout.timeout = timeoutMs
+  // Add timeout and retry back to args so service can see them
+  if (finalArgs && typeof finalArgs === 'object') {
+    if (timeoutMs !== null) {
+      argsWithoutReserved.timeout = timeoutMs
+    }
+    if (retryCount > 0) {
+      argsWithoutReserved.retry = retryCount
+    }
   }
   
-  // Execute service with guard and timeout
-  const servicePromise = guardServiceExecution(serviceName, action, argsWithoutTimeout, service, taskContext)
-  return await withTimeout(servicePromise, timeoutMs, serviceName, action)
+  // Execute service with retry, guard, and timeout
+  const executeWithRetry = async () => {
+    const servicePromise = guardServiceExecution(serviceName, action, argsWithoutReserved, service, taskContext)
+    return await withTimeout(servicePromise, timeoutMs, serviceName, action)
+  }
+  
+  return await withRetry(executeWithRetry, retryCount, serviceName, action)
 }
 
 /**
@@ -421,7 +467,12 @@ const executeChain = async (chain, services, source, timeouts = {}, contextStack
   
   for (let i = 0; i < chain.length; i++) {
     const descriptor = chain[i]
-    const [serviceName, action, args] = descriptor
+    
+    // Transform method syntax to regular syntax if needed
+    const transformed = transformMethodSyntax(descriptor)
+    const actualDescriptor = transformed ? transformed.transformedDescriptor : descriptor
+    
+    const [serviceName, action, args] = actualDescriptor
     
     // Add step context to task context
     const stepContext = taskContext ? {
@@ -537,7 +588,7 @@ export default async function query(config) {
         execute: async () => {
           // Resolve the data source first
           const data = dataSource.startsWith('$.') ? retrieve(dataSource, results) : dataSource
-          const finalArgs = { ...args, on: data }
+          const finalArgs = withOnParameter(args, data)
           return await executeService(serviceName, action, finalArgs, preparedServices, results, null, timeouts, [], { taskName: jobName, descriptor: descriptor })
         }
       })
