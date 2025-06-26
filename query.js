@@ -58,7 +58,11 @@ const prepareServices = (services) => {
 /**
  * Parse method syntax: ['@data', 'service:method', {...}] or ['$.path', 'service:method', {...}]
  */
-const parseMethodCall = (descriptor, methods) => {
+/**
+ * Transform method syntax to regular service call syntax
+ * ['@.data', 'service:method', args] -> ['service', 'method', {on: '@.data', ...args}]
+ */
+const transformMethodSyntax = (descriptor) => {
   if (!Array.isArray(descriptor) || descriptor.length !== 3) {
     return null
   }
@@ -66,27 +70,41 @@ const parseMethodCall = (descriptor, methods) => {
   const [dataSource, methodName, args] = descriptor
   
   // Check if it's method syntax (starts with @ or $.)
-  if (!AT_REGEX.test(dataSource) && !dataSource.startsWith('$.')) {
+  if (typeof dataSource !== 'string' || (!AT_REGEX.test(dataSource) && !dataSource.startsWith('$.'))) {
     return null
   }
   
   // Parse service:method notation
-  if (!methodName.includes(':')) {
+  if (typeof methodName !== 'string' || !methodName.includes(':')) {
     return null
   }
   
   const [serviceName, action] = methodName.split(':')
   
+  return {
+    serviceName,
+    action, 
+    dataSource,
+    transformedDescriptor: [serviceName, action, { on: dataSource, ...args }]
+  }
+}
+
+const parseMethodCall = (descriptor, methods) => {
+  const transformed = transformMethodSyntax(descriptor)
+  if (!transformed) {
+    return null
+  }
+  
   // Verify service is in methods array
-  if (!methods.includes(serviceName)) {
+  if (!methods.includes(transformed.serviceName)) {
     return null
   }
   
   return {
-    serviceName,
-    action,
-    dataSource,
-    args: { on: dataSource, ...args }
+    serviceName: transformed.serviceName,
+    action: transformed.action,
+    dataSource: transformed.dataSource,
+    args: { on: transformed.dataSource, ...descriptor[2] }
   }
 }
 
@@ -127,8 +145,12 @@ const compileServiceFunction = (serviceDescriptor, services, source, contextStac
       // Execute as chain
       return await executeChain(serviceDescriptor, services, source, {}, newContextStack)
     } else if (Array.isArray(serviceDescriptor) && serviceDescriptor.length >= 3) {
-      // Execute as single service call
-      const [serviceName, action, args] = serviceDescriptor
+      // Transform method syntax to regular syntax if needed
+      const transformed = transformMethodSyntax(serviceDescriptor)
+      const actualDescriptor = transformed ? transformed.transformedDescriptor : serviceDescriptor
+      
+      // Execute as regular service call
+      const [serviceName, action, args] = actualDescriptor
       const resolvedArgs = resolveArgsWithContext(args, source, null, newContextStack)
       return await executeService(serviceName, action, resolvedArgs, services, source, null, {}, newContextStack)
     }
