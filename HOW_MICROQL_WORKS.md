@@ -31,6 +31,18 @@ MicroQL is a query language that orchestrates asynchronous service calls with so
 // Transforms to: ['service', 'action', { on: '@.data', arg1: 'value1' }]
 ```
 
+**Method syntax works everywhere** - in task definitions and within chain steps:
+```javascript
+// At task level
+filtered: ['$.items', 'util:filter', { criteria: 'active' }]
+
+// Within chains
+result: [
+  ['util', 'concat', { args: [...] }],
+  ['@', 'util:map', { template: { processed: '@.value' } }]  // ✅ Works!
+]
+```
+
 ## Context System and @ Symbol Resolution
 
 ### Context Stack
@@ -212,12 +224,37 @@ obsidianRecords: [
 ]
 ```
 
+## Reserved Parameters
+
+MicroQL interprets certain parameters specially before passing them to services:
+
+### timeout
+Controls execution timeout in milliseconds:
+```javascript
+['service', 'action', { 
+  data: '@.value',
+  timeout: 5000  // 5 second timeout
+}]
+```
+
+### retry
+Automatically retry failed operations:
+```javascript
+['claude', 'ocr', { 
+  imageUrl: '@.src',
+  retry: 3  // Try up to 4 times total (1 initial + 3 retries)
+}]
+```
+
+Services receive these values in args but MicroQL handles the actual timeout/retry logic.
+
 ## Summary
 
 MicroQL's power comes from:
 1. **Sophisticated context chaining** with @ symbols
-2. **Method syntax** as clean syntactic sugar
+2. **Method syntax** as clean syntactic sugar universally available
 3. **Uniform execution model** after early normalization
 4. **Comprehensive error context** for debugging
+5. **Built-in reliability** with timeout and retry mechanisms
 
 The system is designed to handle complex nested data transformations elegantly while providing clear error messages that point to the query location, not internal implementation details.
