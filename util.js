@@ -1,70 +1,28 @@
 import retrieve from './retrieve.js'
 
 /**
- * Resolve JSONPath or @ symbols in a template value
+ * Resolve @ symbols in template values (now uses MicroQL's context system)
  */
-const resolvePath = (path, source) => {
-  if (typeof path !== 'string') return path
-  
-  // Handle @ symbol (reference to current item)
-  if (path === '@') {
-    return source
-  }
-  
-  // Handle @.field - direct property access
-  if (path.startsWith('@.')) {
-    const fieldPath = path.slice(2) // Remove '@.'
-    const fields = fieldPath.split('.')
-    let result = source
-    
-    for (const field of fields) {
-      if (result && typeof result === 'object') {
-        result = result[field]
+const resolveTemplate = (template, currentItem) => {
+  const result = {}
+  for (const [key, path] of Object.entries(template)) {
+    if (typeof path === 'string') {
+      if (path === '@') {
+        result[key] = currentItem
+      } else if (path.startsWith('@.')) {
+        const fieldPath = path.slice(2) // Remove '@.'
+        const jsonPath = '$.' + fieldPath
+        result[key] = retrieve(jsonPath, currentItem)
+      } else if (path.startsWith('$.')) {
+        result[key] = retrieve(path, currentItem)
       } else {
-        return null
-      }
-    }
-    
-    return result
-  }
-  
-  // Handle regular JSONPath  
-  if (path.startsWith('$.')) {
-    return retrieve(path, source)
-  }
-  
-  return path
-}
-
-/**
- * Execute a service call with current item as @ context
- */
-const executeServiceCall = async (serviceCall, currentItem, services = {}) => {
-  if (!Array.isArray(serviceCall) || serviceCall.length < 3) {
-    throw new Error('Invalid service call format')
-  }
-  
-  const [serviceName, action, args] = serviceCall
-  const service = services[serviceName]
-  
-  if (!service) {
-    throw new Error(`Service '${serviceName}' not found`)
-  }
-  
-  // Simple resolution: @ refers to currentItem
-  const resolvedArgs = {}
-  for (const [key, value] of Object.entries(args)) {
-    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-      resolvedArgs[key] = {}
-      for (const [subKey, subValue] of Object.entries(value)) {
-        resolvedArgs[key][subKey] = resolvePath(subValue, currentItem)
+        result[key] = path
       }
     } else {
-      resolvedArgs[key] = resolvePath(value, currentItem)
+      result[key] = path
     }
   }
-  
-  return await service(action, resolvedArgs)
+  return result
 }
 
 /**
@@ -80,19 +38,13 @@ const util = {
     
     // Template-based mapping
     if (template) {
-      return items.map(item => {
-        const result = {}
-        for (const [key, path] of Object.entries(template)) {
-          result[key] = resolvePath(path, item)
-        }
-        return result
-      })
+      return items.map(item => resolveTemplate(template, item))
     }
     
-    // Function-based mapping
-    if (fn) {
+    // Function-based mapping - fn is now a compiled function from MicroQL
+    if (fn && typeof fn === 'function') {
       const results = await Promise.all(
-        items.map(item => executeServiceCall(fn, item, _services || {}))
+        items.map(item => fn(item))
       )
       return results
     }
@@ -107,13 +59,13 @@ const util = {
     const items = on || collection || []
     if (!Array.isArray(items)) return []
     
-    if (!predicate) {
-      throw new Error('Predicate is required for filter operation')
+    if (!predicate || typeof predicate !== 'function') {
+      throw new Error('Predicate function is required for filter operation')
     }
     
     const results = await Promise.all(
       items.map(async item => {
-        const keep = await executeServiceCall(predicate, item, _services || {})
+        const keep = await predicate(item)
         return { item, keep }
       })
     )
@@ -128,12 +80,12 @@ const util = {
     const items = on || collection || []
     if (!Array.isArray(items)) return []
     
-    if (!fn) {
+    if (!fn || typeof fn !== 'function') {
       throw new Error('Function is required for flatMap operation')
     }
     
     const results = await Promise.all(
-      items.map(item => executeServiceCall(fn, item, _services || {}))
+      items.map(item => fn(item))
     )
     
     // Flatten the results
@@ -166,20 +118,9 @@ const util = {
     
     if (typeof test === 'boolean') {
       testResult = test
-    } else if (Array.isArray(test)) {
-      // Service call - need to resolve JSONPath arguments using context
-      const [serviceName, action, args] = test
-      const resolvedArgs = {}
-      
-      for (const [key, value] of Object.entries(args)) {
-        if (typeof value === 'string' && value.startsWith('$.')) {
-          resolvedArgs[key] = retrieve(value, _context || {})
-        } else {
-          resolvedArgs[key] = value
-        }
-      }
-      
-      testResult = await _services[serviceName](action, resolvedArgs)
+    } else if (typeof test === 'function') {
+      // Compiled function - call with context
+      testResult = await test(_context)
     } else {
       testResult = Boolean(test)
     }
@@ -221,6 +162,24 @@ const util = {
   async length({ value }) {
     return value?.length || 0
   }
+}
+
+// Parameter metadata for MicroQL function compilation
+util.map._params = {
+  fn: { type: 'function' },
+  template: { type: 'template' }  // Templates also need @ resolution
+}
+
+util.filter._params = {
+  predicate: { type: 'function' }
+}
+
+util.flatMap._params = {
+  fn: { type: 'function' }
+}
+
+util.when._params = {
+  test: { type: 'function' }  // Test can be a service call
 }
 
 export default util

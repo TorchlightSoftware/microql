@@ -1,7 +1,7 @@
 import retrieve from './retrieve.js'
 
 const DEP_REGEX = /\$\.(\w+)/
-const AT_REGEX = /^@/
+const AT_REGEX = /^@+/
 
 /**
  * Wrap a promise with a timeout
@@ -25,12 +25,17 @@ const withTimeout = (promise, timeoutMs, serviceName, action) => {
  * Auto-wrap service objects to make them compatible with function-based services
  */
 const wrapServiceObject = (serviceObj) => {
-  return async (action, args) => {
+  const wrapper = async (action, args) => {
     if (typeof serviceObj[action] !== 'function') {
       throw new Error(`Service method '${action}' not found`)
     }
     return await serviceObj[action](args)
   }
+  
+  // Preserve metadata from original service object
+  wrapper._originalService = serviceObj
+  
+  return wrapper
 }
 
 /**
@@ -86,21 +91,91 @@ const parseMethodCall = (descriptor, methods) => {
 }
 
 /**
- * Resolve @ symbols and JSONPath in arguments
+ * Check if a value contains @ symbols that need function compilation
  */
-const resolveArgs = (args, source, chainResult = null) => {
+const containsAtSymbols = (value) => {
+  if (typeof value === 'string' && AT_REGEX.test(value)) {
+    return true
+  }
+  if (Array.isArray(value)) {
+    return value.some(containsAtSymbols)
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.values(value).some(containsAtSymbols)
+  }
+  return false
+}
+
+/**
+ * Count the number of @ symbols at the start of a string
+ */
+const countAtSymbols = (str) => {
+  if (typeof str !== 'string') return 0
+  const match = str.match(/^(@+)/)
+  return match ? match[1].length : 0
+}
+
+/**
+ * Compile a service descriptor into a function that accepts iteration context
+ */
+const compileServiceFunction = (serviceDescriptor, services, source, contextStack = []) => {
+  return async (iterationItem) => {
+    const newContextStack = [...contextStack, iterationItem]
+    
+    // Check if this is a chain (array of arrays)
+    if (Array.isArray(serviceDescriptor) && serviceDescriptor.length > 0 && Array.isArray(serviceDescriptor[0])) {
+      // Execute as chain
+      return await executeChain(serviceDescriptor, services, source, {}, newContextStack)
+    } else if (Array.isArray(serviceDescriptor) && serviceDescriptor.length >= 3) {
+      // Execute as single service call
+      const [serviceName, action, args] = serviceDescriptor
+      const resolvedArgs = resolveArgsWithContext(args, source, null, newContextStack)
+      return await executeService(serviceName, action, resolvedArgs, services, source, null, {}, newContextStack)
+    }
+    
+    throw new Error('Invalid service descriptor for function compilation')
+  }
+}
+
+/**
+ * Resolve @ symbols and JSONPath in arguments with context stack support
+ */
+const resolveArgsWithContext = (args, source, chainResult = null, contextStack = [], skipParams = new Set()) => {
   const resolve = (value) => {
     if (typeof value !== 'string') return value
     
-    // Handle @ symbol (reference to chain result or specified path)
+    // Handle @ symbol with context stack
     if (AT_REGEX.test(value)) {
-      if (value === '@') {
-        return chainResult
+      const atCount = countAtSymbols(value)
+      
+      if (value === '@'.repeat(atCount)) {
+        // Pure @ symbols - use absolute indexing
+        const contextIndex = atCount - 1 // @ = index 0, @@ = index 1, etc.
+        
+        if (contextIndex >= contextStack.length) {
+          throw new Error(`${'@'.repeat(atCount)} used but only ${contextStack.length} context levels available (@ through ${'@'.repeat(contextStack.length)})`)
+        }
+        
+        return contextStack[contextIndex] || null
       }
-      // Handle @.field
-      if (value.startsWith('@.')) {
-        const path = value.replace('@', '$')
-        return retrieve(path, chainResult)
+      
+      // Handle @.field with context stack
+      if (value.startsWith('@'.repeat(atCount) + '.')) {
+        const fieldPath = value.slice(atCount + 1) // Remove @ symbols and dot
+        const contextIndex = atCount - 1 // @ = index 0, @@ = index 1, etc.
+        
+        if (contextIndex >= contextStack.length) {
+          throw new Error(`${'@'.repeat(atCount)} used but only ${contextStack.length} context levels available (@ through ${'@'.repeat(contextStack.length)})`)
+        }
+        
+        const contextItem = contextStack[contextIndex] || null
+        
+        if (contextItem && fieldPath) {
+          const path = '$.' + fieldPath
+          return retrieve(path, contextItem)
+        }
+        
+        return contextItem
       }
     }
     
@@ -116,8 +191,11 @@ const resolveArgs = (args, source, chainResult = null) => {
   if (typeof args === 'object' && args !== null) {
     const resolved = {}
     for (const [key, value] of Object.entries(args)) {
-      if (typeof value === 'object' && value !== null) {
-        resolved[key] = resolveArgs(value, source, chainResult)
+      if (skipParams.has(key)) {
+        // Skip resolution for this parameter - keep as-is
+        resolved[key] = value
+      } else if (typeof value === 'object' && value !== null) {
+        resolved[key] = resolveArgsWithContext(value, source, chainResult, contextStack, skipParams)
       } else {
         resolved[key] = resolve(value)
       }
@@ -129,35 +207,89 @@ const resolveArgs = (args, source, chainResult = null) => {
 }
 
 /**
+ * Resolve @ symbols and JSONPath in arguments (backward compatibility)
+ */
+const resolveArgs = (args, source, chainResult = null) => {
+  return resolveArgsWithContext(args, source, chainResult, [], new Set())
+}
+
+/**
+ * Guard function for service execution - provides context about where errors occur
+ */
+const guardServiceExecution = async (serviceName, action, args, service, taskContext) => {
+  try {
+    const result = await service(action, args)
+    return result
+  } catch (error) {
+    // Enhance error with query context
+    const taskInfo = taskContext ? ` in query task '${taskContext.taskName}'` : ''
+    const serviceInfo = `${serviceName}.${action}`
+    const argsInfo = `Args: ${JSON.stringify(args, null, 2)}`
+    
+    // Create a more helpful error message focusing on the query location
+    const enhancedMessage = `Error in service ${serviceInfo}${taskInfo}: ${error.message}\n${argsInfo}`
+    const enhancedError = new Error(enhancedMessage)
+    enhancedError.originalError = error
+    enhancedError.serviceName = serviceName
+    enhancedError.action = action
+    enhancedError.taskName = taskContext?.taskName
+    
+    throw enhancedError
+  }
+}
+
+/**
  * Execute a single service call
  */
-const executeService = async (serviceName, action, args, services, source, chainResult = null, timeouts = {}) => {
+const executeService = async (serviceName, action, args, services, source, chainResult = null, timeouts = {}, contextStack = [], taskContext = null) => {
   const service = services[serviceName]
   if (!service) {
-    throw new Error(`Service '${serviceName}' not found`)
+    const taskInfo = taskContext ? ` in query task '${taskContext.taskName}'` : ''
+    const descriptorInfo = taskContext?.descriptor ? `\nService descriptor: ${JSON.stringify(taskContext.descriptor)}` : ''
+    throw new Error(`Service '${serviceName}' not found${taskInfo}${descriptorInfo}`)
   }
   
-  let finalArgs
+  // Check for parameter metadata to determine function compilation
+  let paramMetadata = {}
+  if (typeof service === 'function' && service._originalService) {
+    // This is a wrapped service object, get metadata from the original
+    paramMetadata = service._originalService[action]?._params || {}
+  } else if (typeof service === 'object') {
+    // Direct service object access
+    const serviceMethod = service[action]
+    paramMetadata = serviceMethod?._params || {}
+  }
   
-  // For util service, provide special handling
-  if (serviceName === 'util') {
-    if (args.template) {
-      finalArgs = { ...args }
-      // Only resolve non-template arguments
-      for (const [key, value] of Object.entries(args)) {
-        if (key !== 'template') {
-          finalArgs[key] = resolveArgs(value, source, chainResult)
-        }
-      }
-    } else {
-      finalArgs = resolveArgs(args, source, chainResult)
-    }
+  // Build set of parameters that should skip resolution
+  const skipParams = new Set()
+  const functionsToCompile = {}
+  
+  for (const [key, value] of Object.entries(args)) {
+    const paramInfo = paramMetadata[key]
     
+    if (paramInfo?.type === 'function' && Array.isArray(value)) {
+      // Mark for function compilation
+      functionsToCompile[key] = value
+      skipParams.add(key)
+    } else if (paramInfo?.type === 'template') {
+      // Mark to skip resolution
+      skipParams.add(key)
+    }
+  }
+  
+  // Resolve arguments while skipping special parameters
+  const finalArgs = resolveArgsWithContext(args, source, chainResult, contextStack, skipParams)
+  
+  // Now handle function compilation
+  for (const [key, value] of Object.entries(functionsToCompile)) {
+    finalArgs[key] = compileServiceFunction(value, services, source, contextStack)
+  }
+  
+  // Special handling for util service (legacy)
+  if (serviceName === 'util') {
     // Provide util service with access to other services and context
     finalArgs._services = services
     finalArgs._context = source
-  } else {
-    finalArgs = resolveArgs(args, source, chainResult)
   }
   
   // Handle timeout logic
@@ -187,20 +319,41 @@ const executeService = async (serviceName, action, args, services, source, chain
     argsWithoutTimeout.timeout = timeoutMs
   }
   
-  // Execute service with timeout
-  const servicePromise = service(action, argsWithoutTimeout)
+  // Execute service with guard and timeout
+  const servicePromise = guardServiceExecution(serviceName, action, argsWithoutTimeout, service, taskContext)
   return await withTimeout(servicePromise, timeoutMs, serviceName, action)
 }
 
 /**
  * Execute a chain of service calls
  */
-const executeChain = async (chain, services, source, timeouts = {}) => {
+const executeChain = async (chain, services, source, timeouts = {}, contextStack = [], taskContext = null) => {
   let result = null
+  let currentContextStack = [...contextStack]
   
-  for (const descriptor of chain) {
+  for (let i = 0; i < chain.length; i++) {
+    const descriptor = chain[i]
     const [serviceName, action, args] = descriptor
-    result = await executeService(serviceName, action, args, services, source, result, timeouts)
+    
+    // Add step context to task context
+    const stepContext = taskContext ? {
+      ...taskContext,
+      chainStep: i + 1,
+      chainTotal: chain.length,
+      descriptor: descriptor
+    } : null
+    
+    try {
+      result = await executeService(serviceName, action, args, services, source, result, timeouts, currentContextStack, stepContext)
+    } catch (error) {
+      // Enhance error with chain step info
+      const stepInfo = taskContext ? ` at step ${i + 1}/${chain.length} of chain in task '${taskContext.taskName}'` : ` at step ${i + 1}/${chain.length} of chain`
+      error.message = `${error.message}${stepInfo}`
+      throw error
+    }
+    
+    // Add chain result to context stack for subsequent steps
+    currentContextStack = [...currentContextStack, result]
   }
   
   return result
@@ -273,7 +426,7 @@ export default async function query(config) {
       
       tasks.set(jobName, {
         deps: Array.from(allDeps),
-        execute: () => executeChain(chain, preparedServices, results, timeouts)
+        execute: () => executeChain(chain, preparedServices, results, timeouts, [], { taskName: jobName, descriptor: chain })
       })
       continue
     }
@@ -297,7 +450,7 @@ export default async function query(config) {
           // Resolve the data source first
           const data = dataSource.startsWith('$.') ? retrieve(dataSource, results) : dataSource
           const finalArgs = { ...args, on: data }
-          return await executeService(serviceName, action, finalArgs, preparedServices, results, null, timeouts)
+          return await executeService(serviceName, action, finalArgs, preparedServices, results, null, timeouts, [], { taskName: jobName, descriptor: descriptor })
         }
       })
       continue
@@ -310,7 +463,7 @@ export default async function query(config) {
       
       tasks.set(jobName, {
         deps,
-        execute: () => executeService(serviceName, action, args, preparedServices, results, null, timeouts)
+        execute: () => executeService(serviceName, action, args, preparedServices, results, null, timeouts, [], { taskName: jobName, descriptor: descriptor })
       })
       continue
     }
@@ -344,16 +497,28 @@ export default async function query(config) {
     }
     
     const promise = (async () => {
-      // Execute dependencies first
-      for (const depName of task.deps) {
-        await executeTask(depName)
+      try {
+        // Execute dependencies first
+        for (const depName of task.deps) {
+          await executeTask(depName)
+        }
+        
+        // Execute this task
+        const result = await task.execute()
+        results[taskName] = result
+        executed.add(taskName)
+        return result
+      } catch (error) {
+        // If error doesn't already have task context, add it
+        if (!error.taskName) {
+          const enhancedMessage = `Error in query task '${taskName}': ${error.message}`
+          const enhancedError = new Error(enhancedMessage)
+          enhancedError.originalError = error
+          enhancedError.taskName = taskName
+          throw enhancedError
+        }
+        throw error
       }
-      
-      // Execute this task
-      const result = await task.execute()
-      results[taskName] = result
-      executed.add(taskName)
-      return result
     })()
     
     executing.set(taskName, promise)
