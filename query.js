@@ -1,10 +1,34 @@
+/**
+ * @fileoverview MicroQL query execution engine
+ * 
+ * Core module that orchestrates service execution with sophisticated context management,
+ * method syntax transformation, and parallel task execution. Supports complex nested
+ * data transformations with @ symbol context chaining.
+ * 
+ * Key features:
+ * - Promise-based async service orchestration
+ * - Context stack for nested @ symbol resolution (@, @@, @@@)
+ * - Method syntax sugar: ['@.data', 'service:method', args]
+ * - Automatic service object wrapping
+ * - Comprehensive error context for debugging
+ * - Parallel execution with dependency management
+ */
+
 import retrieve from './retrieve.js'
 
+/** @type {RegExp} JSONPath dependency pattern for $.taskName references */
 const DEP_REGEX = /\$\.(\w+)/
+
+/** @type {RegExp} Context reference pattern for @ symbols */
 const AT_REGEX = /^@+/
 
 /**
- * Wrap a promise with a timeout
+ * Wrap a promise with a timeout for service execution
+ * @param {Promise} promise - The promise to wrap
+ * @param {number} timeoutMs - Timeout in milliseconds
+ * @param {string} serviceName - Service name for error context
+ * @param {string} action - Action name for error context
+ * @returns {Promise} Promise that rejects if timeout is exceeded
  */
 const withTimeout = (promise, timeoutMs, serviceName, action) => {
   if (!timeoutMs || timeoutMs <= 0) {
@@ -23,6 +47,11 @@ const withTimeout = (promise, timeoutMs, serviceName, action) => {
 
 /**
  * Auto-wrap service objects to make them compatible with function-based services
+ * Converts object-based services { action1() {}, action2() {} } to function-based
+ * services that can be called as service(action, args)
+ * 
+ * @param {Object} serviceObj - Service object with method implementations
+ * @returns {Function} Wrapped service function with _originalService metadata
  */
 const wrapServiceObject = (serviceObj) => {
   const wrapper = async (action, args) => {
@@ -39,7 +68,12 @@ const wrapServiceObject = (serviceObj) => {
 }
 
 /**
- * Prepare services by auto-wrapping objects
+ * Prepare services by auto-wrapping objects and validating functions
+ * Ensures all services can be called uniformly as async functions
+ * 
+ * @param {Object} services - Raw services object from query config
+ * @returns {Object} Prepared services with consistent function interface
+ * @throws {Error} If service is invalid type
  */
 const prepareServices = (services) => {
   const prepared = {}
@@ -60,7 +94,17 @@ const prepareServices = (services) => {
  */
 /**
  * Transform method syntax to regular service call syntax
- * ['@.data', 'service:method', args] -> ['service', 'method', {on: '@.data', ...args}]
+ * Core normalization function that enables elegant method syntax sugar
+ * 
+ * @example
+ * // Input: Method syntax
+ * ['@.departments', 'util:flatMap', { fn: [...] }]
+ * 
+ * // Output: Regular syntax  
+ * ['util', 'flatMap', { on: '@.departments', fn: [...] }]
+ * 
+ * @param {Array} descriptor - Service descriptor array [dataSource, method, args]
+ * @returns {Object|null} Transformation result with serviceName, action, dataSource and transformedDescriptor, or null if not method syntax
  */
 const transformMethodSyntax = (descriptor) => {
   if (!Array.isArray(descriptor) || descriptor.length !== 3) {
@@ -89,6 +133,14 @@ const transformMethodSyntax = (descriptor) => {
   }
 }
 
+/**
+ * Parse and validate method syntax for task-level execution
+ * Uses transformMethodSyntax and adds validation against methods whitelist
+ * 
+ * @param {Array} descriptor - Service descriptor to parse
+ * @param {Array} methods - Array of service names allowed for method syntax
+ * @returns {Object|null} Parsed method call with serviceName, action, dataSource, args or null
+ */
 const parseMethodCall = (descriptor, methods) => {
   const transformed = transformMethodSyntax(descriptor)
   if (!transformed) {
@@ -110,6 +162,10 @@ const parseMethodCall = (descriptor, methods) => {
 
 /**
  * Check if a value contains @ symbols that need function compilation
+ * Used to detect when service descriptors need to be compiled into functions
+ * 
+ * @param {*} value - Value to check (typically service descriptor array)
+ * @returns {boolean} True if value contains @ symbols requiring compilation
  */
 const containsAtSymbols = (value) => {
   if (typeof value === 'string' && AT_REGEX.test(value)) {
@@ -126,6 +182,10 @@ const containsAtSymbols = (value) => {
 
 /**
  * Count the number of @ symbols at the start of a string
+ * Used for context stack indexing: @ = 0, @@ = 1, @@@ = 2, etc.
+ * 
+ * @param {string} str - String to analyze
+ * @returns {number} Number of consecutive @ symbols at start
  */
 const countAtSymbols = (str) => {
   if (typeof str !== 'string') return 0
@@ -161,8 +221,14 @@ const compileServiceFunction = (serviceDescriptor, services, source, contextStac
 
 /**
  * Resolve @ symbols and JSONPath in arguments with context stack support
+ * @param {*} args - Arguments to resolve (can be object, array, or primitive)
+ * @param {Object} source - Source data object containing query results
+ * @param {*} chainResult - Result from previous step in a chain (unused currently)
+ * @param {Array} contextStack - Stack of context items for @ symbol resolution
+ * @param {Set} skipParams - Set of parameter names to skip resolution for
+ * @returns {*} Resolved arguments with @ symbols and JSONPath replaced
  */
-const resolveArgsWithContext = (args, source, chainResult = null, contextStack = [], skipParams = new Set()) => {
+export const resolveArgsWithContext = (args, source, chainResult = null, contextStack = [], skipParams = new Set()) => {
   const resolve = (value) => {
     if (typeof value !== 'string') return value
     

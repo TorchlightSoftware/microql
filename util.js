@@ -1,36 +1,55 @@
+/**
+ * @fileoverview Utility service for common data transformations in MicroQL
+ * Provides map, filter, flatMap, concat and other operations with proper context handling
+ */
+
 import retrieve from './retrieve.js'
+import { resolveArgsWithContext } from './query.js'
 
 /**
- * Resolve @ symbols in template values (now uses MicroQL's context system)
+ * Resolve template values using MicroQL's canonical context resolution system
+ * This ensures consistent handling of @, @@, @@@, etc. across the entire system
+ * 
+ * @param {Object} template - Template object with @ symbol references
+ * @param {*} currentItem - Current iteration item for context
+ * @returns {Object} Resolved template object
  */
 const resolveTemplate = (template, currentItem) => {
-  const result = {}
-  for (const [key, path] of Object.entries(template)) {
-    if (typeof path === 'string') {
-      if (path === '@') {
-        result[key] = currentItem
-      } else if (path.startsWith('@.')) {
-        const fieldPath = path.slice(2) // Remove '@.'
-        const jsonPath = '$.' + fieldPath
-        result[key] = retrieve(jsonPath, currentItem)
-      } else if (path.startsWith('$.')) {
-        result[key] = retrieve(path, currentItem)
-      } else {
-        result[key] = path
-      }
-    } else {
-      result[key] = path
-    }
-  }
-  return result
+  // Delegate to MicroQL's canonical resolution system
+  // This ensures consistent handling of @, @@, @@@, etc.
+  return resolveArgsWithContext(template, {}, null, [currentItem], new Set())
 }
 
 /**
- * Utility service for common data transformations
+ * Utility service for common data transformations in MicroQL
+ * Provides map, filter, flatMap, concat and other operations with sophisticated context handling
  */
 const util = {
   /**
    * Transform each item in a collection using a function or template
+   * 
+   * @param {Object} params - Parameters object
+   * @param {Array} [params.on] - Collection from method syntax (e.g., ['@.items', 'util:map', ...])
+   * @param {Array} [params.collection] - Collection from direct calls
+   * @param {Function} [params.fn] - Compiled function from MicroQL for transformation
+   * @param {Object} [params.template] - Template object with @ symbol references
+   * @param {Object} [params._services] - MicroQL internal services context
+   * @returns {Promise<Array>} Transformed collection
+   * 
+   * @example
+   * // Template usage
+   * ['util', 'map', { 
+   *   collection: [{ name: 'Alice' }, { name: 'Bob' }],
+   *   template: { greeting: 'Hello @.name' }
+   * }]
+   * // Returns: [{ greeting: 'Hello Alice' }, { greeting: 'Hello Bob' }]
+   * 
+   * @example  
+   * // Function usage (compiled by MicroQL)
+   * ['util', 'map', {
+   *   collection: [{ id: 1 }, { id: 2 }],
+   *   fn: ['service', 'process', { input: '@.id' }]
+   * }]
    */
   async map({ on, collection, fn, template, _services }) {
     const items = on || collection || []
