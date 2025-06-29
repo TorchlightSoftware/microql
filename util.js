@@ -180,6 +180,50 @@ const util = {
    */
   async length({ value }) {
     return value?.length || 0
+  },
+
+  /**
+   * Print values to console with formatting options
+   * 
+   * @param {Object} params - Parameters object
+   * @param {*} [params.on] - Value from method syntax (e.g., ['@.data', 'util:print', ...])
+   * @param {*} [params.value] - Value from direct calls
+   * @param {number} [params.depth=3] - Depth for object inspection
+   * @param {string} [params.lor] - Line-or-return override (terminal default if not specified)
+   * @param {boolean} [params.ts=true] - Whether to include timestamp
+   * @returns {Promise<*>} Returns the input value for chaining
+   * 
+   * @example
+   * // Method syntax with options
+   * ['@.data', 'util:print', { depth: 5, ts: false }]
+   * 
+   * @example
+   * // Direct call
+   * ['util', 'print', { value: { foo: 'bar' }, depth: 2 }]
+   */
+  async print({ on, value, depth = 3, lor, ts = true }) {
+    const printValue = on !== undefined ? on : value
+    
+    // Format timestamp if enabled
+    const timestamp = ts ? `[${new Date().toISOString()}] ` : ''
+    
+    // Handle line-or-return setting
+    const lineEnding = lor !== undefined ? lor : ''
+    
+    // Use util.inspect for proper object formatting with depth control
+    const { inspect } = await import('util')
+    const formatted = typeof printValue === 'string' 
+      ? printValue 
+      : inspect(printValue, { depth, colors: true, compact: false })
+    
+    // Print with formatting
+    process.stdout.write(timestamp + formatted + lineEnding)
+    if (lor === undefined) {
+      process.stdout.write('\n') // Default newline if lor not specified
+    }
+    
+    // Return the original value for chaining
+    return printValue
   }
 }
 
@@ -200,5 +244,7 @@ util.flatMap._params = {
 util.when._params = {
   test: { type: 'function' }  // Test can be a service call
 }
+
+// No special parameter metadata needed for print - all parameters are primitive values
 
 export default util
