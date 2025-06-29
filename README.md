@@ -194,6 +194,14 @@ query: {
 
 - `jsonpath` - For JSONPath query support
 
+## Writing Services
+
+See [SERVICE_WRITER_GUIDE.md](SERVICE_WRITER_GUIDE.md) for comprehensive guidance on:
+- Service architecture and separation of concerns
+- Reserved parameters (timeout, retry)
+- Function parameters and compilation
+- Best practices and anti-patterns
+
 ## License
 
 MIT

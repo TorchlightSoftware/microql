@@ -5,6 +5,12 @@
  * method syntax transformation, and parallel task execution. Supports complex nested
  * data transformations with @ symbol context chaining.
  * 
+ * ARCHITECTURAL SEPARATION:
+ * - MicroQL core is completely self-contained within the microql/ directory
+ * - Services know nothing about MicroQL internals and vice versa
+ * - The only coupling point is the query execution interface
+ * - This separation ensures services remain portable and reusable
+ * 
  * Key features:
  * - Promise-based async service orchestration
  * - Context stack for nested @ symbol resolution (@, @@, @@@)
@@ -12,6 +18,7 @@
  * - Automatic service object wrapping
  * - Comprehensive error context for debugging
  * - Parallel execution with dependency management
+ * - Built-in retry and timeout mechanisms
  */
 
 import retrieve from './retrieve.js'
@@ -101,6 +108,11 @@ const wrapServiceObject = (serviceObj) => {
 /**
  * Prepare services by auto-wrapping objects and validating functions
  * Ensures all services can be called uniformly as async functions
+ * 
+ * ARCHITECTURAL NOTE:
+ * Services are provided by the application layer and MicroQL treats them
+ * as black boxes. We only wrap them to ensure a consistent interface,
+ * but make no assumptions about their internal implementation.
  * 
  * @param {Object} services - Raw services object from query config
  * @returns {Object} Prepared services with consistent function interface
@@ -408,6 +420,9 @@ const executeService = async (serviceName, action, args, services, source, chain
   }
   
   // Handle timeout and retry logic
+  // ARCHITECTURAL NOTE: timeout and retry are MicroQL-interpreted parameters.
+  // We extract them here but pass them through to services so they can
+  // optionally use them for their own logic (e.g., logging).
   let timeoutMs = null
   let retryCount = 0
   let argsWithoutReserved = finalArgs
