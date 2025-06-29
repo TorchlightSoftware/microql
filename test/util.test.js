@@ -109,6 +109,15 @@ describe('Util Service Tests', () => {
       assert.strictEqual(await util.length({ value: 'hello' }), 5)
       assert.strictEqual(await util.length({ value: [1, 2, 3] }), 3)
     })
+    
+    it('should pick fields from objects', async () => {
+      const result = await util.pick({
+        obj: { name: 'Alice', age: 30, email: 'alice@example.com', secret: 'hidden' },
+        fields: ['name', 'email']
+      })
+      
+      assert.deepStrictEqual(result, { name: 'Alice', email: 'alice@example.com' })
+    })
   })
   
   describe('MicroQL Integration', () => {

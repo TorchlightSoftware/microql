@@ -150,9 +150,11 @@ const defaultErrorHandler = (error, context, settings = {}) => {
  * @param {number} timeoutMs - Timeout in milliseconds
  * @param {string} serviceName - Service name for error context
  * @param {string} action - Action name for error context
+ * @param {Object} args - Service arguments for error context
+ * @param {Object} taskContext - Task context for error context
  * @returns {Promise} Promise that rejects if timeout is exceeded
  */
-const withTimeout = (promise, timeoutMs, serviceName, action) => {
+const withTimeout = (promise, timeoutMs, serviceName, action, args, taskContext) => {
   if (!timeoutMs || timeoutMs <= 0) {
     return promise
   }
@@ -161,7 +163,14 @@ const withTimeout = (promise, timeoutMs, serviceName, action) => {
     promise,
     new Promise((_, reject) => {
       setTimeout(() => {
-        reject(new Error(`Service '${serviceName}.${action}' timed out after ${timeoutMs}ms`))
+        // Create enhanced timeout error with same structure as service errors
+        const timeoutError = new Error(`Service '${serviceName}.${action}' timed out after ${timeoutMs}ms`)
+        timeoutError.serviceName = serviceName
+        timeoutError.action = action
+        timeoutError.args = args
+        timeoutError.taskName = taskContext?.taskName
+        timeoutError.serviceChain = taskContext?.serviceChain || []
+        reject(timeoutError)
       }, timeoutMs)
     })
   ])
@@ -620,7 +629,7 @@ const executeService = async (serviceName, action, args, services, source, chain
   const executeWithRetry = async () => {
     try {
       const servicePromise = guardServiceExecution(serviceName, action, argsWithoutReserved, service, taskContext, inspector)
-      return await withTimeout(servicePromise, timeoutMs, serviceName, action)
+      return await withTimeout(servicePromise, timeoutMs, serviceName, action, argsWithoutReserved, taskContext)
     } catch (error) {
       // If onError descriptor is defined, compile and call it with error context
       if (onErrorFunction) {

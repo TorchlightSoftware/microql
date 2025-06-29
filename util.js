@@ -183,6 +183,42 @@ const util = {
   },
 
   /**
+   * Pick specific fields from an object (similar to lodash pick)
+   * 
+   * @param {Object} params - Parameters object
+   * @param {*} [params.on] - Object from method syntax (e.g., ['@.data', 'util:pick', ...])
+   * @param {*} [params.obj] - Object from direct calls
+   * @param {Array} params.fields - Array of field names to pick
+   * @returns {Promise<Object>} New object with only specified fields
+   * 
+   * @example
+   * // Pick text and href from each item
+   * ['@.items', 'util:map', {
+   *   fn: ['@@', 'util:pick', { fields: ['text', 'href'] }]
+   * }]
+   */
+  async pick({ on, obj, fields }) {
+    const source = on || obj
+    
+    if (!source || typeof source !== 'object' || Array.isArray(source)) {
+      return {}
+    }
+    
+    if (!Array.isArray(fields)) {
+      throw new Error('Fields must be an array of field names')
+    }
+    
+    const result = {}
+    for (const field of fields) {
+      if (source.hasOwnProperty(field)) {
+        result[field] = source[field]
+      }
+    }
+    
+    return result
+  },
+
+  /**
    * Print values to console with formatting options and color coding
    * Uses query-level inspect settings for consistent formatting
    * 
