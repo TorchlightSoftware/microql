@@ -23,12 +23,126 @@
 
 import retrieve from './retrieve.js'
 import { withOnParameter, validateContextIndex } from './utils.js'
+import { inspect } from 'util'
 
 /** @type {RegExp} JSONPath dependency pattern for $.taskName references */
 const DEP_REGEX = /\$\.(\w+)/
 
 /** @type {RegExp} Context reference pattern for @ symbols */
 const AT_REGEX = /^@+/
+
+/**
+ * Create compact inspector for arguments with configurable settings
+ * @param {Object} inspectSettings - Inspect configuration settings
+ * @returns {Function} Inspector function
+ */
+const createCompactInspector = (inspectSettings = {}) => {
+  const defaultSettings = {
+    depth: 2,
+    maxArrayLength: 3,
+    maxStringLength: 140,
+    colors: false,
+    compact: true,
+    breakLength: 80
+  }
+  
+  const settings = { ...defaultSettings, ...inspectSettings }
+  
+  return (obj) => {
+    // Filter out properties starting with underscore
+    const filtered = filterHiddenProperties(obj)
+    return inspect(filtered, settings)
+  }
+}
+
+/**
+ * Filter out properties starting with underscore (Node.js convention for hidden)
+ * @param {*} obj - Object to filter
+ * @returns {*} Filtered object
+ */
+const filterHiddenProperties = (obj) => {
+  if (Array.isArray(obj)) {
+    return obj.map(filterHiddenProperties)
+  }
+  
+  if (typeof obj === 'object' && obj !== null) {
+    const filtered = {}
+    for (const [key, value] of Object.entries(obj)) {
+      if (!key.startsWith('_')) {
+        filtered[key] = filterHiddenProperties(value)
+      }
+    }
+    return filtered
+  }
+  
+  return obj
+}
+
+/**
+ * Format error with consistent MicroQL format
+ * @param {Error} error - The error to format
+ * @param {string} taskName - Task name where error occurred
+ * @param {string} serviceName - Service name
+ * @param {string} action - Service action
+ * @param {Object} args - Service arguments
+ * @param {Function} inspector - Compact inspector function
+ * @param {Array} serviceChain - Chain of service calls leading to error
+ * @returns {string} Formatted error message
+ */
+const formatError = (error, taskName, serviceName, action, args, inspector, serviceChain = []) => {
+  const taskPrefix = taskName ? `:${taskName}: ` : ''
+  const chainStr = serviceChain.length > 0 ? serviceChain.map(s => `[${s}]`).join('') : ''
+  const serviceStr = `[${serviceName}:${action}]`
+  
+  let message = error.originalError?.message || error.message
+  
+  // Remove existing MicroQL context from message if present
+  message = message.replace(/^Error in service .+?: /, '')
+  
+  const errorLine = `Error: ${taskPrefix}${chainStr}${serviceStr} ${message}`
+  
+  if (args && Object.keys(filterHiddenProperties(args)).length > 0) {
+    const argsStr = inspector(args)
+    return `${errorLine}\nArgs: ${argsStr}`
+  }
+  
+  return errorLine
+}
+
+/**
+ * Default error handler - prints error in red and exits
+ * @param {Error} error - The error to handle
+ * @param {string} context - Error context (e.g., task name)
+ * @param {Object} settings - Query settings including inspect config
+ */
+const defaultErrorHandler = (error, context, settings = {}) => {
+  const red = '\x1b[31m'
+  const reset = '\x1b[0m'
+  
+  const inspector = createCompactInspector(settings.inspect)
+  
+  let formattedError
+  if (error.serviceName && error.action && error.taskName) {
+    formattedError = formatError(
+      error, 
+      error.taskName, 
+      error.serviceName, 
+      error.action, 
+      error.args,
+      inspector,
+      error.serviceChain
+    )
+  } else {
+    formattedError = `${context ? `In ${context}: ` : ''}${error.message}`
+  }
+  
+  console.error(`${red}${formattedError}${reset}`)
+  
+  // Only exit if not in test environment
+  if (process.env.NODE_ENV !== 'test' && !process.env.MOCHA) {
+    process.exit(1)
+  }
+}
 
 /**
  * Wrap a promise with a timeout for service execution
@@ -240,14 +354,14 @@ const countAtSymbols = (str) => {
 /**
  * Compile a service descriptor into a function that accepts iteration context
  */
-const compileServiceFunction = (serviceDescriptor, services, source, contextStack = []) => {
+const compileServiceFunction = (serviceDescriptor, services, source, contextStack = [], inspector = null, querySettings = {}) => {
   return async (iterationItem) => {
     const newContextStack = [...contextStack, iterationItem]
     
     // Check if this is a chain (array of arrays)
     if (Array.isArray(serviceDescriptor) && serviceDescriptor.length > 0 && Array.isArray(serviceDescriptor[0])) {
       // Execute as chain
-      return await executeChain(serviceDescriptor, services, source, {}, newContextStack)
+      return await executeChain(serviceDescriptor, services, source, {}, newContextStack, null, inspector, querySettings)
     } else if (Array.isArray(serviceDescriptor) && serviceDescriptor.length >= 3) {
       // Transform method syntax to regular syntax if needed
       const transformed = transformMethodSyntax(serviceDescriptor)
@@ -256,7 +370,7 @@ const compileServiceFunction = (serviceDescriptor, services, source, contextStac
       // Execute as regular service call
       const [serviceName, action, args] = actualDescriptor
       const resolvedArgs = resolveArgsWithContext(args, source, null, newContextStack)
-      return await executeService(serviceName, action, resolvedArgs, services, source, null, {}, newContextStack)
+      return await executeService(serviceName, action, resolvedArgs, services, source, null, {}, newContextStack, null, inspector, querySettings)
     }
     
     throw new Error('Invalid service descriptor for function compilation')
@@ -344,22 +458,19 @@ const resolveArgs = (args, source, chainResult = null) => {
 /**
  * Guard function for service execution - provides context about where errors occur
  */
-const guardServiceExecution = async (serviceName, action, args, service, taskContext) => {
+const guardServiceExecution = async (serviceName, action, args, service, taskContext, inspector) => {
   try {
     const result = await service(action, args)
     return result
   } catch (error) {
-    // Enhance error with query context
-    const taskInfo = taskContext ? ` in query task '${taskContext.taskName}'` : ''
-    const serviceInfo = `${serviceName}.${action}`
-    const argsInfo = `Args: ${JSON.stringify(args, null, 2)}`
-    
-    const enhancedMessage = `Error in service ${serviceInfo}${taskInfo}: ${error.message}\n${argsInfo}`
-    const enhancedError = new Error(enhancedMessage)
+    // Create enhanced error with MicroQL context
+    const enhancedError = new Error(error.message)
     enhancedError.originalError = error
     enhancedError.serviceName = serviceName
     enhancedError.action = action
     enhancedError.taskName = taskContext?.taskName
+    enhancedError.args = args
+    enhancedError.serviceChain = taskContext?.serviceChain || []
     
     throw enhancedError
   }
@@ -368,7 +479,7 @@ const guardServiceExecution = async (serviceName, action, args, service, taskCon
 /**
  * Execute a single service call
  */
-const executeService = async (serviceName, action, args, services, source, chainResult = null, timeouts = {}, contextStack = [], taskContext = null) => {
+const executeService = async (serviceName, action, args, services, source, chainResult = null, timeouts = {}, contextStack = [], taskContext = null, inspector = null, querySettings = {}) => {
   const service = services[serviceName]
   if (!service) {
     const taskInfo = taskContext ? ` in query task '${taskContext.taskName}'` : ''
@@ -391,6 +502,12 @@ const executeService = async (serviceName, action, args, services, source, chain
   const skipParams = new Set()
   const functionsToCompile = {}
   
+  // Add reserved MicroQL parameters to skip list
+  skipParams.add('timeout')
+  skipParams.add('retry') 
+  skipParams.add('onError')
+  skipParams.add('ignoreErrors')
+  
   for (const [key, value] of Object.entries(args)) {
     const paramInfo = paramMetadata[key]
     
@@ -409,7 +526,7 @@ const executeService = async (serviceName, action, args, services, source, chain
   
   // Now handle function compilation
   for (const [key, value] of Object.entries(functionsToCompile)) {
-    finalArgs[key] = compileServiceFunction(value, services, source, contextStack)
+    finalArgs[key] = compileServiceFunction(value, services, source, contextStack, inspector, querySettings)
   }
   
   // Special handling for util service (legacy)
@@ -419,15 +536,17 @@ const executeService = async (serviceName, action, args, services, source, chain
     finalArgs._context = source
   }
   
-  // Handle timeout and retry logic
-  // ARCHITECTURAL NOTE: timeout and retry are MicroQL-interpreted parameters.
+  // Handle timeout, retry, onError, and ignoreErrors logic
+  // ARCHITECTURAL NOTE: timeout, retry, onError, and ignoreErrors are MicroQL-interpreted parameters.
   // We extract them here but pass them through to services so they can
   // optionally use them for their own logic (e.g., logging).
   let timeoutMs = null
   let retryCount = 0
+  let onErrorFunction = null
+  let ignoreErrors = false
   let argsWithoutReserved = finalArgs
   
-  // Extract timeout and retry from arguments if present
+  // Extract timeout, retry, onError, and ignoreErrors from arguments if present
   if (finalArgs && typeof finalArgs === 'object') {
     if (finalArgs.timeout !== undefined) {
       timeoutMs = finalArgs.timeout
@@ -435,12 +554,23 @@ const executeService = async (serviceName, action, args, services, source, chain
     if (finalArgs.retry !== undefined) {
       retryCount = Math.max(0, parseInt(finalArgs.retry) || 0)
     }
+    if (finalArgs.onError !== undefined) {
+      // Store the onError descriptor for later compilation when we have error context
+      if (Array.isArray(finalArgs.onError)) {
+        onErrorFunction = finalArgs.onError  // Store the descriptor, not the compiled function
+      }
+    }
+    if (finalArgs.ignoreErrors !== undefined) {
+      ignoreErrors = Boolean(finalArgs.ignoreErrors)
+    }
     
     // Create new args object without reserved fields for service execution
-    if (finalArgs.timeout !== undefined || finalArgs.retry !== undefined) {
+    if (finalArgs.timeout !== undefined || finalArgs.retry !== undefined || finalArgs.onError !== undefined || finalArgs.ignoreErrors !== undefined) {
       argsWithoutReserved = { ...finalArgs }
       delete argsWithoutReserved.timeout
       delete argsWithoutReserved.retry
+      delete argsWithoutReserved.onError
+      delete argsWithoutReserved.ignoreErrors
     }
   }
   
@@ -454,6 +584,11 @@ const executeService = async (serviceName, action, args, services, source, chain
     timeoutMs = timeouts.default
   }
   
+  // Use settings default timeout if nothing else specified
+  if (timeoutMs === null && querySettings?.timeout?.default !== undefined) {
+    timeoutMs = querySettings.timeout.default
+  }
+  
   // Add timeout and retry back to args so service can see them
   if (finalArgs && typeof finalArgs === 'object') {
     if (timeoutMs !== null) {
@@ -464,10 +599,41 @@ const executeService = async (serviceName, action, args, services, source, chain
     }
   }
   
-  // Execute service with retry, guard, and timeout
+  // Execute service with retry, guard, timeout, and error handling
   const executeWithRetry = async () => {
-    const servicePromise = guardServiceExecution(serviceName, action, argsWithoutReserved, service, taskContext)
-    return await withTimeout(servicePromise, timeoutMs, serviceName, action)
+    try {
+      const servicePromise = guardServiceExecution(serviceName, action, argsWithoutReserved, service, taskContext, inspector)
+      return await withTimeout(servicePromise, timeoutMs, serviceName, action)
+    } catch (error) {
+      // If onError descriptor is defined, compile and call it with error context
+      if (onErrorFunction) {
+        const errorContext = {
+          error: error.message,
+          originalError: error,
+          serviceName,
+          action,
+          args: argsWithoutReserved,
+          taskName: taskContext?.taskName
+        }
+        
+        try {
+          // Now compile the onError function with error context as the context stack
+          const compiledOnError = compileServiceFunction(onErrorFunction, services, source, [errorContext], inspector, querySettings)
+          // Call it with the error context as the iteration item (becomes @)
+          await compiledOnError(errorContext)
+        } catch (onErrorErr) {
+          console.error(`onError handler failed: ${onErrorErr.message}`)
+        }
+      }
+      
+      // If ignoreErrors is true, return null instead of throwing
+      if (ignoreErrors) {
+        return null
+      }
+      
+      // Re-throw the original error to maintain normal error flow
+      throw error
+    }
   }
   
   return await withRetry(executeWithRetry, retryCount, serviceName, action)
@@ -476,7 +642,7 @@ const executeService = async (serviceName, action, args, services, source, chain
 /**
  * Execute a chain of service calls
  */
-const executeChain = async (chain, services, source, timeouts = {}, contextStack = [], taskContext = null) => {
+const executeChain = async (chain, services, source, timeouts = {}, contextStack = [], taskContext = null, inspector = null, querySettings = {}) => {
   let result = null
   let currentContextStack = [...contextStack]
   
@@ -498,11 +664,13 @@ const executeChain = async (chain, services, source, timeouts = {}, contextStack
     } : null
     
     try {
-      result = await executeService(serviceName, action, args, services, source, result, timeouts, currentContextStack, stepContext)
+      result = await executeService(serviceName, action, args, services, source, result, timeouts, currentContextStack, stepContext, inspector, querySettings)
     } catch (error) {
-      // Enhance error with chain step info
-      const stepInfo = taskContext ? ` at step ${i + 1}/${chain.length} of chain in task '${taskContext.taskName}'` : ` at step ${i + 1}/${chain.length} of chain`
-      error.message = `${error.message}${stepInfo}`
+      // Add chain step to service chain for error context
+      if (!error.serviceChain) {
+        error.serviceChain = []
+      }
+      error.serviceChain.push(`${serviceName}:${action}`)
       throw error
     }
     
@@ -540,7 +708,34 @@ const getDependencies = (args) => {
  * Promise-based query execution
  */
 export default async function query(config) {
-  const { services, given, query: jobs, methods = [], select, timeouts = {} } = config
+  const { 
+    services, 
+    given, 
+    query: jobs, 
+    methods = [], 
+    select, 
+    timeouts = {}, 
+    onError: queryOnError,
+    settings = {}
+  } = config
+  
+  // Setup default settings
+  const defaultSettings = {
+    timeout: { default: 5000 },
+    inspect: {
+      depth: 2,
+      maxArrayLength: 3,
+      maxStringLength: 140,
+      colors: false
+    }
+  }
+  
+  const resolvedSettings = {
+    timeout: { ...defaultSettings.timeout, ...settings.timeout },
+    inspect: { ...defaultSettings.inspect, ...settings.inspect }
+  }
+  
+  const inspector = createCompactInspector(resolvedSettings.inspect)
   
   // Prepare services (auto-wrap objects)
   const preparedServices = prepareServices(services)
@@ -580,7 +775,7 @@ export default async function query(config) {
       
       tasks.set(jobName, {
         deps: Array.from(allDeps),
-        execute: () => executeChain(chain, preparedServices, results, timeouts, [], { taskName: jobName, descriptor: chain })
+        execute: () => executeChain(chain, preparedServices, results, timeouts, [], { taskName: jobName, descriptor: chain }, inspector, resolvedSettings)
       })
       continue
     }
@@ -604,7 +799,7 @@ export default async function query(config) {
           // Resolve the data source first
           const data = dataSource.startsWith('$.') ? retrieve(dataSource, results) : dataSource
           const finalArgs = withOnParameter(args, data)
-          return await executeService(serviceName, action, finalArgs, preparedServices, results, null, timeouts, [], { taskName: jobName, descriptor: descriptor })
+          return await executeService(serviceName, action, finalArgs, preparedServices, results, null, timeouts, [], { taskName: jobName, descriptor: descriptor }, inspector, resolvedSettings)
         }
       })
       continue
@@ -617,7 +812,7 @@ export default async function query(config) {
       
       tasks.set(jobName, {
         deps,
-        execute: () => executeService(serviceName, action, args, preparedServices, results, null, timeouts, [], { taskName: jobName, descriptor: descriptor })
+        execute: () => executeService(serviceName, action, args, preparedServices, results, null, timeouts, [], { taskName: jobName, descriptor: descriptor }, inspector, resolvedSettings)
       })
       continue
     }
@@ -679,18 +874,47 @@ export default async function query(config) {
     return await promise
   }
   
-  // Execute all tasks
-  const allTaskNames = Array.from(tasks.keys())
-  await Promise.all(allTaskNames.map(name => executeTask(name)))
-  
-  // Select specified results if user requests
-  if (Array.isArray(select)) {
-    return Object.fromEntries(
-      select.map(key => [key, results[key]])
-    )
-  } else if (typeof select === 'string') {
-    return results[select]
+  try {
+    // Execute all tasks
+    const allTaskNames = Array.from(tasks.keys())
+    await Promise.all(allTaskNames.map(name => executeTask(name)))
+    
+    // Select specified results if user requests
+    if (Array.isArray(select)) {
+      return Object.fromEntries(
+        select.map(key => [key, results[key]])
+      )
+    } else if (typeof select === 'string') {
+      return results[select]
+    }
+    
+    return results
+  } catch (error) {
+    // Handle query-level errors
+    if (queryOnError && Array.isArray(queryOnError)) {
+      try {
+        // Compile and execute the query-level onError handler
+        const errorContext = {
+          error: error.message,
+          originalError: error,
+          taskName: error.taskName,
+          query: jobs
+        }
+        
+        const compiledOnError = compileServiceFunction(queryOnError, preparedServices, results, [errorContext], inspector, resolvedSettings)
+        await compiledOnError(errorContext)
+      } catch (onErrorErr) {
+        console.error(`Query-level onError handler failed: ${onErrorErr.message}`)
+      }
+    }
+    
+    // If we have a query-level onError handler, still throw to maintain flow
+    // If no handler, default handler will exit the process
+    if (!queryOnError) {
+      defaultErrorHandler(error, 'query execution', resolvedSettings)
+    }
+    
+    // Re-throw the error to maintain normal flow
+    throw error
   }
-  
-  return results
 }

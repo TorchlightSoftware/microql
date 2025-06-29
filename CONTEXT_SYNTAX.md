@@ -6,9 +6,9 @@ This document explains MicroQL's context reference syntax using `@` symbols and 
 
 MicroQL provides a powerful context reference system that allows you to access data at different levels of nesting:
 
-- `@` - References the first context level (contextStack[0])
-- `@@` - References the second context level (contextStack[1])
-- `@@@` - References the third context level (contextStack[2])
+- `@` - References the most recent context level (contextStack[contextStack.length - 1])
+- `@@` - References the second most recent context level (contextStack[contextStack.length - 2])
+- `@@@` - References the third most recent context level (contextStack[contextStack.length - 3])
 - And so on...
 
 ## Context Hierarchy
@@ -17,7 +17,7 @@ MicroQL maintains a context stack that grows as you nest operations. Context lev
 
 1. **Chain Results**: Each step in a service chain adds its result to the context stack
 2. **Iteration Items**: Each level of iteration (map, flatMap, filter) adds the current item to the context stack
-3. **Absolute Indexing**: @ always refers to contextStack[0], @@ to contextStack[1], etc.
+3. **Relative Indexing**: @ always refers to the most recent context (contextStack[length-1]), @@ to the second most recent (contextStack[length-2]), etc.
 
 ## Parameter Metadata
 
@@ -95,9 +95,9 @@ async (item) => {
 ```
 
 Context stack during execution:
-1. `@` (contextStack[0]) - Company object
-2. `@@` (contextStack[1]) - Department object  
-3. `@@@` (contextStack[2]) - Team member object
+1. `@` (most recent) - Team member object
+2. `@@` (second most recent) - Department object  
+3. `@@@` (third most recent) - Company object
 
 ### Complex Example
 
@@ -106,11 +106,11 @@ Context stack during execution:
   fn: ['@.departments', 'util:flatMap', {
     fn: ['@.teams', 'util:map', {
       fn: ['db', 'createUser', {
-        name: '@.name',           // Current team member
-        email: '@.email',         // Current team member
-        team: '@@.name',          // Team name
-        department: '@@@.name',   // Department name
-        company: '@@@@.name'      // Company name
+        name: '@.name',           // Current team member (most recent context)
+        email: '@.email',         // Current team member (most recent context)
+        team: '@@.name',          // Team name (second most recent context)
+        department: '@@@.name',   // Department name (third most recent context)
+        company: '@@@@.name'      // Company name (fourth most recent context)
       }]
     }]
   }]
@@ -190,8 +190,12 @@ async map({ fn }) {
 
 ## Implementation Details
 
-- Context stack is maintained as an array
-- `@` binds to `contextStack[contextStack.length - 1]`
-- `@@` binds to `contextStack[contextStack.length - 2]`
-- Function compilation creates closures that capture the context
-- Parameter metadata prevents premature @ resolution
+- Context stack is maintained as an array that grows during nested operations
+- `@` binds to `contextStack[contextStack.length - 1]` (most recent context)
+- `@@` binds to `contextStack[contextStack.length - 2]` (second most recent context)
+- Function compilation creates closures that capture the context stack at compilation time
+- Parameter metadata prevents premature @ resolution for function and template parameters
+
+For complete service writing guidance, see [SERVICE_WRITER_GUIDE.md](SERVICE_WRITER_GUIDE.md).
+
+For architectural details, see [HOW_MICROQL_WORKS.md](HOW_MICROQL_WORKS.md).

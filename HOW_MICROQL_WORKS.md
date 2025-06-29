@@ -50,9 +50,11 @@ result: [
 MicroQL maintains a **context stack** during execution that enables sophisticated data flow:
 
 ```javascript
-contextStack[0] = @ 
-contextStack[1] = @@
-contextStack[2] = @@@
+// Context stack grows left to right, @ symbols reference right to left
+contextStack = [oldest, ..., newest]
+contextStack[length-1] = @     // most recent (newest)
+contextStack[length-2] = @@    // second most recent
+contextStack[length-3] = @@@   // third most recent
 // etc.
 ```
 
@@ -64,7 +66,7 @@ contextStack[2] = @@@
   template: { name: '@.name', role: '@.role' }
 }]
 ```
-- `@.name` = current user's name in the iteration
+- `@.name` = current user's name in the iteration (most recent context)
 
 **Nested Levels:**
 ```javascript
@@ -72,9 +74,9 @@ contextStack[2] = @@@
   fn: ['@.departments', 'util:flatMap', {
     fn: ['@.employees', 'util:map', {
       fn: ['user', 'create', {
-        name: '@.name',        // Current employee (contextStack[0])
-        department: '@@.name', // Department name (contextStack[1])
-        company: '@@@.name'    // Company name (contextStack[2])
+        name: '@.name',        // Current employee (most recent context)
+        department: '@@.name', // Department name (second most recent context)
+        company: '@@@.name'    // Company name (third most recent context)
       }]
     }]
   }]
@@ -83,8 +85,10 @@ contextStack[2] = @@@
 
 **Context Stack During Execution:**
 1. Company iteration: `@` = company, `contextStack = [company]`
-2. Department iteration: `@` = department, `@@` = company, `contextStack = [department, company]`
-3. Employee iteration: `@` = employee, `@@` = department, `@@@` = company, `contextStack = [employee, department, company]`
+2. Department iteration: `@` = department, `@@` = company, `contextStack = [company, department]`
+3. Employee iteration: `@` = employee, `@@` = department, `@@@` = company, `contextStack = [company, department, employee]`
+
+Note: `@` always refers to the most recent context (rightmost in the stack).
 
 ## Execution Model
 
@@ -248,13 +252,21 @@ Automatically retry failed operations:
 
 Services receive these values in args but MicroQL handles the actual timeout/retry logic.
 
+For complete details on reserved parameters and service writing, see [SERVICE_WRITER_GUIDE.md](SERVICE_WRITER_GUIDE.md).
+
 ## Summary
 
 MicroQL's power comes from:
-1. **Sophisticated context chaining** with @ symbols
+1. **Sophisticated context chaining** with @ symbols (most recent context first)
 2. **Method syntax** as clean syntactic sugar universally available
 3. **Uniform execution model** after early normalization
 4. **Comprehensive error context** for debugging
 5. **Built-in reliability** with timeout and retry mechanisms
 
 The system is designed to handle complex nested data transformations elegantly while providing clear error messages that point to the query location, not internal implementation details.
+
+## Related Documentation
+
+- [README.md](README.md) - Quick start and basic usage
+- [SERVICE_WRITER_GUIDE.md](SERVICE_WRITER_GUIDE.md) - Complete guide for service developers
+- [CONTEXT_SYNTAX.md](CONTEXT_SYNTAX.md) - Detailed @ symbol syntax and examples

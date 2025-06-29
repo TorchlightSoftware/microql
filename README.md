@@ -37,62 +37,15 @@ const result = await query({
 
 ## New Features
 
-### Service Object Auto-Wrapping
+### Key Features
 
-You can now provide service objects that get automatically wrapped:
+- **Service Object Auto-Wrapping**: Provide service objects that get automatically wrapped
+- **Method Syntax**: Use cleaner syntax like `['@.data', 'service:method', args]`
+- **Service Chains**: Chain operations using the `@` symbol for context flow
+- **Context References**: Use `@`, `@@`, `@@@` for sophisticated nested data access
+- **Built-in Reliability**: Timeout and retry mechanisms
 
-```js
-const dataService = {
-  async validate({ email }) { 
-    return email.includes('@') && email.includes('.')
-  },
-  async normalize({ email }) { 
-    return email.toLowerCase().trim()
-  }
-}
-
-await query({
-  given: { userEmail: 'John.Doe@EXAMPLE.COM' },
-  services: { dataService },
-  query: {
-    isValid: ['dataService', 'validate', { email: '$.given.userEmail' }],
-    normalized: ['dataService', 'normalize', { email: '$.given.userEmail' }]
-  }
-})
-```
-
-### Method Syntax
-
-Use method syntax for cleaner queries:
-
-```js
-await query({
-  given: { items: ['laptop', 'mouse', 'keyboard'] },
-  services: { inventory },
-  methods: ['inventory'],  // Enable method syntax for inventory
-  query: {
-    inStock: ['$.given.items', 'inventory:checkStock', { warehouse: 'east' }]
-  }
-})
-```
-
-### Service Chains
-
-Chain operations using the `@` symbol:
-
-```js
-await query({
-  given: { documentUrl: 'https://example.com/report.pdf' },
-  services: { downloader, parser, analyzer },
-  query: {
-    processedDoc: [
-      ['downloader', 'fetch', { url: '$.given.documentUrl' }],
-      ['parser', 'extractText', { data: '@' }],  // @ refers to downloaded data
-      ['analyzer', 'getSummary', { text: '@', maxLength: 500 }]
-    ]
-  }
-})
-```
+For detailed examples and advanced usage, see [HOW_MICROQL_WORKS.md](HOW_MICROQL_WORKS.md).
 
 ## API Reference
 
@@ -111,77 +64,66 @@ await query({
 
 ### Service Types
 
-**Function Services:**
-```js
-const myService = async (action, args) => {
-  if (action === 'getData') return await fetchData(args.id)
-  if (action === 'saveData') return await saveData(args.data)
-}
-```
-
-**Object Services (auto-wrapped):**
-```js
-const myService = {
-  async getData({ id }) { return await fetchData(id) },
-  async saveData({ data }) { return await saveData(data) }
-}
-```
+Services can be functions or objects (auto-wrapped). For complete service writing guidance including best practices, parameter handling, and examples, see [SERVICE_WRITER_GUIDE.md](SERVICE_WRITER_GUIDE.md).
 
 ### @ Symbol Usage
 
-- `@` - Previous result in a chain
-- `@.field` - Access field of previous result
+- `@` - Most recent context (previous result in a chain, current item in iteration)
+- `@@` - Second most recent context
+- `@.field` - Access field of context
 
-## Timeouts
+For detailed @ symbol syntax and complex nesting examples, see [CONTEXT_SYNTAX.md](CONTEXT_SYNTAX.md).
 
-MicroQL provides comprehensive timeout support to prevent hanging service calls:
+## Timeouts & Reliability
 
-### Configuration
+MicroQL provides built-in reliability features:
 
-```js
-await query({
-  given: { data: 'example' },
-  services: { api, database },
-  timeouts: {
-    default: 3000,    // 3 second default for all services
-    api: 10000,       // 10 seconds for API calls
-    database: 5000    // 5 seconds for database calls
-  },
-  query: {
-    result: ['api', 'getData', { id: '$.given.data' }]
-  }
-})
-```
+- **Timeouts**: Prevent hanging service calls with configurable timeouts
+- **Retries**: Automatically retry failed operations
+- **Error Context**: Rich error messages with query context
+- **Error Handling**: Flexible error handling with onError and ignoreErrors
 
-### Timeout Priority (highest to lowest)
+### Implicit Parameters
 
-1. **Argument-level timeout** - Set `timeout` in service call arguments
-2. **Service-specific timeout** - Set in `timeouts.serviceName`
-3. **Default timeout** - Set in `timeouts.default`
-4. **No timeout** - Service runs indefinitely
-
-### Argument-Level Timeouts
+All service calls support these reserved parameters:
 
 ```js
 query: {
-  // This call will timeout after 500ms regardless of config
-  urgentCall: ['api', 'getData', { 
+  // All implicit parameters example
+  data: ['api', 'getData', { 
     id: '$.given.id',
-    timeout: 500
-  }],
-  
-  // This call uses service/default timeout from config
-  normalCall: ['api', 'getData', { id: '$.given.id' }]
+    timeout: 5000,      // 5 second timeout
+    retry: 3,           // Try up to 4 times total
+    onError: ['logger', 'logError', { on: '@' }],  // Custom error handler
+    ignoreErrors: true  // Continue on error (returns null)
+  }]
 }
 ```
 
-### Timeout Behavior
+### Error Handling
 
-- Timeouts apply to individual service calls, not entire queries
-- Service chains: each step gets its own timeout
-- Parallel execution: each service call gets its own timeout
-- The `timeout` argument is passed through to services for their own use
-- Timeout errors include service name and duration for debugging
+MicroQL provides flexible error handling at both service and query levels:
+
+#### Service-Level Error Handling
+- **onError**: Call a service when this specific call fails
+- **ignoreErrors**: Continue execution on error (returns null)
+
+#### Query-Level Error Handling
+```js
+{
+  services: { logger },
+  query: { /* ... */ },
+  onError: ['logger', 'logQueryError', { on: '@' }]  // Handle any unhandled errors
+}
+```
+
+#### Default Error Behavior
+Without explicit error handlers:
+- Errors are printed in red to stderr
+- Process exits with code 1
+- Full stack trace is displayed
+
+For complete error handling details, see [HOW_MICROQL_WORKS.md#error-handling](HOW_MICROQL_WORKS.md#error-handling).
 
 ## Migration from v0.1
 
@@ -194,13 +136,11 @@ query: {
 
 - `jsonpath` - For JSONPath query support
 
-## Writing Services
+## Documentation
 
-See [SERVICE_WRITER_GUIDE.md](SERVICE_WRITER_GUIDE.md) for comprehensive guidance on:
-- Service architecture and separation of concerns
-- Reserved parameters (timeout, retry)
-- Function parameters and compilation
-- Best practices and anti-patterns
+- **[SERVICE_WRITER_GUIDE.md](SERVICE_WRITER_GUIDE.md)** - Complete guide for writing services
+- **[HOW_MICROQL_WORKS.md](HOW_MICROQL_WORKS.md)** - Architecture and execution model
+- **[CONTEXT_SYNTAX.md](CONTEXT_SYNTAX.md)** - @ symbol syntax and complex examples
 
 ## License
 
