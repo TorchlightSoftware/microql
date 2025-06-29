@@ -183,44 +183,54 @@ const util = {
   },
 
   /**
-   * Print values to console with formatting options
+   * Print values to console with formatting options and color coding
    * 
    * @param {Object} params - Parameters object
    * @param {*} [params.on] - Value from method syntax (e.g., ['@.data', 'util:print', ...])
    * @param {*} [params.value] - Value from direct calls
    * @param {number} [params.depth=3] - Depth for object inspection
-   * @param {string} [params.lor] - Line-or-return override (terminal default if not specified)
+   * @param {string} [params.color] - Color for output (red, green, yellow, blue, magenta, cyan, white)
    * @param {boolean} [params.ts=true] - Whether to include timestamp
    * @returns {Promise<*>} Returns the input value for chaining
    * 
    * @example
-   * // Method syntax with options
-   * ['@.data', 'util:print', { depth: 5, ts: false }]
+   * // Method syntax with color for database calls
+   * ['@.data', 'util:print', { color: 'blue', depth: 2 }]
    * 
    * @example
-   * // Direct call
-   * ['util', 'print', { value: { foo: 'bar' }, depth: 2 }]
+   * // Scraper logging in cyan
+   * ['util', 'print', { value: 'Scraped 10 items', color: 'cyan' }]
    */
-  async print({ on, value, depth = 3, lor, ts = true }) {
+  async print({ on, value, depth = 3, color, ts = true }) {
     const printValue = on !== undefined ? on : value
+    
+    // ANSI color codes for terminal output
+    const colors = {
+      red: '\x1b[31m',
+      green: '\x1b[32m', 
+      yellow: '\x1b[33m',
+      blue: '\x1b[34m',
+      magenta: '\x1b[35m',
+      cyan: '\x1b[36m',
+      white: '\x1b[37m',
+      reset: '\x1b[0m'
+    }
     
     // Format timestamp if enabled
     const timestamp = ts ? `[${new Date().toISOString()}] ` : ''
-    
-    // Handle line-or-return setting
-    const lineEnding = lor !== undefined ? lor : ''
     
     // Use util.inspect for proper object formatting with depth control
     const { inspect } = await import('util')
     const formatted = typeof printValue === 'string' 
       ? printValue 
-      : inspect(printValue, { depth, colors: true, compact: false })
+      : inspect(printValue, { depth, colors: false, compact: false })
     
-    // Print with formatting
-    process.stdout.write(timestamp + formatted + lineEnding)
-    if (lor === undefined) {
-      process.stdout.write('\n') // Default newline if lor not specified
-    }
+    // Apply color if specified
+    const colorCode = color && colors[color] ? colors[color] : ''
+    const resetCode = colorCode ? colors.reset : ''
+    
+    // Print with formatting and color
+    process.stdout.write(colorCode + timestamp + formatted + resetCode + '\n')
     
     // Return the original value for chaining
     return printValue
