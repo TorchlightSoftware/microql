@@ -184,24 +184,25 @@ const util = {
 
   /**
    * Print values to console with formatting options and color coding
+   * Uses query-level inspect settings for consistent formatting
    * 
    * @param {Object} params - Parameters object
    * @param {*} [params.on] - Value from method syntax (e.g., ['@.data', 'util:print', ...])
    * @param {*} [params.value] - Value from direct calls
-   * @param {number} [params.depth=3] - Depth for object inspection
+   * @param {Object} [params.inspect] - Inspect settings from query or override (handled by MicroQL)
    * @param {string} [params.color] - Color for output (red, green, yellow, blue, magenta, cyan, white)
    * @param {boolean} [params.ts=true] - Whether to include timestamp
    * @returns {Promise<*>} Returns the input value for chaining
    * 
    * @example
    * // Method syntax with color for database calls
-   * ['@.data', 'util:print', { color: 'blue', depth: 2 }]
+   * ['@.data', 'util:print', { color: 'blue' }]
    * 
    * @example
-   * // Scraper logging in cyan
-   * ['util', 'print', { value: 'Scraped 10 items', color: 'cyan' }]
+   * // Scraper logging in cyan with custom inspect settings
+   * ['util', 'print', { value: 'Scraped 10 items', color: 'cyan', inspect: { depth: 1 } }]
    */
-  async print({ on, value, depth = 3, color, ts = true }) {
+  async print({ on, value, inspect: inspectSettings, color, ts = true }) {
     const printValue = on !== undefined ? on : value
     
     // ANSI color codes for terminal output
@@ -219,11 +220,27 @@ const util = {
     // Format timestamp if enabled
     const timestamp = ts ? `[${new Date().toISOString()}] ` : ''
     
-    // Use util.inspect for proper object formatting with depth control
+    // Use provided inspect settings or defaults if inspector function wasn't passed
     const { inspect } = await import('util')
-    const formatted = typeof printValue === 'string' 
-      ? printValue 
-      : inspect(printValue, { depth, colors: false, compact: false })
+    let formatted
+    
+    if (typeof printValue === 'string') {
+      formatted = printValue
+    } else if (typeof inspectSettings === 'function') {
+      // inspectSettings is actually the compiled inspector function from MicroQL
+      formatted = inspectSettings(printValue)
+    } else {
+      // Fallback to default inspect with provided settings
+      const defaultSettings = {
+        depth: 3,
+        colors: false,
+        compact: false,
+        maxArrayLength: 10,
+        maxStringLength: 200,
+        ...inspectSettings
+      }
+      formatted = inspect(printValue, defaultSettings)
+    }
     
     // Apply color if specified
     const colorCode = color && colors[color] ? colors[color] : ''
@@ -255,6 +272,8 @@ util.when._params = {
   test: { type: 'function' }  // Test can be a service call
 }
 
-// No special parameter metadata needed for print - all parameters are primitive values
+util.print._params = {
+  inspect: { type: 'inspect' }  // Use query-level inspect settings
+}
 
 export default util

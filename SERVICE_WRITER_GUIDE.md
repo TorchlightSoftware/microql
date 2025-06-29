@@ -108,12 +108,27 @@ const utilService = {
   }
 }
 
-// Mark parameters that should be compiled as functions
+// Mark parameters that need special handling
 utilService.map._params = {
-  fn: { type: 'function' },
-  template: { type: 'template' }
+  fn: { type: 'function' },    // Compiled as service call function
+  template: { type: 'template' }  // Skip @ resolution, handle in service
+}
+
+// For services that need inspect settings (like util.print)
+utilService.print._params = {
+  inspect: { type: 'inspect' }  // Use query-level inspect settings
 }
 ```
+
+### Parameter Types
+
+MicroQL supports several parameter type annotations:
+
+- **`{type: 'function'}`** - Parameter contains service descriptor that MicroQL compiles into a callable function
+- **`{type: 'template'}`** - Parameter contains @ symbols but should skip MicroQL's @ resolution (service handles it)
+- **`{type: 'inspect'}`** - Parameter receives the query's inspector function for consistent formatting
+
+These help MicroQL know how to handle special parameters while maintaining service independence.
 
 ## What NOT to Do
 
@@ -211,6 +226,11 @@ const apiService = {
   }
 }
 ```
+
+**Error Handling Philosophy:**
+- **Just throw errors** - Don't add console.log or console.error statements
+- **MicroQL handles formatting** - All error output is centralized and consistent
+- **Focus on clear messages** - Your error messages will be wrapped with service context automatically
 
 ### 3. Document Your Service
 

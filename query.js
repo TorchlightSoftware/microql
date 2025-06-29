@@ -501,6 +501,7 @@ const executeService = async (serviceName, action, args, services, source, chain
   // Build set of parameters that should skip resolution
   const skipParams = new Set()
   const functionsToCompile = {}
+  const inspectToCompile = {}
   
   // Add reserved MicroQL parameters to skip list
   skipParams.add('timeout')
@@ -518,6 +519,10 @@ const executeService = async (serviceName, action, args, services, source, chain
     } else if (paramInfo?.type === 'template') {
       // Mark to skip resolution
       skipParams.add(key)
+    } else if (paramInfo?.type === 'inspect') {
+      // Mark for inspect compilation
+      inspectToCompile[key] = value
+      skipParams.add(key)
     }
   }
   
@@ -527,6 +532,18 @@ const executeService = async (serviceName, action, args, services, source, chain
   // Now handle function compilation
   for (const [key, value] of Object.entries(functionsToCompile)) {
     finalArgs[key] = compileServiceFunction(value, services, source, contextStack, inspector, querySettings)
+  }
+  
+  // Handle inspect compilation - pass the inspector function or create from settings
+  for (const [key, value] of Object.entries(inspectToCompile)) {
+    if (typeof value === 'object' && value !== null) {
+      // Custom inspect settings provided - create inspector with these settings
+      const customInspector = createCompactInspector({ ...querySettings?.inspect, ...value })
+      finalArgs[key] = customInspector
+    } else {
+      // Use query-level inspector
+      finalArgs[key] = inspector
+    }
   }
   
   // Special handling for util service (legacy)

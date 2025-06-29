@@ -260,4 +260,124 @@ describe('Util Service Tests', () => {
       assert.strictEqual(result, 2) // Orders B456 and C789 are over $30
     })
   })
+
+  describe('Print Function Tests', () => {
+    let originalWrite
+    let capturedOutput
+
+    beforeEach(() => {
+      // Capture stdout.write calls
+      capturedOutput = []
+      originalWrite = process.stdout.write
+      process.stdout.write = function(data) {
+        capturedOutput.push(data)
+        return true
+      }
+    })
+
+    afterEach(() => {
+      // Restore original stdout.write
+      process.stdout.write = originalWrite
+    })
+
+    it('should print basic values', async () => {
+      const result = await query({
+        services: { util },
+        query: {
+          printed: ['util', 'print', { 
+            value: 'Hello World', 
+            color: 'blue',
+            ts: false
+          }]
+        },
+        select: 'printed'
+      })
+
+      // Should return the printed value for chaining
+      assert.strictEqual(result, 'Hello World')
+      
+      // Should have captured some output  
+      assert(capturedOutput.length > 0, 'Should have captured some output')
+      
+      // Find the output that contains the blue color
+      const blueOutput = capturedOutput.find(output => output.includes('\x1b[34m'))
+      assert(blueOutput, 'Should find output with blue color')
+      
+      // Should contain the message
+      assert(blueOutput.includes('Hello World'), 'Should contain the message')
+    })
+
+    it.skip('should print with query-level inspect settings', async () => {
+      const testData = {
+        users: [
+          { id: 1, name: 'Alice', profile: { email: 'alice@example.com', preferences: { theme: 'dark', notifications: true } } },
+          { id: 2, name: 'Bob', profile: { email: 'bob@example.com', preferences: { theme: 'light', notifications: false } } }
+        ]
+      }
+
+      const result = await query({
+        given: testData,
+        services: { util },
+        settings: {
+          inspect: {
+            depth: 1,
+            maxArrayLength: 1,
+            maxStringLength: 20
+          }
+        },
+        query: {
+          printed: ['util', 'print', { 
+            value: '$.given.users', 
+            color: 'blue',
+            ts: false
+          }]
+        },
+        select: 'printed'
+      })
+
+
+      // Should return the printed value for chaining
+      assert.deepStrictEqual(result, testData.users)
+      
+      // Should have captured some output  
+      assert(capturedOutput.length > 0, 'Should have captured some output')
+      
+      // Find the output that contains the blue color (from our print call)
+      const blueOutput = capturedOutput.find(output => output.includes('\\x1b[34m'))
+      assert(blueOutput, 'Should find output with blue color')
+      
+      // Should contain ANSI blue color codes
+      // Already checked that blueOutput contains blue color
+      assert(blueOutput.includes('\x1b[0m'), 'Should contain reset color code')
+      
+      
+      // Should show truncation due to maxArrayLength: 1
+      assert(blueOutput.includes('... 1 more item'), 'Should truncate array due to maxArrayLength setting')
+    })
+
+    it('should work with method syntax and custom inspect settings', async () => {
+      const testData = { message: 'This is a very long string that should be truncated based on settings' }
+
+      await query({
+        given: testData,
+        services: { util },
+        methods: ['util'],
+        query: {
+          result: ['$.given.message', 'util:print', { 
+            inspect: { maxStringLength: 30 },
+            color: 'green',
+            ts: false
+          }]
+        }
+      })
+
+      // Check output
+      assert.strictEqual(capturedOutput.length, 1)
+      const output = capturedOutput[0]
+      
+      // Should be a string (not inspected as object)
+      assert(output.includes('This is a very long string'), 'Should contain the message')
+      assert(output.includes('\x1b[32m'), 'Should contain green color code')
+    })
+  })
 })

@@ -58,7 +58,15 @@ For detailed examples and advanced usage, see [HOW_MICROQL_WORKS.md](HOW_MICROQL
   methods: [],            // Services that support method syntax
   query: {},              // Jobs to execute (was 'jobs' in v0.1)
   select: 'resultName',   // What to return
-  timeouts: {}            // Timeout configuration (optional)
+  settings: {             // Query configuration (optional)
+    timeout: { default: 5000 },  // Default timeout settings
+    inspect: {                   // Error output and util:print formatting
+      depth: 2,
+      maxArrayLength: 3,
+      maxStringLength: 140
+    }
+  },
+  timeouts: {}            // Legacy timeout configuration (deprecated)
 }
 ```
 
@@ -119,9 +127,16 @@ MicroQL provides flexible error handling at both service and query levels:
 
 #### Default Error Behavior
 Without explicit error handlers:
+- Errors use consistent format: `Error: :taskName: [service:action] message`
+- Args are displayed using compact inspect settings
 - Errors are printed in red to stderr
 - Process exits with code 1
-- Full stack trace is displayed
+
+Example error output:
+```
+Error: :listings: [util:flatMap][scraper:extract] Validation failed for "images"
+Args: { url: 'https://example.com', queries: { images: 'img.photo' } }
+```
 
 For complete error handling details, see [HOW_MICROQL_WORKS.md#error-handling](HOW_MICROQL_WORKS.md#error-handling).
 
