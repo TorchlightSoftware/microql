@@ -125,8 +125,28 @@ utilService.print._params = {
 MicroQL supports several parameter type annotations:
 
 - **`{type: 'function'}`** - Parameter contains service descriptor that MicroQL compiles into a callable function
-- **`{type: 'template'}`** - Parameter contains @ symbols but should skip MicroQL's @ resolution (service handles it)
+- **`{type: 'template'}`** - Parameter contains @ symbols for context-aware object transformation. Service receives raw template with @ symbols and the full context stack for proper @ resolution (including @@, @@@, etc.)
 - **`{type: 'inspect'}`** - Parameter receives the query's inspector function for consistent formatting
+
+#### Template Parameter Details
+
+Template parameters provide context-aware object transformation with full @ symbol support:
+
+```javascript
+// Query using template with nested @ context
+['$.items', 'util:flatMap', {
+  fn: ['@.categories', 'util:map', {
+    template: { 
+      name: '@.text',        // Current category
+      parentUrl: '@@.href'   // Parent item's href
+    }
+  }]
+}]
+```
+
+When using `{type: 'template'}`, your service receives:
+- The raw template object with unresolved @ symbols
+- `_contextStack` parameter containing the execution context stack for proper @@ resolution
 
 These help MicroQL know how to handle special parameters while maintaining service independence.
 

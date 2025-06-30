@@ -31,12 +31,16 @@ const COLOR_NAMES = ['green', 'yellow', 'blue', 'magenta', 'cyan', 'white']
  * 
  * @param {Object} template - Template object with @ symbol references
  * @param {*} currentItem - Current iteration item for context
+ * @param {Array} [contextStack] - Full context stack for nested @ resolution
  * @returns {Object} Resolved template object
  */
-const resolveTemplate = (template, currentItem) => {
+const resolveTemplate = (template, currentItem, contextStack = []) => {
+  // Create context stack with current item as @ and any outer context for @@, @@@, etc.
+  const fullContextStack = [currentItem, ...contextStack]
+  
   // Delegate to MicroQL's canonical resolution system
   // This ensures consistent handling of @, @@, @@@, etc.
-  return resolveArgsWithContext(template, {}, null, [currentItem], new Set())
+  return resolveArgsWithContext(template, {}, fullContextStack, new Set())
 }
 
 /**
@@ -70,13 +74,13 @@ const util = {
    *   fn: ['service', 'process', { input: '@.id' }]
    * }]
    */
-  async map({ on, collection, fn, template, _services }) {
+  async map({ on, collection, fn, template, _services, _contextStack }) {
     const items = on || collection || []
     if (!Array.isArray(items)) return []
     
     // Template-based mapping
     if (template) {
-      return items.map(item => resolveTemplate(template, item))
+      return items.map(item => resolveTemplate(template, item, _contextStack))
     }
     
     // Function-based mapping - fn is now a compiled function from MicroQL
@@ -114,7 +118,7 @@ const util = {
   /**
    * Map and then flatten the results
    */
-  async flatMap({ on, collection, fn, _services }) {
+  async flatMap({ on, collection, fn, _services, _contextStack }) {
     const items = on || collection || []
     if (!Array.isArray(items)) return []
     

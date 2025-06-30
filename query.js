@@ -426,7 +426,7 @@ const compileServiceFunction = (serviceDescriptor, services, source, contextStac
     // Check if this is a chain (array of arrays)
     if (Array.isArray(serviceDescriptor) && serviceDescriptor.length > 0 && Array.isArray(serviceDescriptor[0])) {
       // Execute as chain
-      return await executeChain(serviceDescriptor, services, source, {}, newContextStack, null, inspector, querySettings)
+      return await executeChain(serviceDescriptor, services, source, newContextStack, null, inspector, querySettings)
     } else if (Array.isArray(serviceDescriptor) && serviceDescriptor.length >= 3) {
       // Transform method syntax to regular syntax if needed
       const transformed = transformMethodSyntax(serviceDescriptor)
@@ -637,6 +637,7 @@ const executeService = async (serviceName, action, args, services, source, conte
     // Provide util service with access to other services and context
     finalArgs._services = services
     finalArgs._context = source
+    finalArgs._contextStack = contextStack
   }
   
   // Handle timeout, retry, onError, and ignoreErrors logic
