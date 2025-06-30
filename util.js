@@ -23,7 +23,7 @@ const COLORS = {
 /**
  * Ordered list of color names for service assignment
  */
-const COLOR_NAMES = ['red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white']
+const COLOR_NAMES = ['green', 'yellow', 'blue', 'magenta', 'cyan', 'white']
 
 /**
  * Resolve template values using MicroQL's canonical context resolution system
