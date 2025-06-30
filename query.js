@@ -463,6 +463,11 @@ export const resolveArgsWithContext = (args, source, chainResult = null, context
         // Pure @ symbols - use absolute indexing
         const contextIndex = atCount - 1 // @ = index 0, @@ = index 1, etc.
         
+        // Special case: single @ in chains should use chainResult (previous step result)
+        if (atCount === 1 && chainResult !== null) {
+          return chainResult
+        }
+        
         validateContextIndex(atCount, contextIndex, contextStack)
         
         return contextStack[contextIndex] || null
