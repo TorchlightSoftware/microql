@@ -26,24 +26,6 @@ const COLORS = {
 const COLOR_NAMES = ['green', 'yellow', 'blue', 'magenta', 'cyan', 'white']
 
 /**
- * Resolve template values using MicroQL's canonical context resolution system
- * This ensures consistent handling of @, @@, @@@, etc. across the entire system
- * 
- * @param {Object} template - Template object with @ symbol references
- * @param {*} currentItem - Current iteration item for context
- * @param {Array} [contextStack] - Full context stack for nested @ resolution
- * @returns {Object} Resolved template object
- */
-const resolveTemplate = (template, currentItem, contextStack = []) => {
-  // Create context stack with current item as @ and any outer context for @@, @@@, etc.
-  const fullContextStack = [currentItem, ...contextStack]
-  
-  // Delegate to MicroQL's canonical resolution system
-  // This ensures consistent handling of @, @@, @@@, etc.
-  return resolveArgsWithContext(template, {}, fullContextStack, new Set())
-}
-
-/**
  * Utility service for common data transformations in MicroQL
  * Provides map, filter, flatMap, concat and other operations with sophisticated context handling
  */
@@ -74,19 +56,15 @@ const util = {
    *   fn: ['service', 'process', { input: '@.id' }]
    * }]
    */
-  async map({ on, collection, fn, template, _services, _contextStack }) {
+  async map({ on, collection, fn, template, _services }) {
     const items = on || collection || []
     if (!Array.isArray(items)) return []
     
-    // Template-based mapping
-    if (template) {
-      return items.map(item => resolveTemplate(template, item, _contextStack))
-    }
-    
-    // Function-based mapping - fn is now a compiled function from MicroQL
-    if (fn && typeof fn === 'function') {
+    // Both templates and functions are now compiled functions by MicroQL
+    const mapFunction = template || fn
+    if (mapFunction && typeof mapFunction === 'function') {
       const results = await Promise.all(
-        items.map(item => fn(item))
+        items.map(item => mapFunction(item))
       )
       return results
     }
@@ -118,7 +96,7 @@ const util = {
   /**
    * Map and then flatten the results
    */
-  async flatMap({ on, collection, fn, _services, _contextStack }) {
+  async flatMap({ on, collection, fn, _services }) {
     const items = on || collection || []
     if (!Array.isArray(items)) return []
     
@@ -307,7 +285,7 @@ const util = {
 // Parameter metadata for MicroQL function compilation
 util.map._params = {
   fn: { type: 'function' },
-  template: { type: 'template' }  // Templates also need @ resolution
+  template: { type: 'function' }  // Templates compiled as functions with @ resolution
 }
 
 util.filter._params = {

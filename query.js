@@ -436,6 +436,9 @@ const compileServiceFunction = (serviceDescriptor, services, source, contextStac
       const [serviceName, action, args] = actualDescriptor
       const resolvedArgs = resolveArgsWithContext(args, source, newContextStack)
       return await executeService(serviceName, action, resolvedArgs, services, source, newContextStack, null, inspector, querySettings)
+    } else if (typeof serviceDescriptor === 'object' && serviceDescriptor !== null && !Array.isArray(serviceDescriptor)) {
+      // Handle template objects - resolve @ symbols with current context
+      return resolveArgsWithContext(serviceDescriptor, source, newContextStack)
     }
     
     throw new Error('Invalid service descriptor for function compilation')
@@ -602,8 +605,9 @@ const executeService = async (serviceName, action, args, services, source, conte
       // Mark for function compilation
       functionsToCompile[key] = value
       skipParams.add(key)
-    } else if (paramInfo?.type === 'template') {
-      // Mark to skip resolution
+    } else if (paramInfo?.type === 'function' && typeof value === 'object' && value !== null) {
+      // Mark template objects for function compilation
+      functionsToCompile[key] = value
       skipParams.add(key)
     } else if (paramInfo?.type === 'inspect') {
       // Mark for inspect compilation
@@ -637,7 +641,6 @@ const executeService = async (serviceName, action, args, services, source, conte
     // Provide util service with access to other services and context
     finalArgs._services = services
     finalArgs._context = source
-    finalArgs._contextStack = contextStack
   }
   
   // Handle timeout, retry, onError, and ignoreErrors logic
