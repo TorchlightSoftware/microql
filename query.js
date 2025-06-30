@@ -22,6 +22,7 @@
  */
 
 import retrieve from './retrieve.js'
+import { COLOR_NAMES } from './util.js'
 import { withOnParameter, validateContextIndex } from './utils.js'
 import { inspect } from 'util'
 
@@ -30,6 +31,61 @@ const DEP_REGEX = /\$\.(\w+)/
 
 /** @type {RegExp} Context reference pattern for @ symbols */
 const AT_REGEX = /^@+/
+
+/**
+ * Service color assignment for debug logging
+ * Maintains consistent colors for each service across the session
+ */
+const serviceColors = new Map()
+let colorIndex = 0
+
+/**
+ * Get assigned color for a service, creating one if needed
+ */
+const getServiceColor = (serviceName) => {
+  if (!serviceColors.has(serviceName)) {
+    serviceColors.set(serviceName, COLOR_NAMES[colorIndex % COLOR_NAMES.length])
+    colorIndex++
+  }
+  return serviceColors.get(serviceName)
+}
+
+/**
+ * Debug print function that mimics util:print behavior with color assignment
+ * Uses the query's inspect settings for consistent formatting
+ */
+const debugPrint = (serviceName, action, message, value, inspector) => {
+  const color = getServiceColor(serviceName)
+  const timestamp = `[${new Date().toISOString()}] `
+  
+  // ANSI color codes (same as in util.js)
+  const colors = {
+    red: '\x1b[31m',
+    green: '\x1b[32m', 
+    yellow: '\x1b[33m',
+    blue: '\x1b[34m',
+    magenta: '\x1b[35m',
+    cyan: '\x1b[36m',
+    white: '\x1b[37m',
+    reset: '\x1b[0m'
+  }
+  
+  const colorCode = colors[color] || ''
+  const resetCode = colorCode ? colors.reset : ''
+  
+  // Format the value using the inspector if provided
+  let formatted
+  if (typeof value === 'string') {
+    formatted = value
+  } else if (typeof inspector === 'function') {
+    formatted = inspector(value)
+  } else {
+    formatted = inspect(value, { depth: 2, colors: false, compact: false })
+  }
+  
+  const fullMessage = `${message} ${serviceName}:${action}\n   ${formatted}`
+  process.stdout.write(colorCode + timestamp + fullMessage + resetCode + '\n')
+}
 
 /**
  * Create compact inspector for arguments with configurable settings
@@ -471,24 +527,27 @@ const guardServiceExecution = async (serviceName, action, args, service, taskCon
   try {
     // Debug logging when entering service
     if (querySettings?.debug) {
-      console.log(`🔵 ENTERING ${serviceName}:${action}`)
-      console.log(`   Args:`, JSON.stringify(args, null, 2))
+      debugPrint(serviceName, action, '🔵 ENTERING', `Args: ${typeof args}`, inspector)
+      if (typeof args === 'object' && args !== null) {
+        debugPrint(serviceName, action, '   Args:', args, inspector)
+      }
     }
     
     const result = await service(action, args)
     
     // Debug logging when leaving service
     if (querySettings?.debug) {
-      console.log(`🟢 LEAVING ${serviceName}:${action}`)
-      console.log(`   Result:`, JSON.stringify(result, null, 2))
+      debugPrint(serviceName, action, '🟢 LEAVING', `Result: ${Array.isArray(result) ? `Array(${result.length})` : typeof result}`, inspector)
+      if (typeof result === 'object' && result !== null) {
+        debugPrint(serviceName, action, '   Result:', result, inspector)
+      }
     }
     
     return result
   } catch (error) {
     // Debug logging when service throws error
     if (querySettings?.debug) {
-      console.log(`🔴 ERROR in ${serviceName}:${action}`)
-      console.log(`   Error:`, error.message)
+      debugPrint(serviceName, action, '🔴 ERROR', `Error: ${error.message}`, inspector)
     }
     
     // Create enhanced error with MicroQL context

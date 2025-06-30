@@ -7,6 +7,25 @@ import retrieve from './retrieve.js'
 import { resolveArgsWithContext } from './query.js'
 
 /**
+ * Available color names for util:print service
+ */
+const COLORS = {
+  red: '\x1b[31m',
+  green: '\x1b[32m', 
+  yellow: '\x1b[33m',
+  blue: '\x1b[34m',
+  magenta: '\x1b[35m',
+  cyan: '\x1b[36m',
+  white: '\x1b[37m',
+  reset: '\x1b[0m'
+}
+
+/**
+ * Ordered list of color names for service assignment
+ */
+const COLOR_NAMES = ['red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white']
+
+/**
  * Resolve template values using MicroQL's canonical context resolution system
  * This ensures consistent handling of @, @@, @@@, etc. across the entire system
  * 
@@ -242,16 +261,7 @@ const util = {
     const printValue = on !== undefined ? on : value
     
     // ANSI color codes for terminal output
-    const colors = {
-      red: '\x1b[31m',
-      green: '\x1b[32m', 
-      yellow: '\x1b[33m',
-      blue: '\x1b[34m',
-      magenta: '\x1b[35m',
-      cyan: '\x1b[36m',
-      white: '\x1b[37m',
-      reset: '\x1b[0m'
-    }
+    const colors = COLORS
     
     // Format timestamp if enabled
     const timestamp = ts ? `[${new Date().toISOString()}] ` : ''
@@ -313,3 +323,4 @@ util.print._params = {
 }
 
 export default util
+export { COLOR_NAMES }
