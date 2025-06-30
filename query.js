@@ -926,7 +926,7 @@ export default async function query(config) {
     // If already executed, return cached result
     if (executed.has(taskName)) {
       if (resolvedSettings?.debug) {
-        console.log(`⏭️  TASK ${taskName}: Using cached result`)
+        // Skip logging for cached results
       }
       return results[taskName]
     }
@@ -934,7 +934,7 @@ export default async function query(config) {
     // If currently executing, wait for it
     if (executing.has(taskName)) {
       if (resolvedSettings?.debug) {
-        console.log(`⏸️  TASK ${taskName}: Waiting for concurrent execution`)
+        // Skip logging for waiting on concurrent execution
       }
       return await executing.get(taskName)
     }
@@ -944,7 +944,7 @@ export default async function query(config) {
       // Check if it's a built-in value like 'given'
       if (taskName === 'given' && given) {
         if (resolvedSettings?.debug) {
-          console.log(`📋 TASK ${taskName}: Using built-in value`)
+          // Skip logging for built-in values
         }
         executed.add(taskName)
         return given
@@ -955,7 +955,7 @@ export default async function query(config) {
     const promise = (async () => {
       try {
         if (resolvedSettings?.debug) {
-          console.log(`🔄 TASK ${taskName}: Starting execution`)
+          console.log(`🔄 Starting QUERY ${taskName}`)
         }
         
         // Execute dependencies first
@@ -968,9 +968,9 @@ export default async function query(config) {
         results[taskName] = result
         executed.add(taskName)
         
-        if (resolvedSettings?.debug) {
-          console.log(`✅ TASK ${taskName}: Completed with ${Array.isArray(result) ? `Array(${result.length})` : typeof result}`)
-        }
+        // Always show query completion
+        console.log(`✅ Completed QUERY ${taskName}:`)
+        console.log(inspector(result))
         
         return result
       } catch (error) {
@@ -994,9 +994,8 @@ export default async function query(config) {
     // Execute all tasks
     const allTaskNames = Array.from(tasks.keys())
     
-    if (settings?.debug) {
-      console.log(`🚀 EXECUTING TASKS: ${allTaskNames.join(', ')}`)
-    }
+    // Always show what queries are being executed
+    console.log(`🚀 EXECUTING QUERIES: ${allTaskNames.join(', ')}`)
     
     await Promise.all(allTaskNames.map(name => executeTask(name)))
     
