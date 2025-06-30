@@ -434,8 +434,8 @@ const compileServiceFunction = (serviceDescriptor, services, source, contextStac
       
       // Execute as regular service call
       const [serviceName, action, args] = actualDescriptor
-      const resolvedArgs = resolveArgsWithContext(args, source, null, newContextStack)
-      return await executeService(serviceName, action, resolvedArgs, services, source, null, {}, newContextStack, null, inspector, querySettings)
+      const resolvedArgs = resolveArgsWithContext(args, source, newContextStack)
+      return await executeService(serviceName, action, resolvedArgs, services, source, {}, newContextStack, null, inspector, querySettings)
     }
     
     throw new Error('Invalid service descriptor for function compilation')
@@ -446,12 +446,11 @@ const compileServiceFunction = (serviceDescriptor, services, source, contextStac
  * Resolve @ symbols and JSONPath in arguments with context stack support
  * @param {*} args - Arguments to resolve (can be object, array, or primitive)
  * @param {Object} source - Source data object containing query results
- * @param {*} chainResult - Result from previous step in a chain (unused currently)
- * @param {Array} contextStack - Stack of context items for @ symbol resolution
+ * @param {Array} contextStack - Stack of context items for @ symbol resolution (absolute indexing)
  * @param {Set} skipParams - Set of parameter names to skip resolution for
  * @returns {*} Resolved arguments with @ symbols and JSONPath replaced
  */
-export const resolveArgsWithContext = (args, source, chainResult = null, contextStack = [], skipParams = new Set()) => {
+export const resolveArgsWithContext = (args, source, contextStack = [], skipParams = new Set()) => {
   const resolve = (value) => {
     if (typeof value !== 'string') return value
     
@@ -462,11 +461,6 @@ export const resolveArgsWithContext = (args, source, chainResult = null, context
       if (value === '@'.repeat(atCount)) {
         // Pure @ symbols - use absolute indexing
         const contextIndex = atCount - 1 // @ = index 0, @@ = index 1, etc.
-        
-        // Special case: single @ in chains should use chainResult (previous step result)
-        if (atCount === 1 && chainResult !== null) {
-          return chainResult
-        }
         
         validateContextIndex(atCount, contextIndex, contextStack)
         
@@ -507,7 +501,7 @@ export const resolveArgsWithContext = (args, source, chainResult = null, context
         // Skip resolution for this parameter - keep as-is
         resolved[key] = value
       } else if (typeof value === 'object' && value !== null) {
-        resolved[key] = resolveArgsWithContext(value, source, chainResult, contextStack, skipParams)
+        resolved[key] = resolveArgsWithContext(value, source, contextStack, skipParams)
       } else {
         resolved[key] = resolve(value)
       }
@@ -521,8 +515,8 @@ export const resolveArgsWithContext = (args, source, chainResult = null, context
 /**
  * Resolve @ symbols and JSONPath in arguments (backward compatibility)
  */
-const resolveArgs = (args, source, chainResult = null) => {
-  return resolveArgsWithContext(args, source, chainResult, [], new Set())
+const resolveArgs = (args, source) => {
+  return resolveArgsWithContext(args, source, [], new Set())
 }
 
 /**
@@ -571,7 +565,7 @@ const guardServiceExecution = async (serviceName, action, args, service, taskCon
 /**
  * Execute a single service call
  */
-const executeService = async (serviceName, action, args, services, source, chainResult = null, timeouts = {}, contextStack = [], taskContext = null, inspector = null, querySettings = {}) => {
+const executeService = async (serviceName, action, args, services, source, timeouts = {}, contextStack = [], taskContext = null, inspector = null, querySettings = {}) => {
   const service = services[serviceName]
   if (!service) {
     const taskInfo = taskContext ? ` in query task '${taskContext.taskName}'` : ''
@@ -619,7 +613,7 @@ const executeService = async (serviceName, action, args, services, source, chain
   }
   
   // Resolve arguments while skipping special parameters
-  const finalArgs = resolveArgsWithContext(args, source, chainResult, contextStack, skipParams)
+  const finalArgs = resolveArgsWithContext(args, source, contextStack, skipParams)
   
   // Now handle function compilation
   for (const [key, value] of Object.entries(functionsToCompile)) {
@@ -688,6 +682,11 @@ const executeService = async (serviceName, action, args, services, source, chain
     timeoutMs = timeouts[serviceName]
   }
   
+  // Use service-specific timeout from settings if no other timeout provided
+  if (timeoutMs === null && querySettings?.timeout?.[serviceName] !== undefined) {
+    timeoutMs = querySettings.timeout[serviceName]
+  }
+  
   // Use default timeout if no other timeout specified
   if (timeoutMs === null && timeouts.default !== undefined) {
     timeoutMs = timeouts.default
@@ -753,7 +752,6 @@ const executeService = async (serviceName, action, args, services, source, chain
  */
 const executeChain = async (chain, services, source, timeouts = {}, contextStack = [], taskContext = null, inspector = null, querySettings = {}) => {
   let result = null
-  let currentContextStack = [...contextStack]
   
   for (let i = 0; i < chain.length; i++) {
     const descriptor = chain[i]
@@ -772,8 +770,12 @@ const executeChain = async (chain, services, source, timeouts = {}, contextStack
       descriptor: descriptor
     } : null
     
+    // For chains, update the iteration value at the current nesting level
+    // Each chain step's result becomes the new iteration value at this level
+    const currentContextStack = result !== null ? [result, ...contextStack.slice(1)] : contextStack
+    
     try {
-      result = await executeService(serviceName, action, args, services, source, result, timeouts, currentContextStack, stepContext, inspector, querySettings)
+      result = await executeService(serviceName, action, args, services, source, timeouts, currentContextStack, stepContext, inspector, querySettings)
     } catch (error) {
       // Add chain step to service chain for error context
       if (!error.serviceChain) {
@@ -782,9 +784,6 @@ const executeChain = async (chain, services, source, timeouts = {}, contextStack
       error.serviceChain.push(`${serviceName}:${action}`)
       throw error
     }
-    
-    // Add chain result to context stack for subsequent steps
-    currentContextStack = [...currentContextStack, result]
   }
   
   return result
@@ -909,7 +908,7 @@ export default async function query(config) {
           // Resolve the data source first
           const data = dataSource.startsWith('$.') ? retrieve(dataSource, results) : dataSource
           const finalArgs = withOnParameter(args, data)
-          return await executeService(serviceName, action, finalArgs, preparedServices, results, null, timeouts, [], { taskName: jobName, descriptor: descriptor }, inspector, resolvedSettings)
+          return await executeService(serviceName, action, finalArgs, preparedServices, results, timeouts, [], { taskName: jobName, descriptor: descriptor }, inspector, resolvedSettings)
         }
       })
       continue
@@ -922,7 +921,7 @@ export default async function query(config) {
       
       tasks.set(jobName, {
         deps,
-        execute: () => executeService(serviceName, action, args, preparedServices, results, null, timeouts, [], { taskName: jobName, descriptor: descriptor }, inspector, resolvedSettings)
+        execute: () => executeService(serviceName, action, args, preparedServices, results, timeouts, [], { taskName: jobName, descriptor: descriptor }, inspector, resolvedSettings)
       })
       continue
     }

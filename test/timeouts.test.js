@@ -221,5 +221,47 @@ describe('Timeout Tests', () => {
       // Last call should have received timeout: 400
       assert.strictEqual(receivedTimeout, 400)
     })
+    
+    it('should use service-specific timeout from settings', async () => {
+      const result = await query({
+        given: { value: 'test' },
+        services: {
+          slow: createDelayService(150, 'slow')
+        },
+        settings: {
+          timeout: {
+            default: 100,
+            slow: 200
+          }
+        },
+        query: {
+          result: ['slow', 'delay', { input: '$.given.value' }]
+        }
+      })
+      
+      assert.strictEqual(result.result, 'slow completed after 150ms')
+    })
+    
+    it('should prioritize legacy timeouts over settings timeouts', async () => {
+      const result = await query({
+        given: { value: 'test' },
+        services: {
+          slow: createDelayService(150, 'slow')
+        },
+        timeouts: {
+          slow: 200  // Legacy config should take priority
+        },
+        settings: {
+          timeout: {
+            slow: 100  // This should be ignored
+          }
+        },
+        query: {
+          result: ['slow', 'delay', { input: '$.given.value' }]
+        }
+      })
+      
+      assert.strictEqual(result.result, 'slow completed after 150ms')
+    })
   })
 })
