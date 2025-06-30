@@ -65,8 +65,7 @@ For detailed examples and advanced usage, see [HOW_MICROQL_WORKS.md](HOW_MICROQL
       maxArrayLength: 3,
       maxStringLength: 140
     }
-  },
-  timeouts: {}            // Legacy timeout configuration (deprecated)
+  }
 }
 ```
 

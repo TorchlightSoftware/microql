@@ -36,8 +36,10 @@ describe('Timeout Tests', () => {
           services: {
             slow: createDelayService(200, 'slow')
           },
-          timeouts: {
-            default: 100
+          settings: {
+            timeout: {
+              default: 100
+            }
           },
           query: {
             result: ['slow', 'delay', { input: '$.given.value' }]
@@ -53,8 +55,10 @@ describe('Timeout Tests', () => {
         services: {
           fast: createDelayService(50, 'fast')
         },
-        timeouts: {
-          default: 100
+        settings: {
+          timeout: {
+            default: 100
+          }
         },
         query: {
           result: ['fast', 'delay', { input: '$.given.value' }]
@@ -73,9 +77,11 @@ describe('Timeout Tests', () => {
         services: {
           medium: createDelayService(150, 'medium')
         },
-        timeouts: {
-          default: 100,
-          medium: 200
+        settings: {
+          timeout: {
+            default: 100,
+            medium: 200
+          }
         },
         query: {
           result: ['medium', 'delay', { input: '$.given.value' }]
@@ -91,9 +97,11 @@ describe('Timeout Tests', () => {
         services: {
           slow: createDelayService(150, 'slow')
         },
-        timeouts: {
-          default: 100,
-          slow: 120
+        settings: {
+          timeout: {
+            default: 100,
+            slow: 120
+          }
         },
         query: {
           result: ['slow', 'delay', { 
@@ -113,8 +121,10 @@ describe('Timeout Tests', () => {
           services: {
             slow: createDelayService(150, 'slow')
           },
-          timeouts: {
-            default: 1000
+          settings: {
+            timeout: {
+              default: 1000
+            }
           },
           query: {
             result: ['slow', 'delay', { 
@@ -138,9 +148,11 @@ describe('Timeout Tests', () => {
           medium: createDelayService(80, 'medium'),
           slow: createDelayService(150, 'slow')
         },
-        timeouts: {
-          default: 100,
-          slow: 200
+        settings: {
+          timeout: {
+            default: 100,
+            slow: 200
+          }
         },
         query: {
           fastResult: ['fast', 'delay', { input: '$.given.value' }],
@@ -161,8 +173,10 @@ describe('Timeout Tests', () => {
           step1: createDelayService(50, 'step1'),
           step2: createDelayService(60, 'step2')
         },
-        timeouts: {
-          default: 200
+        settings: {
+          timeout: {
+            default: 200
+          }
         },
         query: {
           chained: [
@@ -183,8 +197,10 @@ describe('Timeout Tests', () => {
             step1: createDelayService(50, 'step1'),
             step2: createDelayService(150, 'step2')
           },
-          timeouts: {
-            default: 100
+          settings: {
+            timeout: {
+              default: 100
+            }
           },
           query: {
             chained: [
@@ -208,9 +224,11 @@ describe('Timeout Tests', () => {
             return 'completed'
           }
         },
-        timeouts: {
-          default: 200,
-          test: 300
+        settings: {
+          timeout: {
+            default: 200,
+            test: 300
+          }
         },
         query: {
           withServiceTimeout: ['test', 'action', { data: 'x' }],
@@ -222,7 +240,7 @@ describe('Timeout Tests', () => {
       assert.strictEqual(receivedTimeout, 400)
     })
     
-    it('should use service-specific timeout from settings', async () => {
+    it('should use service-specific timeout', async () => {
       const result = await query({
         given: { value: 'test' },
         services: {
@@ -232,28 +250,6 @@ describe('Timeout Tests', () => {
           timeout: {
             default: 100,
             slow: 200
-          }
-        },
-        query: {
-          result: ['slow', 'delay', { input: '$.given.value' }]
-        }
-      })
-      
-      assert.strictEqual(result.result, 'slow completed after 150ms')
-    })
-    
-    it('should prioritize legacy timeouts over settings timeouts', async () => {
-      const result = await query({
-        given: { value: 'test' },
-        services: {
-          slow: createDelayService(150, 'slow')
-        },
-        timeouts: {
-          slow: 200  // Legacy config should take priority
-        },
-        settings: {
-          timeout: {
-            slow: 100  // This should be ignored
           }
         },
         query: {

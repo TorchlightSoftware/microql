@@ -435,7 +435,7 @@ const compileServiceFunction = (serviceDescriptor, services, source, contextStac
       // Execute as regular service call
       const [serviceName, action, args] = actualDescriptor
       const resolvedArgs = resolveArgsWithContext(args, source, newContextStack)
-      return await executeService(serviceName, action, resolvedArgs, services, source, {}, newContextStack, null, inspector, querySettings)
+      return await executeService(serviceName, action, resolvedArgs, services, source, newContextStack, null, inspector, querySettings)
     }
     
     throw new Error('Invalid service descriptor for function compilation')
@@ -565,7 +565,7 @@ const guardServiceExecution = async (serviceName, action, args, service, taskCon
 /**
  * Execute a single service call
  */
-const executeService = async (serviceName, action, args, services, source, timeouts = {}, contextStack = [], taskContext = null, inspector = null, querySettings = {}) => {
+const executeService = async (serviceName, action, args, services, source, contextStack = [], taskContext = null, inspector = null, querySettings = {}) => {
   const service = services[serviceName]
   if (!service) {
     const taskInfo = taskContext ? ` in query task '${taskContext.taskName}'` : ''
@@ -677,22 +677,12 @@ const executeService = async (serviceName, action, args, services, source, timeo
     }
   }
   
-  // Use service-specific timeout if no arg timeout provided
-  if (timeoutMs === null && timeouts[serviceName] !== undefined) {
-    timeoutMs = timeouts[serviceName]
-  }
-  
-  // Use service-specific timeout from settings if no other timeout provided
+  // Use service-specific timeout from settings if no arg timeout provided
   if (timeoutMs === null && querySettings?.timeout?.[serviceName] !== undefined) {
     timeoutMs = querySettings.timeout[serviceName]
   }
   
-  // Use default timeout if no other timeout specified
-  if (timeoutMs === null && timeouts.default !== undefined) {
-    timeoutMs = timeouts.default
-  }
-  
-  // Use settings default timeout if nothing else specified
+  // Use default timeout from settings if nothing else specified
   if (timeoutMs === null && querySettings?.timeout?.default !== undefined) {
     timeoutMs = querySettings.timeout.default
   }
@@ -750,7 +740,7 @@ const executeService = async (serviceName, action, args, services, source, timeo
 /**
  * Execute a chain of service calls
  */
-const executeChain = async (chain, services, source, timeouts = {}, contextStack = [], taskContext = null, inspector = null, querySettings = {}) => {
+const executeChain = async (chain, services, source, contextStack = [], taskContext = null, inspector = null, querySettings = {}) => {
   let result = null
   
   for (let i = 0; i < chain.length; i++) {
@@ -775,7 +765,7 @@ const executeChain = async (chain, services, source, timeouts = {}, contextStack
     const currentContextStack = result !== null ? [result, ...contextStack.slice(1)] : contextStack
     
     try {
-      result = await executeService(serviceName, action, args, services, source, timeouts, currentContextStack, stepContext, inspector, querySettings)
+      result = await executeService(serviceName, action, args, services, source, currentContextStack, stepContext, inspector, querySettings)
     } catch (error) {
       // Add chain step to service chain for error context
       if (!error.serviceChain) {
@@ -822,7 +812,6 @@ export default async function query(config) {
     query: jobs, 
     methods = [], 
     select, 
-    timeouts = {}, 
     onError: queryOnError,
     settings = {}
   } = config
@@ -884,7 +873,7 @@ export default async function query(config) {
       
       tasks.set(jobName, {
         deps: Array.from(allDeps),
-        execute: () => executeChain(chain, preparedServices, results, timeouts, [], { taskName: jobName, descriptor: chain }, inspector, resolvedSettings)
+        execute: () => executeChain(chain, preparedServices, results, [], { taskName: jobName, descriptor: chain }, inspector, resolvedSettings)
       })
       continue
     }
@@ -908,7 +897,7 @@ export default async function query(config) {
           // Resolve the data source first
           const data = dataSource.startsWith('$.') ? retrieve(dataSource, results) : dataSource
           const finalArgs = withOnParameter(args, data)
-          return await executeService(serviceName, action, finalArgs, preparedServices, results, timeouts, [], { taskName: jobName, descriptor: descriptor }, inspector, resolvedSettings)
+          return await executeService(serviceName, action, finalArgs, preparedServices, results, [], { taskName: jobName, descriptor: descriptor }, inspector, resolvedSettings)
         }
       })
       continue
@@ -921,7 +910,7 @@ export default async function query(config) {
       
       tasks.set(jobName, {
         deps,
-        execute: () => executeService(serviceName, action, args, preparedServices, results, timeouts, [], { taskName: jobName, descriptor: descriptor }, inspector, resolvedSettings)
+        execute: () => executeService(serviceName, action, args, preparedServices, results, [], { taskName: jobName, descriptor: descriptor }, inspector, resolvedSettings)
       })
       continue
     }
