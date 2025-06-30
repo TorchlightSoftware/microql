@@ -467,11 +467,30 @@ const resolveArgs = (args, source, chainResult = null) => {
 /**
  * Guard function for service execution - provides context about where errors occur
  */
-const guardServiceExecution = async (serviceName, action, args, service, taskContext, inspector) => {
+const guardServiceExecution = async (serviceName, action, args, service, taskContext, inspector, querySettings) => {
   try {
+    // Debug logging when entering service
+    if (querySettings?.debug) {
+      console.log(`🔵 ENTERING ${serviceName}:${action}`)
+      console.log(`   Args:`, JSON.stringify(args, null, 2))
+    }
+    
     const result = await service(action, args)
+    
+    // Debug logging when leaving service
+    if (querySettings?.debug) {
+      console.log(`🟢 LEAVING ${serviceName}:${action}`)
+      console.log(`   Result:`, JSON.stringify(result, null, 2))
+    }
+    
     return result
   } catch (error) {
+    // Debug logging when service throws error
+    if (querySettings?.debug) {
+      console.log(`🔴 ERROR in ${serviceName}:${action}`)
+      console.log(`   Error:`, error.message)
+    }
+    
     // Create enhanced error with MicroQL context
     const enhancedError = new Error(error.message)
     enhancedError.originalError = error
@@ -628,7 +647,7 @@ const executeService = async (serviceName, action, args, services, source, chain
   // Execute service with retry, guard, timeout, and error handling
   const executeWithRetry = async () => {
     try {
-      const servicePromise = guardServiceExecution(serviceName, action, argsWithoutReserved, service, taskContext, inspector)
+      const servicePromise = guardServiceExecution(serviceName, action, argsWithoutReserved, service, taskContext, inspector, querySettings)
       return await withTimeout(servicePromise, timeoutMs, serviceName, action, argsWithoutReserved, taskContext)
     } catch (error) {
       // If onError descriptor is defined, compile and call it with error context
@@ -758,7 +777,8 @@ export default async function query(config) {
   
   const resolvedSettings = {
     timeout: { ...defaultSettings.timeout, ...settings.timeout },
-    inspect: { ...defaultSettings.inspect, ...settings.inspect }
+    inspect: { ...defaultSettings.inspect, ...settings.inspect },
+    debug: settings.debug
   }
   
   const inspector = createCompactInspector(resolvedSettings.inspect)
@@ -853,11 +873,17 @@ export default async function query(config) {
   const executeTask = async (taskName) => {
     // If already executed, return cached result
     if (executed.has(taskName)) {
+      if (resolvedSettings?.debug) {
+        console.log(`⏭️  TASK ${taskName}: Using cached result`)
+      }
       return results[taskName]
     }
     
     // If currently executing, wait for it
     if (executing.has(taskName)) {
+      if (resolvedSettings?.debug) {
+        console.log(`⏸️  TASK ${taskName}: Waiting for concurrent execution`)
+      }
       return await executing.get(taskName)
     }
     
@@ -865,6 +891,9 @@ export default async function query(config) {
     if (!task) {
       // Check if it's a built-in value like 'given'
       if (taskName === 'given' && given) {
+        if (resolvedSettings?.debug) {
+          console.log(`📋 TASK ${taskName}: Using built-in value`)
+        }
         executed.add(taskName)
         return given
       }
@@ -873,6 +902,10 @@ export default async function query(config) {
     
     const promise = (async () => {
       try {
+        if (resolvedSettings?.debug) {
+          console.log(`🔄 TASK ${taskName}: Starting execution`)
+        }
+        
         // Execute dependencies first
         for (const depName of task.deps) {
           await executeTask(depName)
@@ -882,6 +915,11 @@ export default async function query(config) {
         const result = await task.execute()
         results[taskName] = result
         executed.add(taskName)
+        
+        if (resolvedSettings?.debug) {
+          console.log(`✅ TASK ${taskName}: Completed with ${Array.isArray(result) ? `Array(${result.length})` : typeof result}`)
+        }
+        
         return result
       } catch (error) {
         // If error doesn't already have task context, add it
@@ -903,15 +941,41 @@ export default async function query(config) {
   try {
     // Execute all tasks
     const allTaskNames = Array.from(tasks.keys())
+    
+    if (settings?.debug) {
+      console.log(`🚀 EXECUTING TASKS: ${allTaskNames.join(', ')}`)
+    }
+    
     await Promise.all(allTaskNames.map(name => executeTask(name)))
+    
+    if (settings?.debug) {
+      console.log(`📊 RESULTS SUMMARY:`)
+      for (const [key, value] of Object.entries(results)) {
+        console.log(`   ${key}: ${Array.isArray(value) ? `Array(${value.length})` : typeof value}`)
+      }
+    }
     
     // Select specified results if user requests
     if (Array.isArray(select)) {
-      return Object.fromEntries(
+      const selectedResults = Object.fromEntries(
         select.map(key => [key, results[key]])
       )
+      if (settings?.debug) {
+        console.log(`🎯 SELECTING: ${select.join(', ')}`)
+        console.log(`📤 FINAL RESULT:`, JSON.stringify(selectedResults, null, 2))
+      }
+      return selectedResults
     } else if (typeof select === 'string') {
-      return results[select]
+      const selectedResult = results[select]
+      if (settings?.debug) {
+        console.log(`🎯 SELECTING: ${select}`)
+        console.log(`📤 FINAL RESULT:`, Array.isArray(selectedResult) ? `Array(${selectedResult.length})` : JSON.stringify(selectedResult, null, 2))
+      }
+      return selectedResult
+    }
+    
+    if (settings?.debug) {
+      console.log(`📤 FINAL RESULT: All results returned`)
     }
     
     return results
