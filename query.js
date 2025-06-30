@@ -434,11 +434,8 @@ const compileServiceFunction = (serviceDescriptor, services, source, contextStac
       
       // Execute as regular service call
       const [serviceName, action, args] = actualDescriptor
-      const resolvedArgs = resolveArgsWithContext(args, source, newContextStack)
-      return await executeService(serviceName, action, resolvedArgs, services, source, newContextStack, null, inspector, querySettings)
-    } else if (typeof serviceDescriptor === 'object' && serviceDescriptor !== null && !Array.isArray(serviceDescriptor)) {
-      // Handle template objects - resolve @ symbols with current context
-      return resolveArgsWithContext(serviceDescriptor, source, newContextStack)
+      // Pass args without resolving - executeService will handle resolution while preserving special parameters
+      return await executeService(serviceName, action, args, services, source, newContextStack, null, inspector, querySettings)
     }
     
     throw new Error('Invalid service descriptor for function compilation')
@@ -462,8 +459,9 @@ export const resolveArgsWithContext = (args, source, contextStack = [], skipPara
       const atCount = countAtSymbols(value)
       
       if (value === '@'.repeat(atCount)) {
-        // Pure @ symbols - use absolute indexing
-        const contextIndex = atCount - 1 // @ = index 0, @@ = index 1, etc.
+        // Pure @ symbols - @ refers to most recent context (last item)
+        // @ = last item (length-1), @@ = second to last (length-2), etc.
+        const contextIndex = contextStack.length - atCount
         
         validateContextIndex(atCount, contextIndex, contextStack)
         
@@ -473,7 +471,8 @@ export const resolveArgsWithContext = (args, source, contextStack = [], skipPara
       // Handle @.field with context stack
       if (value.startsWith('@'.repeat(atCount) + '.')) {
         const fieldPath = value.slice(atCount + 1) // Remove @ symbols and dot
-        const contextIndex = atCount - 1 // @ = index 0, @@ = index 1, etc.
+        // @ refers to most recent context (last item)
+        const contextIndex = contextStack.length - atCount
         
         validateContextIndex(atCount, contextIndex, contextStack)
         
@@ -605,8 +604,8 @@ const executeService = async (serviceName, action, args, services, source, conte
       // Mark for function compilation
       functionsToCompile[key] = value
       skipParams.add(key)
-    } else if (paramInfo?.type === 'function' && typeof value === 'object' && value !== null) {
-      // Mark template objects for function compilation
+    } else if (paramInfo?.type === 'template' && typeof value === 'object' && value !== null) {
+      // Mark template for compilation to function
       functionsToCompile[key] = value
       skipParams.add(key)
     } else if (paramInfo?.type === 'inspect') {
@@ -621,7 +620,18 @@ const executeService = async (serviceName, action, args, services, source, conte
   
   // Now handle function compilation
   for (const [key, value] of Object.entries(functionsToCompile)) {
-    finalArgs[key] = compileServiceFunction(value, services, source, contextStack, inspector, querySettings)
+    const paramInfo = paramMetadata[key]
+    
+    if (paramInfo?.type === 'template') {
+      // Compile template to function with context layer
+      finalArgs[key] = async (iterationItem) => {
+        const newContextStack = [...contextStack, iterationItem]
+        return resolveArgsWithContext(value, source, newContextStack)
+      }
+    } else {
+      // Compile service descriptor to function
+      finalArgs[key] = compileServiceFunction(value, services, source, contextStack, inspector, querySettings)
+    }
   }
   
   // Handle inspect compilation - pass the inspector function or create from settings

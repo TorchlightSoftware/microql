@@ -110,8 +110,8 @@ const utilService = {
 
 // Mark parameters that need special handling
 utilService.map._params = {
-  fn: { type: 'function' },    // Compiled as service call function
-  template: { type: 'template' }  // Skip @ resolution, handle in service
+  fn: { type: 'function' },      // Compiled as service call function
+  template: { type: 'template' } // Compiled as template resolver function
 }
 
 // For services that need inspect settings (like util.print)
@@ -124,12 +124,13 @@ utilService.print._params = {
 
 MicroQL supports several parameter type annotations:
 
-- **`{type: 'function'}`** - Parameter contains service descriptor or template object that MicroQL compiles into a callable function with proper @ symbol resolution
+- **`{type: 'function'}`** - Parameter contains a service descriptor that MicroQL compiles into a callable function with proper @ symbol resolution
+- **`{type: 'template'}`** - Parameter contains a template object that MicroQL compiles into a function returning the resolved template
 - **`{type: 'inspect'}`** - Parameter receives the query's inspector function for consistent formatting
 
-#### Template Parameters as Functions
+#### Template Parameters
 
-Template objects are compiled as functions with full @ symbol support:
+Template objects marked with `{type: 'template'}` are compiled as functions with full @ symbol support:
 
 ```javascript
 // Query using template with nested @ context
@@ -143,10 +144,11 @@ Template objects are compiled as functions with full @ symbol support:
 }]
 ```
 
-When using `{type: 'function'}` for template objects, MicroQL compiles the template into a function that:
+When using `{type: 'template'}`, MicroQL compiles the template into a function that:
 - Receives the iteration item as a parameter
+- Adds the iteration item to the context stack
 - Returns the resolved template object with all @ symbols properly resolved
-- Handles nested context (@@, @@@, etc.) automatically
+- Handles nested context (@@, @@@, etc.) where @ refers to the most recent context
 
 These help MicroQL know how to handle special parameters while maintaining service independence.
 

@@ -21,7 +21,7 @@ export const withOnParameter = (args, onValue) => ({ on: onValue, ...args })
  * @throws {Error} If context index is invalid
  */
 export const validateContextIndex = (atCount, contextIndex, contextStack) => {
-  if (contextIndex >= contextStack.length) {
+  if (contextIndex < 0 || contextIndex >= contextStack.length) {
     throw new Error(`${'@'.repeat(atCount)} used but only ${contextStack.length} context levels available (@ through ${'@'.repeat(contextStack.length)})`)
   }
 }

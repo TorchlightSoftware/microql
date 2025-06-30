@@ -11,7 +11,7 @@ import { resolveArgsWithContext } from './query.js'
  */
 const COLORS = {
   red: '\x1b[31m',
-  green: '\x1b[32m', 
+  green: '\x1b[32m',
   yellow: '\x1b[33m',
   blue: '\x1b[34m',
   magenta: '\x1b[35m',
@@ -32,86 +32,41 @@ const COLOR_NAMES = ['green', 'yellow', 'blue', 'magenta', 'cyan', 'white']
 const util = {
   /**
    * Transform each item in a collection using a function or template
-   * 
-   * @param {Object} params - Parameters object
-   * @param {Array} [params.on] - Collection from method syntax (e.g., ['@.items', 'util:map', ...])
-   * @param {Array} [params.collection] - Collection from direct calls
-   * @param {Function} [params.fn] - Compiled function from MicroQL for transformation
-   * @param {Object} [params.template] - Template object with @ symbol references
-   * @param {Object} [params._services] - MicroQL internal services context
-   * @returns {Promise<Array>} Transformed collection
-   * 
-   * @example
-   * // Template usage
-   * ['util', 'map', { 
-   *   collection: [{ name: 'Alice' }, { name: 'Bob' }],
-   *   template: { greeting: 'Hello @.name' }
-   * }]
-   * // Returns: [{ greeting: 'Hello Alice' }, { greeting: 'Hello Bob' }]
-   * 
-   * @example  
-   * // Function usage (compiled by MicroQL)
-   * ['util', 'map', {
-   *   collection: [{ id: 1 }, { id: 2 }],
-   *   fn: ['service', 'process', { input: '@.id' }]
-   * }]
    */
-  async map({ on, collection, fn, template, _services }) {
-    const items = on || collection || []
-    if (!Array.isArray(items)) return []
-    
+  async map({ on, fn, template }) {
+    if (!Array.isArray(on)) throw new Error(`expected array, got ${typeof on}`)
+
     // Both templates and functions are now compiled functions by MicroQL
     const mapFunction = template || fn
     if (mapFunction && typeof mapFunction === 'function') {
-      const results = await Promise.all(
-        items.map(item => mapFunction(item))
-      )
-      return results
+      return Promise.all(on.map(mapFunction))
     }
-    
+
     throw new Error('Either template or fn must be provided for map operation')
   },
-  
+
   /**
    * Filter collection based on a predicate function
    */
-  async filter({ on, collection, predicate, _services }) {
-    const items = on || collection || []
-    if (!Array.isArray(items)) return []
-    
+  async filter({ on, predicate }) {
+    if (!Array.isArray(on)) throw new Error(`expected array, got ${typeof on}`)
+
     if (!predicate || typeof predicate !== 'function') {
       throw new Error('Predicate function is required for filter operation')
     }
-    
-    const results = await Promise.all(
-      items.map(async item => {
-        const keep = await predicate(item)
-        return { item, keep }
-      })
-    )
-    
-    return results.filter(({ keep }) => keep).map(({ item }) => item)
+
+    const keepResults = await Promise.all(on.map(predicate))
+    return on.filter((_, index) => keepResults[index])
   },
-  
+
   /**
    * Map and then flatten the results
    */
-  async flatMap({ on, collection, fn, _services }) {
-    const items = on || collection || []
-    if (!Array.isArray(items)) return []
-    
-    if (!fn || typeof fn !== 'function') {
-      throw new Error('Function is required for flatMap operation')
-    }
-    
-    const results = await Promise.all(
-      items.map(item => fn(item))
-    )
-    
-    // Flatten the results
+  async flatMap({ on, template, fn }) {
+    const results = await util.map({on, template, fn})
     return results.flat()
   },
-  
+
   /**
    * Concatenate multiple arrays into a single array
    */
@@ -119,63 +74,45 @@ const util = {
     if (!Array.isArray(args)) {
       throw new Error('Args must be an array of arrays')
     }
-    
-    const result = []
-    for (const arr of args) {
-      if (Array.isArray(arr)) {
-        result.push(...arr)
-      }
-    }
-    
-    return result
+
+    return [].concat(...args)
   },
-  
+
   /**
    * Conditional logic - return different values based on test
    */
-  async when({ test, then, or, _services, _context }) {
-    let testResult
-    
-    if (typeof test === 'boolean') {
-      testResult = test
-    } else if (typeof test === 'function') {
-      // Compiled function - call with context
-      testResult = await test(_context)
-    } else {
-      testResult = Boolean(test)
-    }
-    
-    return testResult ? then : or
+  async when({ test, then, or }) {
+    return test ? then : or
   },
-  
+
   /**
    * Equality comparison
    */
   async eq({ l, r }) {
     return l === r
   },
-  
+
   /**
    * Greater than comparison
    */
   async gt({ l, r }) {
     return l > r
   },
-  
+
   /**
    * Less than comparison
    */
   async lt({ l, r }) {
     return l < r
   },
-  
+
   /**
    * Check if value exists (not null/undefined)
    */
   async exists({ value }) {
     return value != null
   },
-  
+
   /**
    * Get length of array or string
    */
@@ -185,107 +122,71 @@ const util = {
 
   /**
    * Pick specific fields from an object (similar to lodash pick)
-   * 
-   * @param {Object} params - Parameters object
-   * @param {*} [params.on] - Object from method syntax (e.g., ['@.data', 'util:pick', ...])
-   * @param {*} [params.obj] - Object from direct calls
-   * @param {Array} params.fields - Array of field names to pick
-   * @returns {Promise<Object>} New object with only specified fields
-   * 
-   * @example
-   * // Pick text and href from each item
-   * ['@.items', 'util:map', {
-   *   fn: ['@@', 'util:pick', { fields: ['text', 'href'] }]
-   * }]
    */
-  async pick({ on, obj, fields }) {
-    const source = on || obj
-    
-    if (!source || typeof source !== 'object' || Array.isArray(source)) {
-      return {}
+  async pick({ on, fields }) {
+    if (!on || typeof on !== 'object' || Array.isArray(on)) {
+      throw new Error('`on` must be an object')
     }
-    
+
     if (!Array.isArray(fields)) {
-      throw new Error('Fields must be an array of field names')
+      throw new Error('`fields` must be an array of field names')
     }
-    
+
     const result = {}
     for (const field of fields) {
-      if (source.hasOwnProperty(field)) {
-        result[field] = source[field]
+      if (on.hasOwnProperty(field)) {
+        result[field] = on[field]
       }
     }
-    
+
     return result
   },
 
   /**
    * Print values to console with formatting options and color coding
    * Uses query-level inspect settings for consistent formatting
-   * 
-   * @param {Object} params - Parameters object
-   * @param {*} [params.on] - Value from method syntax (e.g., ['@.data', 'util:print', ...])
-   * @param {*} [params.value] - Value from direct calls
-   * @param {Object} [params.inspect] - Inspect settings from query or override (handled by MicroQL)
-   * @param {string} [params.color] - Color for output (red, green, yellow, blue, magenta, cyan, white)
-   * @param {boolean} [params.ts=true] - Whether to include timestamp
-   * @returns {Promise<*>} Returns the input value for chaining
-   * 
-   * @example
-   * // Method syntax with color for database calls
-   * ['@.data', 'util:print', { color: 'blue' }]
-   * 
-   * @example
-   * // Scraper logging in cyan with custom inspect settings
-   * ['util', 'print', { value: 'Scraped 10 items', color: 'cyan', inspect: { depth: 1 } }]
    */
-  async print({ on, value, inspect: inspectSettings, color, ts = true }) {
-    const printValue = on !== undefined ? on : value
-    
-    // ANSI color codes for terminal output
-    const colors = COLORS
-    
+  async print({ on, inspect, color, ts = true }) {
+    if (inspect && typeof inspect !== 'object') throw new Error("`inspect` if provided must be an object")
+
+    const inspectSettings = {
+      depth: 3,
+      colors: false,
+      compact: false,
+      maxArrayLength: 10,
+      maxStringLength: 200,
+      ...inspect
+    }
+
     // Format timestamp if enabled
     const timestamp = ts ? `[${new Date().toISOString()}] ` : ''
-    
+
     // Use provided inspect settings or defaults if inspector function wasn't passed
-    const { inspect } = await import('util')
+    const util = await import('util')
     let formatted
-    
-    if (typeof printValue === 'string') {
-      formatted = printValue
-    } else if (typeof inspectSettings === 'function') {
-      // inspectSettings is actually the compiled inspector function from MicroQL
-      formatted = inspectSettings(printValue)
+
+    if (typeof on === 'string') {
+      formatted = on
     } else {
-      // Fallback to default inspect with provided settings
-      const defaultSettings = {
-        depth: 3,
-        colors: false,
-        compact: false,
-        maxArrayLength: 10,
-        maxStringLength: 200,
-        ...inspectSettings
-      }
-      formatted = inspect(printValue, defaultSettings)
+      formatted = util.inspect(on, inspectSettings)
     }
-    
+
     // Apply color if specified
-    const colorCode = color && colors[color] ? colors[color] : ''
-    const resetCode = colorCode ? colors.reset : ''
-    
+    const colorCode = COLORS[color] || ''
+    const resetCode = colorCode ? COLORS.reset : ''
+
     // Print with formatting and color
     process.stdout.write(colorCode + timestamp + formatted + resetCode + '\n')
-    
+
     // Return the original value for chaining
-    return printValue
+    return on
   }
 }
 
 // Parameter metadata for MicroQL function compilation
 util.map._params = {
   fn: { type: 'function' },
-  template: { type: 'function' }  // Templates compiled as functions with @ resolution
+  template: { type: 'template' }
 }
 
 util.filter._params = {
@@ -293,7 +194,8 @@ util.filter._params = {
 }
 
 util.flatMap._params = {
-  fn: { type: 'function' }
+  fn: { type: 'function' },
+  template: { type: 'template' }
 }
 
 util.when._params = {

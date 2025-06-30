@@ -51,14 +51,14 @@ describe('Util Service Tests', () => {
   
   describe('Direct Service Usage', () => {
     
-    it('should map with template', async () => {
+    it('should map with function', async () => {
       const result = await util.map({
-        collection: testData.people,
-        template: {
-          fullName: '@.name',
-          yearsOld: '@.age',
-          team: '@.department'
-        }
+        on: testData.people,
+        fn: async (person) => ({
+          fullName: person.name,
+          yearsOld: person.age,
+          team: person.department
+        })
       })
       
       assert.strictEqual(result.length, 4)
@@ -128,7 +128,7 @@ describe('Util Service Tests', () => {
         services: { util },
         query: {
           summary: ['util', 'map', {
-            collection: '$.given.people',
+            on: '$.given.people',
             template: {
               name: '@.name',
               info: '@.department'
@@ -152,7 +152,7 @@ describe('Util Service Tests', () => {
         services: mockServices,
         query: {
           formatted: ['util', 'map', {
-            collection: '$.given.people',
+            on: '$.given.people',
             fn: ['data', 'formatName', { person: '@' }]
           }]
         },
@@ -168,7 +168,7 @@ describe('Util Service Tests', () => {
         services: mockServices,
         query: {
           engineers: ['util', 'filter', {
-            collection: '$.given.people',
+            on: '$.given.people',
             predicate: ['data', 'isEngineer', { person: '@' }]
           }]
         },
@@ -184,7 +184,7 @@ describe('Util Service Tests', () => {
         services: mockServices,
         query: {
           allCategories: ['util', 'flatMap', {
-            collection: '$.given.products',
+            on: '$.given.products',
             fn: ['data', 'getCategories', { product: '@' }]
           }]
         },
@@ -247,7 +247,7 @@ describe('Util Service Tests', () => {
         query: {
           // Calculate total for each order
           orderTotals: ['util', 'map', {
-            collection: '$.given.orders',
+            on: '$.given.orders',
             fn: ['data', 'calculateTotal', { 
               items: '@.items',
               products: testData.products
@@ -256,7 +256,7 @@ describe('Util Service Tests', () => {
           
           // Filter to orders over $30
           bigOrders: ['util', 'filter', {
-            collection: '$.orderTotals',
+            on: '$.orderTotals',
             predicate: ['util', 'gt', { l: '@', r: 30 }]
           }],
           
