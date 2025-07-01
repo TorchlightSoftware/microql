@@ -161,6 +161,23 @@ const util = {
     // Format timestamp if enabled
     const timestamp = ts ? `[${new Date().toISOString()}] ` : ''
 
+    // Filter hidden properties (starting with _) before formatting
+    const filterHidden = (val) => {
+      if (Array.isArray(val)) {
+        return val.map(filterHidden)
+      }
+      if (typeof val === 'object' && val !== null) {
+        const filtered = {}
+        for (const [key, value] of Object.entries(val)) {
+          if (!key.startsWith('_')) {
+            filtered[key] = filterHidden(value)
+          }
+        }
+        return filtered
+      }
+      return val
+    }
+
     // Use provided inspect settings or defaults if inspector function wasn't passed
     const util = await import('util')
     let formatted
@@ -168,7 +185,8 @@ const util = {
     if (typeof on === 'string') {
       formatted = on
     } else {
-      formatted = util.inspect(on, inspectSettings)
+      const filtered = filterHidden(on)
+      formatted = util.inspect(filtered, inspectSettings)
     }
 
     // Apply color if specified
