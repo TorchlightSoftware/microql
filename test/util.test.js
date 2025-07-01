@@ -112,7 +112,7 @@ describe('Util Service Tests', () => {
     
     it('should pick fields from objects', async () => {
       const result = await util.pick({
-        obj: { name: 'Alice', age: 30, email: 'alice@example.com', secret: 'hidden' },
+        on: { name: 'Alice', age: 30, email: 'alice@example.com', secret: 'hidden' },
         fields: ['name', 'email']
       })
       
@@ -294,7 +294,7 @@ describe('Util Service Tests', () => {
         services: { util },
         query: {
           printed: ['util', 'print', { 
-            value: 'Hello World', 
+            on: 'Hello World', 
             color: 'blue',
             ts: false
           }]

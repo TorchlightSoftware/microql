@@ -203,7 +203,7 @@ util.when._params = {
 }
 
 util.print._params = {
-  inspect: { type: 'inspect' }  // Use query-level inspect settings
+  // No special parameters - all arguments passed as-is
 }
 
 export default util

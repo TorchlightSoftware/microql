@@ -23,6 +23,7 @@
 
 import retrieve from './retrieve.js'
 import { COLOR_NAMES } from './util.js'
+import utilService from './util.js'
 import { inspect } from 'util'
 
 /** @type {RegExp} JSONPath dependency pattern for $.queryName references */
@@ -85,6 +86,51 @@ const createDebugPrinter = (services, querySettings = {}) => {
     } catch (e) {
       // Fallback to console.log if util:print fails
       console.log(`[${new Date().toISOString()}] ${formattedMessage}`, value)
+    }
+  }
+}
+
+/**
+ * Create a query debug printer for colored query status messages
+ * @param {Object} services - Services object containing util service
+ * @param {Object} querySettings - Query settings with inspect configuration
+ * @returns {Function} Query debug print function
+ */
+const createQueryDebugPrinter = (services, querySettings = {}) => {
+  const utilService = services?.util
+  if (!utilService) {
+    // Fallback if util service not available
+    return (queryName, message, result = null) => {
+      console.log(`${message} ${queryName}`)
+      if (result !== null) {
+        console.log(result)
+      }
+    }
+  }
+  
+  return async (queryName, message, result = null) => {
+    const color = getServiceColor(queryName)
+    
+    try {
+      await utilService.print({
+        on: `${message} ${queryName}`,
+        color,
+        ts: false
+      })
+      
+      if (result !== null) {
+        await utilService.print({
+          on: result,
+          inspect: querySettings.inspect,
+          ts: false
+        })
+      }
+    } catch (e) {
+      // Fallback to console.log if util:print fails
+      console.log(`${message} ${queryName}`)
+      if (result !== null) {
+        console.log(result)
+      }
     }
   }
 }
@@ -200,10 +246,9 @@ const defaultErrorHandler = (error, context, settings = {}) => {
     formattedError = `${context ? `In ${context}: ` : ''}${error.message}`
   }
   
-  console.error(`${red}${formattedError}${reset}`)
-  
-  // Only exit if not in test environment
+  // Only print and exit if not in test environment
   if (process.env.NODE_ENV !== 'test' && !process.env.MOCHA) {
+    console.error(`${red}${formattedError}${reset}`)
     process.exit(1)
   }
 }
@@ -470,9 +515,9 @@ export const resolveArgsWithContext = (args, source, contextStack = [], skipPara
       const atCount = countAtSymbols(value)
       
       if (value === '@'.repeat(atCount)) {
-        // Pure @ symbols - @ refers to most recent context (last item)
-        // @ = last item (length-1), @@ = second to last (length-2), etc.
-        const contextIndex = contextStack.length - atCount
+        // Pure @ symbols - @ refers to absolute context indexing
+        // @ = first context (contextStack[0]), @@ = second context (contextStack[1]), etc.
+        const contextIndex = atCount - 1
         
         validateContextIndex(atCount, contextIndex, contextStack)
         
@@ -853,10 +898,21 @@ export default async function query(config) {
   }
   
   // Prepare services (auto-wrap objects)
-  const preparedServices = prepareServices(services)
+  const servicesWithUtil = { ...services }
+  
+  // Auto-include util service for debug functionality if not already present
+  if (resolvedSettings.debug && !servicesWithUtil.util) {
+    servicesWithUtil.util = utilService
+  }
+  
+  const preparedServices = prepareServices(servicesWithUtil)
   
   // Create inspector with access to prepared services
   const inspector = createInspector(preparedServices, resolvedSettings.inspect)
+  
+  // Create query debug printer for colored output
+  const queryDebugPrint = resolvedSettings.debug ? 
+    createQueryDebugPrinter(preparedServices, resolvedSettings) : null
   
   const results = {}
   const queryMap = new Map()
@@ -951,7 +1007,9 @@ export default async function query(config) {
     
     const promise = (async () => {
       try {
-        console.log(`🔄 Starting QUERY ${queryName}`)
+        if (queryDebugPrint) {
+          await queryDebugPrint(queryName, '🔄 Starting QUERY')
+        }
         
         // Execute dependencies first
         for (const depName of query.deps) {
@@ -963,9 +1021,9 @@ export default async function query(config) {
         results[queryName] = result
         executed.add(queryName)
         
-        // Always show query completion
-        console.log(`✅ Completed QUERY ${queryName}`)
-        console.log(inspector(result))
+        if (queryDebugPrint) {
+          await queryDebugPrint(queryName, '✅ Completed QUERY', inspector(result))
+        }
         
         return result
       } catch (error) {
@@ -986,9 +1044,6 @@ export default async function query(config) {
   try {
     // Execute all queries
     const allQueryNames = Array.from(queryMap.keys())
-    
-    // Always show what queries are being executed
-    console.log(`🚀 EXECUTING QUERIES: ${allQueryNames.join(', ')}`)
     
     await Promise.all(allQueryNames.map(name => executeQuery(name)))
     
