@@ -149,15 +149,6 @@ const util = {
   async print({ on, settings, color, ts = true }) {
     if (settings && typeof settings !== 'object') throw new Error("`settings` if provided must be an object")
 
-    const inspectSettings = {
-      depth: 3,
-      colors: false,
-      compact: false,
-      maxArrayLength: 10,
-      maxStringLength: 200,
-      ...settings?.inspect
-    }
-
     // Format timestamp if enabled
     const timestamp = ts ? `[${new Date().toISOString()}] ` : ''
 
@@ -186,7 +177,7 @@ const util = {
       formatted = on
     } else {
       const filtered = filterHidden(on)
-      formatted = util.inspect(filtered, inspectSettings)
+      formatted = util.inspect(filtered, settings?.inspect)
     }
 
     // Apply color if specified

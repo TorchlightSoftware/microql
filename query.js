@@ -126,6 +126,30 @@ const formatError = (error, inspectSettings) => {
 }
 
 /**
+ * Deep merge two objects, with the second object taking precedence
+ * @param {Object} target - The target object (query settings)
+ * @param {Object} source - The source object (service call settings)
+ * @returns {Object} Merged object
+ */
+const deepMerge = (target, source) => {
+  if (!source || typeof source !== 'object') return target
+  if (!target || typeof target !== 'object') return source
+  
+  const result = { ...target }
+  
+  for (const [key, value] of Object.entries(source)) {
+    if (typeof value === 'object' && value !== null && !Array.isArray(value) && 
+        typeof result[key] === 'object' && result[key] !== null && !Array.isArray(result[key])) {
+      result[key] = deepMerge(result[key], value)
+    } else {
+      result[key] = value
+    }
+  }
+  
+  return result
+}
+
+/**
  * Default error handler - prints error in red and exits
  * @param {Error} error - The error to handle
  * @param {string} context - Error context (e.g., query name)
@@ -211,6 +235,115 @@ const withRetry = async (fn, retries, serviceName, action) => {
 
   // All attempts failed
   throw lastError
+}
+
+/**
+ * Wrap a function with guard execution (debug logging and error context)
+ * @param {Function} fn - Function to wrap
+ * @param {Object} context - Execution context
+ * @returns {Function} Wrapped function with guard logic
+ */
+const withGuard = (fn, { serviceName, action, debugPrinter, querySettings, queryContext }) => {
+  let callCount = 0
+  const maxCalls = querySettings.inspect?.maxArrayLength || Infinity
+  
+  return async (...args) => {
+    callCount++
+    
+    // Only debug the first maxCalls iterations, then go silent
+    if (querySettings?.debug && debugPrinter && callCount <= maxCalls) {
+      await debugPrinter.service(serviceName, action, '🔵 ENTERING', args[0])
+    }
+    
+    try {
+      const result = await fn(...args)
+      
+      if (querySettings?.debug && debugPrinter && callCount <= maxCalls) {
+        await debugPrinter.service(serviceName, action, '🟢 LEAVING', result)
+      }
+      
+      return result
+    } catch (error) {
+      // Always show errors, regardless of maxCalls
+      if (querySettings?.debug && debugPrinter) {
+        await debugPrinter.service(serviceName, action, '🔴 ERROR', `Error: ${error.message}`)
+      }
+      
+      // Enhance error with context
+      error.serviceName = serviceName
+      error.action = action  
+      error.queryName = queryContext?.queryName
+      error.args = args[0]
+      error.serviceChain = queryContext?.serviceChain || []
+      
+      throw error
+    }
+  }
+}
+
+/**
+ * Wrap a function with timeout logic
+ * @param {Function} fn - Function to wrap
+ * @param {number} timeoutMs - Timeout in milliseconds
+ * @param {string} serviceName - Service name for error context
+ * @param {string} action - Action name for error context
+ * @param {Object} queryContext - Query context for error context
+ * @returns {Function} Wrapped function with timeout logic
+ */
+const withTimeoutWrapper = (fn, timeoutMs, serviceName, action, queryContext) => {
+  if (!timeoutMs || timeoutMs <= 0) {
+    return fn
+  }
+  
+  return async (...args) => {
+    return Promise.race([
+      fn(...args),
+      new Promise((_, reject) => {
+        setTimeout(() => {
+          const timeoutError = new Error(`Service '${serviceName}.${action}' timed out after ${timeoutMs}ms`)
+          timeoutError.serviceName = serviceName
+          timeoutError.action = action
+          timeoutError.args = args[0]
+          timeoutError.queryName = queryContext?.queryName
+          timeoutError.serviceChain = queryContext?.serviceChain || []
+          reject(timeoutError)
+        }, timeoutMs)
+      })
+    ])
+  }
+}
+
+/**
+ * Wrap a function with retry logic
+ * @param {Function} fn - Function to wrap
+ * @param {number} retries - Number of retry attempts
+ * @param {string} serviceName - Service name for error context
+ * @param {string} action - Action name for error context
+ * @returns {Function} Wrapped function with retry logic
+ */
+const withRetryWrapper = (fn, retries, serviceName, action) => {
+  if (retries <= 0) {
+    return fn
+  }
+  
+  return async (...args) => {
+    let lastError
+    
+    // Try up to retries + 1 times (initial attempt + retries)
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        return await fn(...args)
+      } catch (error) {
+        lastError = error
+        
+        if (attempt < retries) {
+          console.log(`Service '${serviceName}.${action}' failed (attempt ${attempt + 1}/${retries + 1}), retrying...`)
+        }
+      }
+    }
+    
+    throw lastError
+  }
 }
 
 /**
@@ -371,10 +504,40 @@ const validateContextIndex = (atCount, contextIndex, contextStack) => {
 }
 
 /**
- * Compile a service descriptor into a function that accepts iteration context
+ * Compile a service descriptor into a wrapped function that accepts iteration context
  */
-const compileServiceFunction = (serviceDescriptor, services, source, contextStack = [], querySettings = {}) => {
-  return async (iterationItem) => {
+const compileServiceFunction = (serviceDescriptor, services, source, contextStack = [], querySettings = {}, debugPrinter = null) => {
+  // Extract service information for wrapper metadata
+  let serviceName, action, args, timeoutMs = null, retryCount = 0
+  
+  if (Array.isArray(serviceDescriptor) && serviceDescriptor.length >= 3) {
+    const transformed = transformMethodSyntax(serviceDescriptor)
+    const actualDescriptor = transformed ? transformed.transformedDescriptor : serviceDescriptor
+    ;[serviceName, action, args] = actualDescriptor
+    
+    // Extract timeout and retry from args if present
+    if (args && typeof args === 'object') {
+      if (args.timeout !== undefined) {
+        timeoutMs = args.timeout
+      }
+      if (args.retry !== undefined) {
+        retryCount = Math.max(0, parseInt(args.retry) || 0)
+      }
+    }
+    
+    // Use service-specific timeout from settings if no arg timeout provided
+    if (timeoutMs === null && querySettings?.timeout?.[serviceName] !== undefined) {
+      timeoutMs = querySettings.timeout[serviceName]
+    }
+    
+    // Use default timeout from settings if nothing else specified
+    if (timeoutMs === null && querySettings?.timeout?.default !== undefined) {
+      timeoutMs = querySettings.timeout.default
+    }
+  }
+
+  // Create base function
+  const baseFunction = async (iterationItem) => {
     const newContextStack = [...contextStack, iterationItem]
 
     // Check if this is a chain (array of arrays)
@@ -382,18 +545,42 @@ const compileServiceFunction = (serviceDescriptor, services, source, contextStac
       // Execute as chain
       return await executeChain(serviceDescriptor, services, source, newContextStack, null, querySettings)
     } else if (Array.isArray(serviceDescriptor) && serviceDescriptor.length >= 3) {
-      // Transform method syntax to regular syntax if needed
-      const transformed = transformMethodSyntax(serviceDescriptor)
-      const actualDescriptor = transformed ? transformed.transformedDescriptor : serviceDescriptor
-
-      // Execute as regular service call
-      const [serviceName, action, args] = actualDescriptor
-      // Pass args without resolving - executeService will handle resolution while preserving special parameters
-      return await executeService(serviceName, action, args, services, source, newContextStack, null, querySettings)
+      // Execute as regular service call - but use simplified executeService without wrappers
+      return await executeServiceCore(serviceName, action, args, services, source, newContextStack, null, querySettings, debugPrinter)
     }
 
     throw new Error('Invalid service descriptor for function compilation')
   }
+  
+  // Apply wrappers if we have service metadata
+  if (serviceName && action) {
+    const queryContext = { queryName: 'compiled-function' }
+    
+    // Apply wrappers in order: retry -> timeout -> guard
+    let wrappedFunction = baseFunction
+    
+    if (retryCount > 0) {
+      wrappedFunction = withRetryWrapper(wrappedFunction, retryCount, serviceName, action)
+    }
+    
+    if (timeoutMs && timeoutMs > 0) {
+      wrappedFunction = withTimeoutWrapper(wrappedFunction, timeoutMs, serviceName, action, queryContext)
+    }
+    
+    if (debugPrinter) {
+      wrappedFunction = withGuard(wrappedFunction, {
+        serviceName,
+        action,
+        debugPrinter,
+        querySettings,
+        queryContext
+      })
+    }
+    
+    return wrappedFunction
+  }
+  
+  return baseFunction
 }
 
 /**
@@ -507,14 +694,36 @@ const guardServiceExecution = async (serviceName, action, args, service, queryCo
 }
 
 /**
- * Execute a single service call
+ * Core service execution without wrappers - used by compiled functions
  */
-const executeService = async (serviceName, action, args, services, source, contextStack = [], queryContext = null, querySettings = {}) => {
+const executeServiceCore = async (serviceName, action, args, services, source, contextStack = [], queryContext = null, querySettings = {}, debugPrinter = null) => {
   const service = services[serviceName]
   if (!service) {
     const queryInfo = queryContext ? ` in query '${queryContext.queryName}'` : ''
     const descriptorInfo = queryContext?.descriptor ? `\nService descriptor: ${JSON.stringify(queryContext.descriptor)}` : ''
     throw new Error(`Service '${serviceName}' not found${queryInfo}${descriptorInfo}`)
+  }
+
+  // Extract timeout and retry values from args and settings (same logic as executeService)
+  let timeoutMs = null, retryCount = 0
+  
+  if (args && typeof args === 'object') {
+    if (args.timeout !== undefined) {
+      timeoutMs = args.timeout
+    }
+    if (args.retry !== undefined) {
+      retryCount = Math.max(0, parseInt(args.retry) || 0)
+    }
+  }
+
+  // Use service-specific timeout from settings if no arg timeout provided
+  if (timeoutMs === null && querySettings?.timeout?.[serviceName] !== undefined) {
+    timeoutMs = querySettings.timeout[serviceName]
+  }
+
+  // Use default timeout from settings if nothing else specified
+  if (timeoutMs === null && querySettings?.timeout?.default !== undefined) {
+    timeoutMs = querySettings.timeout.default
   }
 
   // Check for parameter metadata to determine function compilation
@@ -560,7 +769,8 @@ const executeService = async (serviceName, action, args, services, source, conte
   // Resolve arguments while skipping special parameters
   const finalArgs = resolveArgsWithContext(args, source, contextStack, skipParams)
 
-  // Now handle function compilation
+  // Now handle function compilation - use passed debugPrinter for nested compilations
+  
   for (const [key, value] of Object.entries(functionsToCompile)) {
     const paramInfo = paramMetadata[key]
 
@@ -572,51 +782,60 @@ const executeService = async (serviceName, action, args, services, source, conte
       }
     } else {
       // Compile service descriptor to function
-      finalArgs[key] = compileServiceFunction(value, services, source, contextStack, querySettings)
+      finalArgs[key] = compileServiceFunction(value, services, source, contextStack, querySettings, debugPrinter)
     }
   }
 
-  // Handle settings compilation - pass the resolved settings
+  // Handle settings compilation - deep merge provided settings with query settings
   for (const [key, value] of Object.entries(settingsToCompile)) {
-    // Always pass the full resolved settings
-    finalArgs[key] = querySettings
+    // Deep merge the service call settings with query settings, giving precedence to service call settings
+    finalArgs[key] = deepMerge(querySettings, value)
   }
 
-  // Handle timeout, retry, onError, and ignoreErrors logic
-  // ARCHITECTURAL NOTE: timeout, retry, onError, and ignoreErrors are MicroQL-interpreted parameters.
-  // We extract them here but pass them through to services so they can
-  // optionally use them for their own logic (e.g., logging).
-  let timeoutMs = null
-  let retryCount = 0
-  let onErrorFunction = null
-  let ignoreErrors = false
-  let argsWithoutReserved = finalArgs
+  // Remove non-service reserved parameters for service execution
+  // timeout and retry are passed to services according to SERVICE_WRITER_GUIDE.md
+  const argsWithoutReserved = { ...finalArgs }
+  delete argsWithoutReserved.onError
+  delete argsWithoutReserved.ignoreErrors
+  
+  // Ensure resolved timeout and retry are in args if they were determined
+  if (timeoutMs !== null) {
+    argsWithoutReserved.timeout = timeoutMs
+  }
+  if (retryCount > 0) {
+    argsWithoutReserved.retry = retryCount
+  }
 
-  // Extract timeout, retry, onError, and ignoreErrors from arguments if present
-  if (finalArgs && typeof finalArgs === 'object') {
-    if (finalArgs.timeout !== undefined) {
-      timeoutMs = finalArgs.timeout
-    }
-    if (finalArgs.retry !== undefined) {
-      retryCount = Math.max(0, parseInt(finalArgs.retry) || 0)
-    }
-    if (finalArgs.onError !== undefined) {
-      // Store the onError descriptor for later compilation when we have error context
-      if (Array.isArray(finalArgs.onError)) {
-        onErrorFunction = finalArgs.onError  // Store the descriptor, not the compiled function
-      }
-    }
-    if (finalArgs.ignoreErrors !== undefined) {
-      ignoreErrors = Boolean(finalArgs.ignoreErrors)
-    }
+  // Special handling for util service (legacy)
+  if (serviceName === 'util') {
+    // Provide util service with access to other services and context
+    argsWithoutReserved._services = services
+    argsWithoutReserved._context = source
+  }
 
-    // Create new args object without reserved fields for service execution
-    if (finalArgs.timeout !== undefined || finalArgs.retry !== undefined || finalArgs.onError !== undefined || finalArgs.ignoreErrors !== undefined) {
-      argsWithoutReserved = { ...finalArgs }
-      delete argsWithoutReserved.timeout
-      delete argsWithoutReserved.retry
-      delete argsWithoutReserved.onError
-      delete argsWithoutReserved.ignoreErrors
+  // Execute the service directly
+  return await service(action, argsWithoutReserved)
+}
+
+/**
+ * Execute a single service call with full wrapper support
+ */
+const executeService = async (serviceName, action, args, services, source, contextStack = [], queryContext = null, querySettings = {}, debugPrinter = null) => {
+  // Extract wrapper parameters
+  let timeoutMs = null, retryCount = 0, onErrorFunction = null, ignoreErrors = false
+  
+  if (args && typeof args === 'object') {
+    if (args.timeout !== undefined) {
+      timeoutMs = args.timeout
+    }
+    if (args.retry !== undefined) {
+      retryCount = Math.max(0, parseInt(args.retry) || 0)
+    }
+    if (args.onError !== undefined && Array.isArray(args.onError)) {
+      onErrorFunction = args.onError
+    }
+    if (args.ignoreErrors !== undefined) {
+      ignoreErrors = Boolean(args.ignoreErrors)
     }
   }
 
@@ -630,40 +849,35 @@ const executeService = async (serviceName, action, args, services, source, conte
     timeoutMs = querySettings.timeout.default
   }
 
-  // Add timeout and retry back to args so service can see them
-  if (finalArgs && typeof finalArgs === 'object') {
-    if (timeoutMs !== null) {
-      argsWithoutReserved.timeout = timeoutMs
-    }
-    if (retryCount > 0) {
-      argsWithoutReserved.retry = retryCount
-    }
-  }
-
-  // Create unified debug printer if debug mode is enabled
-  const debugPrinter = querySettings?.debug ? createDebugPrinter(querySettings) : null
-
-  // Execute service with retry, guard, timeout, and error handling
-  const executeWithRetry = async () => {
+  // Create base service execution function
+  const baseFunction = async () => {
     try {
-      const servicePromise = guardServiceExecution(serviceName, action, argsWithoutReserved, service, queryContext, debugPrinter, querySettings)
-      return await withTimeout(servicePromise, timeoutMs, serviceName, action, argsWithoutReserved, queryContext)
+      return await executeServiceCore(serviceName, action, args, services, source, contextStack, queryContext, querySettings, debugPrinter)
     } catch (error) {
-      // If onError descriptor is defined, compile and call it with error context
+      // Handle onError if defined
       if (onErrorFunction) {
+        // Create args for error context with resolved timeout but without reserved params
+        const argsForErrorContext = { ...args }
+        delete argsForErrorContext.onError
+        delete argsForErrorContext.ignoreErrors
+        delete argsForErrorContext.retry
+        
+        // Add resolved timeout if it was determined
+        if (timeoutMs !== null) {
+          argsForErrorContext.timeout = timeoutMs
+        }
+        
         const errorContext = {
           error: error.message,
           originalError: error,
           serviceName,
           action,
-          args: argsWithoutReserved,
+          args: argsForErrorContext,
           queryName: queryContext?.queryName
         }
 
         try {
-          // Now compile the onError function with error context as the context stack
-          const compiledOnError = compileServiceFunction(onErrorFunction, services, source, [errorContext], querySettings)
-          // Call it with the error context as the iteration item (becomes @)
+          const compiledOnError = compileServiceFunction(onErrorFunction, services, source, [errorContext], querySettings, debugPrinter)
           await compiledOnError(errorContext)
         } catch (onErrorErr) {
           console.error(`onError handler failed: ${onErrorErr.message}`)
@@ -675,18 +889,40 @@ const executeService = async (serviceName, action, args, services, source, conte
         return null
       }
 
-      // Re-throw the original error to maintain normal error flow
       throw error
     }
   }
 
-  return await withRetry(executeWithRetry, retryCount, serviceName, action)
+  // Use singleton debug printer from query level (passed as parameter)
+
+  // Apply wrappers in order: retry -> timeout -> guard
+  let wrappedFunction = baseFunction
+
+  if (retryCount > 0) {
+    wrappedFunction = withRetryWrapper(wrappedFunction, retryCount, serviceName, action)
+  }
+
+  if (timeoutMs && timeoutMs > 0) {
+    wrappedFunction = withTimeoutWrapper(wrappedFunction, timeoutMs, serviceName, action, queryContext)
+  }
+
+  if (debugPrinter) {
+    wrappedFunction = withGuard(wrappedFunction, {
+      serviceName,
+      action,
+      debugPrinter,
+      querySettings,
+      queryContext
+    })
+  }
+
+  return await wrappedFunction()
 }
 
 /**
  * Execute a chain of service calls
  */
-const executeChain = async (chain, services, source, contextStack = [], queryContext = null, querySettings = {}) => {
+const executeChain = async (chain, services, source, contextStack = [], queryContext = null, querySettings = {}, debugPrinter = null) => {
   let result = null
 
   for (let i = 0; i < chain.length; i++) {
@@ -711,7 +947,7 @@ const executeChain = async (chain, services, source, contextStack = [], queryCon
     const currentContextStack = result !== null ? [result, ...contextStack.slice(1)] : contextStack
 
     try {
-      result = await executeService(serviceName, action, args, services, source, currentContextStack, stepContext, querySettings)
+      result = await executeService(serviceName, action, args, services, source, currentContextStack, stepContext, querySettings, debugPrinter)
     } catch (error) {
       // Add chain step to service chain for error context
       if (!error.serviceChain) {
@@ -819,7 +1055,7 @@ export default async function query(config) {
 
       queryMap.set(queryName, {
         deps: Array.from(allDeps),
-        execute: () => executeChain(chain, preparedServices, results, [], { queryName: queryName, descriptor: chain }, resolvedSettings)
+        execute: () => executeChain(chain, preparedServices, results, [], { queryName: queryName, descriptor: chain }, resolvedSettings, debugPrinter)
       })
       continue
     }
@@ -843,7 +1079,7 @@ export default async function query(config) {
           // Resolve the data source first
           const data = dataSource.startsWith('$.') ? retrieve(dataSource, results) : dataSource
           const finalArgs = withOnParameter(args, data)
-          return await executeService(serviceName, action, finalArgs, preparedServices, results, [], { queryName: queryName, descriptor: descriptor }, resolvedSettings)
+          return await executeService(serviceName, action, finalArgs, preparedServices, results, [], { queryName: queryName, descriptor: descriptor }, resolvedSettings, debugPrinter)
         }
       })
       continue
@@ -856,7 +1092,7 @@ export default async function query(config) {
 
       queryMap.set(queryName, {
         deps,
-        execute: () => executeService(serviceName, action, args, preparedServices, results, [], { queryName: queryName, descriptor: descriptor }, resolvedSettings)
+        execute: () => executeService(serviceName, action, args, preparedServices, results, [], { queryName: queryName, descriptor: descriptor }, resolvedSettings, debugPrinter)
       })
       continue
     }
@@ -970,7 +1206,7 @@ export default async function query(config) {
           query: queries
         }
 
-        const compiledOnError = compileServiceFunction(queryOnError, preparedServices, results, [errorContext], resolvedSettings)
+        const compiledOnError = compileServiceFunction(queryOnError, preparedServices, results, [errorContext], resolvedSettings, debugPrinter)
         await compiledOnError(errorContext)
       } catch (onErrorErr) {
         console.error(`Query-level onError handler failed: ${onErrorErr.message}`)
