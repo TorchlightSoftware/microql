@@ -75,7 +75,7 @@ describe('Absolute Indexing Context Tests', () => {
       query: {
         nested: ['$.given.outer', 'util:flatMap', {
           fn: ['util', 'map', {
-            collection: '@.inner',
+            on: '@.inner',
             fn: ['test', 'checkContext', {
               level1: '@',      // Should be outer item (contextStack[0])
               level2: '@@'      // Should be inner item (contextStack[1])
@@ -116,7 +116,7 @@ describe('Absolute Indexing Context Tests', () => {
       query: {
         // Test chains in functions
         result: ['util', 'map', {
-          collection: [1, 2],
+          on: [1, 2],
           fn: ['chain', 'final', {
             chain1: '@',    // Should be current iteration item
             chain2: '@'     // Same - we're not in a chain context here

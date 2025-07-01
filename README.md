@@ -75,11 +75,9 @@ Services can be functions or objects (auto-wrapped). For complete service writin
 
 ### @ Symbol Usage
 
-- `@` - Most recent context (previous result in a chain, current item in iteration)
-- `@@` - Second most recent context
+- `@` - first level context
+- `@@` - second level context
 - `@.field` - Access field of context
-
-For detailed @ symbol syntax and complex nesting examples, see [CONTEXT_SYNTAX.md](CONTEXT_SYNTAX.md).
 
 ## Timeouts & Reliability
 
@@ -101,7 +99,7 @@ query: {
     id: '$.given.id',
     timeout: 5000,      // 5 second timeout
     retry: 3,           // Try up to 4 times total
-    onError: ['logger', 'logError', { on: '@' }],  // Custom error handler
+    onError: ['@', 'logger', 'logError'],  // Custom error handler
     ignoreErrors: true  // Continue on error (returns null)
   }]
 }
@@ -120,13 +118,13 @@ MicroQL provides flexible error handling at both service and query levels:
 {
   services: { logger },
   query: { /* ... */ },
-  onError: ['logger', 'logQueryError', { on: '@' }]  // Handle any unhandled errors
+  onError: ['@', 'logger', 'logError'],  // Handle any unhandled errors
 }
 ```
 
 #### Default Error Behavior
 Without explicit error handlers:
-- Errors use consistent format: `Error: :taskName: [service:action] message`
+- Errors use consistent format: `Error: :queryName: [service:action] message`
 - Args are displayed using compact inspect settings
 - Errors are printed in red to stderr
 - Process exits with code 1

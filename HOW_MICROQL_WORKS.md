@@ -22,24 +22,24 @@ MicroQL is a query language that orchestrates asynchronous service calls with so
 
 **Regular Syntax:**
 ```javascript
-['serviceName', 'action', { arg1: 'value1', arg2: '@.field' }]
+['serviceName', 'action', { arg1: 'value1', arg2: 'value2' }]
 ```
 
 **Method Syntax (syntactic sugar):**
 ```javascript
-['@.data', 'service:action', { arg1: 'value1' }]
-// Transforms to: ['service', 'action', { on: '@.data', arg1: 'value1' }]
+['$.data', 'service:action', { arg1: 'value1' }]
+// Transforms to: ['service', 'action', { on: '$.data', arg1: 'value1' }]
 ```
 
-**Method syntax works everywhere** - in task definitions and within chain steps:
+**Method syntax works everywhere** - in query definitions and within chain steps:
 ```javascript
-// At task level
+// At query level
 filtered: ['$.items', 'util:filter', { criteria: 'active' }]
 
 // Within chains
 result: [
   ['util', 'concat', { args: [...] }],
-  ['@', 'util:map', { template: { processed: '@.value' } }]  // ✅ Works!
+  ['@', 'util:map', { template: { processed: '@@.value' } }]  // ✅ Works!
 ]
 ```
 
@@ -47,15 +47,12 @@ result: [
 
 ### Context Stack
 
-MicroQL maintains a **context stack** during execution that enables sophisticated data flow:
+MicroQL maintains a **context stack** during execution that enables services to receive chain or iteration values.  The context can be nested, and each layer of nesting adds an additional @ to the syntax.
 
 ```javascript
-// Context stack grows left to right, @ symbols reference right to left
-contextStack = [oldest, ..., newest]
-contextStack[length-1] = @     // most recent (newest)
-contextStack[length-2] = @@    // second most recent
-contextStack[length-3] = @@@   // third most recent
-// etc.
+contextStack[0] = @     // top level
+contextStack[1] = @@    // second level
+contextStack[2] = @@@   // third level
 ```
 
 ### Context Resolution Examples
@@ -72,33 +69,26 @@ contextStack[length-3] = @@@   // third most recent
 ```javascript
 ['$.companies', 'util:flatMap', {
   fn: ['@.departments', 'util:flatMap', {
-    fn: ['@.employees', 'util:map', {
+    fn: ['@@.employees', 'util:map', {
       fn: ['user', 'create', {
-        name: '@.name',        // Current employee (most recent context)
+        name: '@@@.name',        // Current employee (most recent context)
         department: '@@.name', // Department name (second most recent context)
-        company: '@@@.name'    // Company name (third most recent context)
+        company: '@.name'    // Company name (third most recent context)
       }]
     }]
   }]
 }]
 ```
 
-**Context Stack During Execution:**
-1. Company iteration: `@` = company, `contextStack = [company]`
-2. Department iteration: `@` = department, `@@` = company, `contextStack = [company, department]`
-3. Employee iteration: `@` = employee, `@@` = department, `@@@` = company, `contextStack = [company, department, employee]`
-
-Note: `@` always refers to the most recent context (rightmost in the stack).
-
 ## Execution Model
 
-### 1. Task-Level Parsing
+### 1. Query-Level Parsing
 
 The main query processor:
-1. **Parses descriptors** into tasks with dependencies
+1. **Parses descriptors** into queries with dependencies
 2. **Detects method syntax** using `parseMethodCall()`
 3. **Creates execution plan** with proper dependency ordering
-4. **Executes tasks** in parallel where possible
+4. **Executes queries** in parallel where possible
 
 ### 2. Function Compilation
 
@@ -123,7 +113,7 @@ Method syntax is **syntactic sugar** that gets transformed once:
 ```
 
 This transformation happens in **one place** (`transformMethodSyntax`) and is used by:
-- Task-level parsing (`parseMethodCall`)
+- Query-level parsing (`parseMethodCall`)
 - Function compilation (`compileServiceFunction`)
 
 ## Error Handling Architecture
@@ -131,7 +121,7 @@ This transformation happens in **one place** (`transformMethodSyntax`) and is us
 ### Service Execution Guard
 
 All service calls are wrapped with `guardServiceExecution()` which:
-1. **Provides context** about which query task is executing
+1. **Provides context** about which query is executing
 2. **Shows service arguments** for debugging
 3. **Preserves original errors** while adding context
 4. **Points to query location** rather than internal implementation
@@ -139,7 +129,7 @@ All service calls are wrapped with `guardServiceExecution()` which:
 ### Error Message Format
 
 ```
-Error in service util.flatMap in query task 'listings': Error in service scraper.extract: Protocol error
+Error in service util.flatMap in query 'listings': Error in service scraper.extract: Protocol error
 Args: { /* full arguments for debugging */ }
 ```
 
@@ -172,7 +162,7 @@ results: ['$.companies', 'util:flatMap', {
     fn: ['@.employees', 'util:map', {
       fn: ['processor', 'transform', {
         employee: '@.name',
-        dept: '@@.name', 
+        dept: '@@.name',
         company: '@@@.name'
       }]
     }]
@@ -192,42 +182,6 @@ obsidianRecords: [
 ]
 ```
 
-## What NOT To Do
-
-### ❌ Duplicate Logic
-```javascript
-// DON'T: Check for method syntax in multiple places
-if (dataSource.startsWith('@') && methodName.includes(':')) { ... }
-// DO: Use transformMethodSyntax() consistently
-```
-
-### ❌ Special Case Handling
-```javascript
-// DON'T: Handle method syntax as special case everywhere
-// DO: Transform once, execute uniformly
-```
-
-### ❌ Break Query Structure
-```javascript
-// DON'T: Flatten sophisticated nested chains
-obsidianRecords: [
-  step1: ['...'],
-  step2: ['...'], 
-  // This loses the power of context chaining
-]
-
-// DO: Preserve nested structure for context flow
-obsidianRecords: [
-  ['util', 'concat', {
-    args: [
-      ['$.listings', 'util:flatMap', { 
-        fn: ['@.images', 'util:map', { fn: [...] }] 
-      }]
-    ]
-  }]
-]
-```
-
 ## Reserved Parameters
 
 MicroQL interprets certain parameters specially before passing them to services:
@@ -235,7 +189,7 @@ MicroQL interprets certain parameters specially before passing them to services:
 ### timeout
 Controls execution timeout in milliseconds:
 ```javascript
-['service', 'action', { 
+['service', 'action', {
   data: '@.value',
   timeout: 5000  // 5 second timeout
 }]
@@ -244,7 +198,7 @@ Controls execution timeout in milliseconds:
 ### retry
 Automatically retry failed operations:
 ```javascript
-['claude', 'ocr', { 
+['claude', 'ocr', {
   imageUrl: '@.src',
   retry: 3  // Try up to 4 times total (1 initial + 3 retries)
 }]
@@ -257,10 +211,8 @@ For complete details on reserved parameters and service writing, see [SERVICE_WR
 ## Summary
 
 MicroQL's power comes from:
-1. **Sophisticated context chaining** with @ symbols (most recent context first)
-2. **Method syntax** as clean syntactic sugar universally available
-3. **Uniform execution model** after early normalization
-4. **Comprehensive error context** for debugging
+3. **JSON as code** declarative queries with implicit execution order
+4. **Unified logging and errors** for debugging
 5. **Built-in reliability** with timeout and retry mechanisms
 
 The system is designed to handle complex nested data transformations elegantly while providing clear error messages that point to the query location, not internal implementation details.

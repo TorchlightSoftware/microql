@@ -2,7 +2,7 @@
  * @fileoverview MicroQL query execution engine
  * 
  * Core module that orchestrates service execution with sophisticated context management,
- * method syntax transformation, and parallel task execution. Supports complex nested
+ * method syntax transformation, and parallel query execution. Supports complex nested
  * data transformations with @ symbol context chaining.
  * 
  * ARCHITECTURAL SEPARATION:
@@ -23,10 +23,9 @@
 
 import retrieve from './retrieve.js'
 import { COLOR_NAMES } from './util.js'
-import { withOnParameter, validateContextIndex } from './utils.js'
 import { inspect } from 'util'
 
-/** @type {RegExp} JSONPath dependency pattern for $.taskName references */
+/** @type {RegExp} JSONPath dependency pattern for $.queryName references */
 const DEP_REGEX = /\$\.(\w+)/
 
 /** @type {RegExp} Context reference pattern for @ symbols */
@@ -51,48 +50,54 @@ const getServiceColor = (serviceName) => {
 }
 
 /**
- * Debug print function that mimics util:print behavior with color assignment
- * Uses the query's inspect settings for consistent formatting
+ * Create a wrapper around util:print service for consistent debug logging
+ * @param {Object} services - Services object containing util service
+ * @param {Object} querySettings - Query settings with inspect configuration
+ * @returns {Function} Debug print function
  */
-const debugPrint = (serviceName, action, message, value, inspector) => {
-  const color = getServiceColor(serviceName)
-  const timestamp = `[${new Date().toISOString()}] `
-  
-  // ANSI color codes (same as in util.js)
-  const colors = {
-    red: '\x1b[31m',
-    green: '\x1b[32m', 
-    yellow: '\x1b[33m',
-    blue: '\x1b[34m',
-    magenta: '\x1b[35m',
-    cyan: '\x1b[36m',
-    white: '\x1b[37m',
-    reset: '\x1b[0m'
+const createDebugPrinter = (services, querySettings = {}) => {
+  const utilService = services?.util
+  if (!utilService) {
+    // Fallback if util service not available
+    return (serviceName, action, message, value) => {
+      console.log(`[${new Date().toISOString()}] ${message} ${serviceName}:${action}`, value)
+    }
   }
   
-  const colorCode = colors[color] || ''
-  const resetCode = colorCode ? colors.reset : ''
-  
-  // Format the value using the inspector if provided
-  let formatted
-  if (typeof value === 'string') {
-    formatted = value
-  } else if (typeof inspector === 'function') {
-    formatted = inspector(value)
-  } else {
-    formatted = inspect(value, { depth: 2, colors: false, compact: false })
+  return async (serviceName, action, message, value) => {
+    const color = getServiceColor(serviceName)
+    const formattedMessage = `${message} ${serviceName}:${action}`
+    
+    try {
+      await utilService.print({
+        on: typeof value === 'string' ? `${formattedMessage}\n   ${value}` : formattedMessage,
+        color,
+        inspect: querySettings.inspect
+      })
+      
+      if (typeof value !== 'string') {
+        await utilService.print({
+          on: value,
+          inspect: querySettings.inspect,
+          ts: false
+        })
+      }
+    } catch (e) {
+      // Fallback to console.log if util:print fails
+      console.log(`[${new Date().toISOString()}] ${formattedMessage}`, value)
+    }
   }
-  
-  const fullMessage = `${message} ${serviceName}:${action}\n   ${formatted}`
-  process.stdout.write(colorCode + timestamp + fullMessage + resetCode + '\n')
 }
 
 /**
- * Create compact inspector for arguments with configurable settings
+ * Create inspector function that wraps util:print for consistent formatting
+ * @param {Object} services - Services object containing util service  
  * @param {Object} inspectSettings - Inspect configuration settings
  * @returns {Function} Inspector function
  */
-const createCompactInspector = (inspectSettings = {}) => {
+const createInspector = (services, inspectSettings = {}) => {
+  const utilService = services?.util
+  
   const defaultSettings = {
     depth: 2,
     maxArrayLength: 3,
@@ -104,40 +109,40 @@ const createCompactInspector = (inspectSettings = {}) => {
   
   const settings = { ...defaultSettings, ...inspectSettings }
   
+  // If no util service, fall back to native inspect
+  if (!utilService) {
+    return (obj) => inspect(obj, settings)
+  }
+  
+  // Return a synchronous function that uses inspect directly
+  // This maintains compatibility with existing code that expects a sync inspector
   return (obj) => {
-    // Filter out properties starting with underscore
-    const filtered = filterHiddenProperties(obj)
+    // Filter hidden properties inline
+    const filterHidden = (val) => {
+      if (Array.isArray(val)) {
+        return val.map(filterHidden)
+      }
+      if (typeof val === 'object' && val !== null) {
+        const filtered = {}
+        for (const [key, value] of Object.entries(val)) {
+          if (!key.startsWith('_')) {
+            filtered[key] = filterHidden(value)
+          }
+        }
+        return filtered
+      }
+      return val
+    }
+    
+    const filtered = filterHidden(obj)
     return inspect(filtered, settings)
   }
 }
 
 /**
- * Filter out properties starting with underscore (Node.js convention for hidden)
- * @param {*} obj - Object to filter
- * @returns {*} Filtered object
- */
-const filterHiddenProperties = (obj) => {
-  if (Array.isArray(obj)) {
-    return obj.map(filterHiddenProperties)
-  }
-  
-  if (typeof obj === 'object' && obj !== null) {
-    const filtered = {}
-    for (const [key, value] of Object.entries(obj)) {
-      if (!key.startsWith('_')) {
-        filtered[key] = filterHiddenProperties(value)
-      }
-    }
-    return filtered
-  }
-  
-  return obj
-}
-
-/**
  * Format error with consistent MicroQL format
  * @param {Error} error - The error to format
- * @param {string} taskName - Task name where error occurred
+ * @param {string} queryName - Query name where error occurred
  * @param {string} serviceName - Service name
  * @param {string} action - Service action
  * @param {Object} args - Service arguments
@@ -145,8 +150,8 @@ const filterHiddenProperties = (obj) => {
  * @param {Array} serviceChain - Chain of service calls leading to error
  * @returns {string} Formatted error message
  */
-const formatError = (error, taskName, serviceName, action, args, inspector, serviceChain = []) => {
-  const taskPrefix = taskName ? `:${taskName}: ` : ''
+const formatError = (error, queryName, serviceName, action, args, inspector, serviceChain = []) => {
+  const queryPrefix = queryName ? `:${queryName}: ` : ''
   const chainStr = serviceChain.length > 0 ? serviceChain.map(s => `[${s}]`).join('') : ''
   const serviceStr = `[${serviceName}:${action}]`
   
@@ -155,9 +160,10 @@ const formatError = (error, taskName, serviceName, action, args, inspector, serv
   // Remove existing MicroQL context from message if present
   message = message.replace(/^Error in service .+?: /, '')
   
-  const errorLine = `Error: ${taskPrefix}${chainStr}${serviceStr} ${message}`
+  const errorLine = `Error: ${queryPrefix}${chainStr}${serviceStr} ${message}`
   
-  if (args && Object.keys(filterHiddenProperties(args)).length > 0) {
+  if (args && typeof args === 'object' && Object.keys(args).length > 0) {
+    // Inspector already handles filtering hidden properties
     const argsStr = inspector(args)
     return `${errorLine}\nArgs: ${argsStr}`
   }
@@ -168,20 +174,22 @@ const formatError = (error, taskName, serviceName, action, args, inspector, serv
 /**
  * Default error handler - prints error in red and exits
  * @param {Error} error - The error to handle
- * @param {string} context - Error context (e.g., task name)
+ * @param {string} context - Error context (e.g., query name)
  * @param {Object} settings - Query settings including inspect config
  */
 const defaultErrorHandler = (error, context, settings = {}) => {
   const red = '\x1b[31m'
   const reset = '\x1b[0m'
   
-  const inspector = createCompactInspector(settings.inspect)
+  // Note: we can't pass services here as it would create circular dependency
+  // defaultErrorHandler doesn't need debug printing anyway
+  const inspector = createInspector(null, settings.inspect)
   
   let formattedError
-  if (error.serviceName && error.action && error.taskName) {
+  if (error.serviceName && error.action && error.queryName) {
     formattedError = formatError(
       error, 
-      error.taskName, 
+      error.queryName, 
       error.serviceName, 
       error.action, 
       error.args,
@@ -207,10 +215,10 @@ const defaultErrorHandler = (error, context, settings = {}) => {
  * @param {string} serviceName - Service name for error context
  * @param {string} action - Action name for error context
  * @param {Object} args - Service arguments for error context
- * @param {Object} taskContext - Task context for error context
+ * @param {Object} queryContext - Query context for error context
  * @returns {Promise} Promise that rejects if timeout is exceeded
  */
-const withTimeout = (promise, timeoutMs, serviceName, action, args, taskContext) => {
+const withTimeout = (promise, timeoutMs, serviceName, action, args, queryContext) => {
   if (!timeoutMs || timeoutMs <= 0) {
     return promise
   }
@@ -224,8 +232,8 @@ const withTimeout = (promise, timeoutMs, serviceName, action, args, taskContext)
         timeoutError.serviceName = serviceName
         timeoutError.action = action
         timeoutError.args = args
-        timeoutError.taskName = taskContext?.taskName
-        timeoutError.serviceChain = taskContext?.serviceChain || []
+        timeoutError.queryName = queryContext?.queryName
+        timeoutError.serviceChain = queryContext?.serviceChain || []
         reject(timeoutError)
       }, timeoutMs)
     })
@@ -357,7 +365,7 @@ const transformMethodSyntax = (descriptor) => {
 }
 
 /**
- * Parse and validate method syntax for task-level execution
+ * Parse and validate method syntax for query-level execution
  * Uses transformMethodSyntax and adds validation against methods whitelist
  * 
  * @param {Array} descriptor - Service descriptor to parse
@@ -384,24 +392,13 @@ const parseMethodCall = (descriptor, methods) => {
 }
 
 /**
- * Check if a value contains @ symbols that need function compilation
- * Used to detect when service descriptors need to be compiled into functions
- * 
- * @param {*} value - Value to check (typically service descriptor array)
- * @returns {boolean} True if value contains @ symbols requiring compilation
+ * Merge arguments with 'on' parameter (common pattern in MicroQL)
+ * Used for method syntax transformation and service argument preparation
+ * @param {Object} args - Base arguments object
+ * @param {*} onValue - Value for the 'on' parameter
+ * @returns {Object} Merged arguments with 'on' parameter
  */
-const containsAtSymbols = (value) => {
-  if (typeof value === 'string' && AT_REGEX.test(value)) {
-    return true
-  }
-  if (Array.isArray(value)) {
-    return value.some(containsAtSymbols)
-  }
-  if (typeof value === 'object' && value !== null) {
-    return Object.values(value).some(containsAtSymbols)
-  }
-  return false
-}
+const withOnParameter = (args, onValue) => ({ on: onValue, ...args })
 
 /**
  * Count the number of @ symbols at the start of a string
@@ -414,6 +411,20 @@ const countAtSymbols = (str) => {
   if (typeof str !== 'string') return 0
   const match = str.match(/^(@+)/)
   return match ? match[1].length : 0
+}
+
+/**
+ * Validate context index for @ symbol resolution
+ * Ensures proper error messages when context stack depth is insufficient
+ * @param {number} atCount - Number of @ symbols (1 for @, 2 for @@, etc.)
+ * @param {number} contextIndex - Calculated context index (atCount - 1)
+ * @param {Array} contextStack - Current context stack
+ * @throws {Error} If context index is invalid
+ */
+const validateContextIndex = (atCount, contextIndex, contextStack) => {
+  if (contextIndex < 0 || contextIndex >= contextStack.length) {
+    throw new Error(`${'@'.repeat(atCount)} used but only ${contextStack.length} context levels available (@ through ${'@'.repeat(contextStack.length)})`)
+  }
 }
 
 /**
@@ -471,13 +482,16 @@ export const resolveArgsWithContext = (args, source, contextStack = [], skipPara
       // Handle @.field with context stack
       if (value.startsWith('@'.repeat(atCount) + '.')) {
         const fieldPath = value.slice(atCount + 1) // Remove @ symbols and dot
-        // @ refers to most recent context (last item)
-        const contextIndex = contextStack.length - atCount
+        // @ refers to context level
+        const contextIndex = atCount - 1
         
         validateContextIndex(atCount, contextIndex, contextStack)
         
         const contextItem = contextStack[contextIndex] || null
         
+        // $ sign here represents JSONPath syntax, not MicroQL
+        // We're using JSONPath to query the path, even though
+        // @ context is the target
         if (contextItem && fieldPath) {
           const path = '$.' + fieldPath
           return retrieve(path, contextItem)
@@ -515,64 +529,52 @@ export const resolveArgsWithContext = (args, source, contextStack = [], skipPara
 }
 
 /**
- * Resolve @ symbols and JSONPath in arguments (backward compatibility)
- */
-const resolveArgs = (args, source) => {
-  return resolveArgsWithContext(args, source, [], new Set())
-}
-
-/**
  * Guard function for service execution - provides context about where errors occur
  */
-const guardServiceExecution = async (serviceName, action, args, service, taskContext, inspector, querySettings) => {
+const guardServiceExecution = async (serviceName, action, args, service, queryContext, debugPrinter, querySettings) => {
   try {
     // Debug logging when entering service
-    if (querySettings?.debug) {
-      debugPrint(serviceName, action, '🔵 ENTERING', `Args: ${typeof args}`, inspector)
+    if (querySettings?.debug && debugPrinter) {
+      await debugPrinter(serviceName, action, '🔵 ENTERING', `Args: ${typeof args}`)
       if (typeof args === 'object' && args !== null) {
-        debugPrint(serviceName, action, '   Args:', args, inspector)
+        await debugPrinter(serviceName, action, '   Args:', args)
       }
     }
     
     const result = await service(action, args)
     
     // Debug logging when leaving service
-    if (querySettings?.debug) {
-      debugPrint(serviceName, action, '🟢 LEAVING', `Result: ${Array.isArray(result) ? `Array(${result.length})` : typeof result}`, inspector)
-      if (typeof result === 'object' && result !== null) {
-        debugPrint(serviceName, action, '   Result:', result, inspector)
-      }
+    if (querySettings?.debug && debugPrinter) {
+      await debugPrinter(serviceName, action, '🟢 LEAVING', result)
     }
     
     return result
   } catch (error) {
     // Debug logging when service throws error
-    if (querySettings?.debug) {
-      debugPrint(serviceName, action, '🔴 ERROR', `Error: ${error.message}`, inspector)
+    if (querySettings?.debug && debugPrinter) {
+      await debugPrinter(serviceName, action, '🔴 ERROR', `Error: ${error.message}`)
     }
     
-    // Create enhanced error with MicroQL context
-    const enhancedError = new Error(error.message)
-    enhancedError.originalError = error
-    enhancedError.serviceName = serviceName
-    enhancedError.action = action
-    enhancedError.taskName = taskContext?.taskName
-    enhancedError.args = args
-    enhancedError.serviceChain = taskContext?.serviceChain || []
+    // Enhance error with MicroQL context while preserving stack trace
+    error.serviceName = serviceName
+    error.action = action
+    error.queryName = queryContext?.queryName
+    error.args = args
+    error.serviceChain = queryContext?.serviceChain || []
     
-    throw enhancedError
+    throw error
   }
 }
 
 /**
  * Execute a single service call
  */
-const executeService = async (serviceName, action, args, services, source, contextStack = [], taskContext = null, inspector = null, querySettings = {}) => {
+const executeService = async (serviceName, action, args, services, source, contextStack = [], queryContext = null, inspector = null, querySettings = {}) => {
   const service = services[serviceName]
   if (!service) {
-    const taskInfo = taskContext ? ` in query task '${taskContext.taskName}'` : ''
-    const descriptorInfo = taskContext?.descriptor ? `\nService descriptor: ${JSON.stringify(taskContext.descriptor)}` : ''
-    throw new Error(`Service '${serviceName}' not found${taskInfo}${descriptorInfo}`)
+    const queryInfo = queryContext ? ` in query '${queryContext.queryName}'` : ''
+    const descriptorInfo = queryContext?.descriptor ? `\nService descriptor: ${JSON.stringify(queryContext.descriptor)}` : ''
+    throw new Error(`Service '${serviceName}' not found${queryInfo}${descriptorInfo}`)
   }
   
   // Check for parameter metadata to determine function compilation
@@ -638,7 +640,7 @@ const executeService = async (serviceName, action, args, services, source, conte
   for (const [key, value] of Object.entries(inspectToCompile)) {
     if (typeof value === 'object' && value !== null) {
       // Custom inspect settings provided - create inspector with these settings
-      const customInspector = createCompactInspector({ ...querySettings?.inspect, ...value })
+      const customInspector = createInspector(services, { ...querySettings?.inspect, ...value })
       finalArgs[key] = customInspector
     } else {
       // Use query-level inspector
@@ -711,11 +713,14 @@ const executeService = async (serviceName, action, args, services, source, conte
     }
   }
   
+  // Create debugPrinter if debug mode is enabled
+  const debugPrinter = querySettings?.debug ? createDebugPrinter(services, querySettings) : null
+  
   // Execute service with retry, guard, timeout, and error handling
   const executeWithRetry = async () => {
     try {
-      const servicePromise = guardServiceExecution(serviceName, action, argsWithoutReserved, service, taskContext, inspector, querySettings)
-      return await withTimeout(servicePromise, timeoutMs, serviceName, action, argsWithoutReserved, taskContext)
+      const servicePromise = guardServiceExecution(serviceName, action, argsWithoutReserved, service, queryContext, debugPrinter, querySettings)
+      return await withTimeout(servicePromise, timeoutMs, serviceName, action, argsWithoutReserved, queryContext)
     } catch (error) {
       // If onError descriptor is defined, compile and call it with error context
       if (onErrorFunction) {
@@ -725,7 +730,7 @@ const executeService = async (serviceName, action, args, services, source, conte
           serviceName,
           action,
           args: argsWithoutReserved,
-          taskName: taskContext?.taskName
+          queryName: queryContext?.queryName
         }
         
         try {
@@ -754,7 +759,7 @@ const executeService = async (serviceName, action, args, services, source, conte
 /**
  * Execute a chain of service calls
  */
-const executeChain = async (chain, services, source, contextStack = [], taskContext = null, inspector = null, querySettings = {}) => {
+const executeChain = async (chain, services, source, contextStack = [], queryContext = null, inspector = null, querySettings = {}) => {
   let result = null
   
   for (let i = 0; i < chain.length; i++) {
@@ -766,9 +771,9 @@ const executeChain = async (chain, services, source, contextStack = [], taskCont
     
     const [serviceName, action, args] = actualDescriptor
     
-    // Add step context to task context
-    const stepContext = taskContext ? {
-      ...taskContext,
+    // Add step context to query context
+    const stepContext = queryContext ? {
+      ...queryContext,
       chainStep: i + 1,
       chainTotal: chain.length,
       descriptor: descriptor
@@ -823,7 +828,7 @@ export default async function query(config) {
   const { 
     services, 
     given, 
-    query: jobs, 
+    query: queries, 
     methods = [], 
     select, 
     onError: queryOnError,
@@ -847,31 +852,22 @@ export default async function query(config) {
     debug: settings.debug
   }
   
-  const inspector = createCompactInspector(resolvedSettings.inspect)
-  
   // Prepare services (auto-wrap objects)
   const preparedServices = prepareServices(services)
   
+  // Create inspector with access to prepared services
+  const inspector = createInspector(preparedServices, resolvedSettings.inspect)
+  
   const results = {}
-  const tasks = new Map()
+  const queryMap = new Map()
   
   // Add given data to results immediately
   if (given) {
     results.given = given
   }
   
-  // Process each job to create task definitions
-  for (const [jobName, descriptor] of Object.entries(jobs)) {
-    
-    // Handle alias jobs (simple references)
-    if (typeof descriptor === 'string' && descriptor.match(DEP_REGEX)) {
-      const deps = getDependencies(descriptor)
-      tasks.set(jobName, {
-        deps,
-        execute: () => retrieve(descriptor, results)
-      })
-      continue
-    }
+  // Process each query to create query definitions
+  for (const [queryName, descriptor] of Object.entries(queries)) {
     
     // Handle service chains
     if (Array.isArray(descriptor) && descriptor.length > 0 && Array.isArray(descriptor[0])) {
@@ -885,9 +881,9 @@ export default async function query(config) {
         }
       })
       
-      tasks.set(jobName, {
+      queryMap.set(queryName, {
         deps: Array.from(allDeps),
-        execute: () => executeChain(chain, preparedServices, results, [], { taskName: jobName, descriptor: chain }, inspector, resolvedSettings)
+        execute: () => executeChain(chain, preparedServices, results, [], { queryName: queryName, descriptor: chain }, inspector, resolvedSettings)
       })
       continue
     }
@@ -905,13 +901,13 @@ export default async function query(config) {
       }
       deps.push(...getDependencies(args))
       
-      tasks.set(jobName, {
+      queryMap.set(queryName, {
         deps,
         execute: async () => {
           // Resolve the data source first
           const data = dataSource.startsWith('$.') ? retrieve(dataSource, results) : dataSource
           const finalArgs = withOnParameter(args, data)
-          return await executeService(serviceName, action, finalArgs, preparedServices, results, [], { taskName: jobName, descriptor: descriptor }, inspector, resolvedSettings)
+          return await executeService(serviceName, action, finalArgs, preparedServices, results, [], { queryName: queryName, descriptor: descriptor }, inspector, resolvedSettings)
         }
       })
       continue
@@ -922,96 +918,79 @@ export default async function query(config) {
       const [serviceName, action, args] = descriptor
       const deps = getDependencies(args)
       
-      tasks.set(jobName, {
+      queryMap.set(queryName, {
         deps,
-        execute: () => executeService(serviceName, action, args, preparedServices, results, [], { taskName: jobName, descriptor: descriptor }, inspector, resolvedSettings)
+        execute: () => executeService(serviceName, action, args, preparedServices, results, [], { queryName: queryName, descriptor: descriptor }, inspector, resolvedSettings)
       })
       continue
     }
     
-    throw new Error(`Invalid job descriptor for '${jobName}': ${JSON.stringify(descriptor)}`)
+    throw new Error(`Invalid query descriptor for '${queryName}': ${JSON.stringify(descriptor)}`)
   }
   
-  // Execute tasks in dependency order using topological sort
+  // Execute queries in dependency order using topological sort
   const executed = new Set()
   const executing = new Map()
+  executed.add('given')
   
-  const executeTask = async (taskName) => {
+  const executeQuery = async (queryName) => {
     // If already executed, return cached result
-    if (executed.has(taskName)) {
-      if (resolvedSettings?.debug) {
-        // Skip logging for cached results
-      }
-      return results[taskName]
+    if (executed.has(queryName)) {
+      return results[queryName]
     }
     
     // If currently executing, wait for it
-    if (executing.has(taskName)) {
-      if (resolvedSettings?.debug) {
-        // Skip logging for waiting on concurrent execution
-      }
-      return await executing.get(taskName)
+    if (executing.has(queryName)) {
+      return await executing.get(queryName)
     }
     
-    const task = tasks.get(taskName)
-    if (!task) {
-      // Check if it's a built-in value like 'given'
-      if (taskName === 'given' && given) {
-        if (resolvedSettings?.debug) {
-          // Skip logging for built-in values
-        }
-        executed.add(taskName)
-        return given
-      }
-      throw new Error(`Task '${taskName}' not found`)
+    const query = queryMap.get(queryName)
+    if (!query) {
+      throw new Error(`Query '${queryName}' not found`)
     }
     
     const promise = (async () => {
       try {
-        if (resolvedSettings?.debug) {
-          console.log(`🔄 Starting QUERY ${taskName}`)
-        }
+        console.log(`🔄 Starting QUERY ${queryName}`)
         
         // Execute dependencies first
-        for (const depName of task.deps) {
-          await executeTask(depName)
+        for (const depName of query.deps) {
+          await executeQuery(depName)
         }
         
-        // Execute this task
-        const result = await task.execute()
-        results[taskName] = result
-        executed.add(taskName)
+        // Execute this query
+        const result = await query.execute()
+        results[queryName] = result
+        executed.add(queryName)
         
         // Always show query completion
-        console.log(`✅ Completed QUERY ${taskName}:`)
+        console.log(`✅ Completed QUERY ${queryName}`)
         console.log(inspector(result))
         
         return result
       } catch (error) {
-        // If error doesn't already have task context, add it
-        if (!error.taskName) {
-          const enhancedMessage = `Error in query task '${taskName}': ${error.message}`
-          const enhancedError = new Error(enhancedMessage)
-          enhancedError.originalError = error
-          enhancedError.taskName = taskName
-          throw enhancedError
+        // If error doesn't already have query context, add it
+        if (!error.queryName) {
+          // Preserve stack trace by modifying the existing error
+          error.message = `Error in query '${queryName}': ${error.message}`
+          error.queryName = queryName
         }
         throw error
       }
     })()
     
-    executing.set(taskName, promise)
+    executing.set(queryName, promise)
     return await promise
   }
   
   try {
-    // Execute all tasks
-    const allTaskNames = Array.from(tasks.keys())
+    // Execute all queries
+    const allQueryNames = Array.from(queryMap.keys())
     
     // Always show what queries are being executed
-    console.log(`🚀 EXECUTING QUERIES: ${allTaskNames.join(', ')}`)
+    console.log(`🚀 EXECUTING QUERIES: ${allQueryNames.join(', ')}`)
     
-    await Promise.all(allTaskNames.map(name => executeTask(name)))
+    await Promise.all(allQueryNames.map(name => executeQuery(name)))
     
     if (settings?.debug) {
       console.log(`📊 RESULTS SUMMARY:`)
@@ -1052,8 +1031,8 @@ export default async function query(config) {
         const errorContext = {
           error: error.message,
           originalError: error,
-          taskName: error.taskName,
-          query: jobs
+          queryName: error.queryName,
+          query: queries
         }
         
         const compiledOnError = compileServiceFunction(queryOnError, preparedServices, results, [errorContext], inspector, resolvedSettings)
@@ -1061,11 +1040,9 @@ export default async function query(config) {
       } catch (onErrorErr) {
         console.error(`Query-level onError handler failed: ${onErrorErr.message}`)
       }
-    }
-    
-    // If we have a query-level onError handler, still throw to maintain flow
-    // If no handler, default handler will exit the process
-    if (!queryOnError) {
+    } else {
+      // If we have a query-level onError handler, still throw to maintain flow
+      // If no handler, default handler will exit the process
       defaultErrorHandler(error, 'query execution', resolvedSettings)
     }
     

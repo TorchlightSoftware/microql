@@ -26,7 +26,7 @@ describe('Error Handling Tests', () => {
       return {
         queryLogged: true,
         error: errorContext.error,
-        taskName: errorContext.taskName
+        queryName: errorContext.queryName
       }
     }
   }
@@ -52,15 +52,15 @@ describe('Error Handling Tests', () => {
       const config = {
         services: { error: errorService },
         query: {
-          failedTask: ['error', 'fail', { ignoreErrors: true }],
-          successTask: ['error', 'succeed', {}]
+          failedQuery: ['error', 'fail', { ignoreErrors: true }],
+          successQuery: ['error', 'succeed', {}]
         },
-        select: ['failedTask', 'successTask']
+        select: ['failedQuery', 'successQuery']
       }
       
       const result = await query(config)
-      assert.strictEqual(result.failedTask, null)
-      assert.deepStrictEqual(result.successTask, { success: true })
+      assert.strictEqual(result.failedQuery, null)
+      assert.deepStrictEqual(result.successQuery, { success: true })
     })
     
     it('should work with both onError and ignoreErrors', async () => {
@@ -142,7 +142,7 @@ describe('Error Handling Tests', () => {
       const config = {
         services: { error: errorService, capture: captureService },
         query: {
-          testTask: ['error', 'fail', {
+          testQuery: ['error', 'fail', {
             someArg: 'value',
             onError: ['capture', 'capture', { on: '@' }],
             ignoreErrors: true
@@ -157,7 +157,7 @@ describe('Error Handling Tests', () => {
       assert.strictEqual(capturedContext.serviceName, 'error')
       assert.strictEqual(capturedContext.action, 'fail')
       assert.deepStrictEqual(capturedContext.args, { someArg: 'value', timeout: 5000 })
-      assert.strictEqual(capturedContext.taskName, 'testTask')
+      assert.strictEqual(capturedContext.queryName, 'testQuery')
     })
   })
 })

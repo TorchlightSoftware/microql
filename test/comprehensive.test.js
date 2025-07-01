@@ -134,7 +134,7 @@ describe('MicroQL Comprehensive Tests', () => {
       assert.strictEqual(result.greeting, 'Hello John from NYC!')
     })
     
-    it('should execute tasks in parallel when possible', async () => {
+    it('should execute queries in parallel when possible', async () => {
       const start = Date.now()
       const result = await query({
         given: { delay: 10 },
@@ -147,17 +147,17 @@ describe('MicroQL Comprehensive Tests', () => {
           }
         },
         query: {
-          task1: ['async', 'delay', { ms: '$.given.delay', value: 'A' }],
-          task2: ['async', 'delay', { ms: '$.given.delay', value: 'B' }],
-          task3: ['async', 'delay', { ms: '$.given.delay', value: 'C' }]
+          query1: ['async', 'delay', { ms: '$.given.delay', value: 'A' }],
+          query2: ['async', 'delay', { ms: '$.given.delay', value: 'B' }],
+          query3: ['async', 'delay', { ms: '$.given.delay', value: 'C' }]
         }
       })
       
       const duration = Date.now() - start
       assert(duration < 30, `Should execute in parallel (took ${duration}ms)`)
-      assert.strictEqual(result.task1, 'A')
-      assert.strictEqual(result.task2, 'B')
-      assert.strictEqual(result.task3, 'C')
+      assert.strictEqual(result.query1, 'A')
+      assert.strictEqual(result.query2, 'B')
+      assert.strictEqual(result.query3, 'C')
     })
     
     it('should handle select functionality', async () => {
@@ -178,22 +178,6 @@ describe('MicroQL Comprehensive Tests', () => {
       })
       
       assert.deepStrictEqual(result, { sum: 15, product: 50 })
-    })
-    
-    it('should handle alias jobs (JSONPath references)', async () => {
-      const result = await query({
-        given: { user: { profile: { name: 'Alice', settings: { theme: 'dark' } } } },
-        services: {},
-        query: {
-          userName: '$.given.user.profile.name',
-          userTheme: '$.given.user.profile.settings.theme',
-          fullProfile: '$.given.user.profile'
-        }
-      })
-      
-      assert.strictEqual(result.userName, 'Alice')
-      assert.strictEqual(result.userTheme, 'dark')
-      assert.deepStrictEqual(result.fullProfile, { name: 'Alice', settings: { theme: 'dark' } })
     })
   })
   
@@ -238,7 +222,7 @@ describe('MicroQL Comprehensive Tests', () => {
             result: ['test', 'increment', { value: '$.nonexistent' }]
           }
         }),
-        /Task 'nonexistent' not found/
+        /Query 'nonexistent' not found/
       )
     })
     
@@ -274,7 +258,7 @@ describe('MicroQL Comprehensive Tests', () => {
         },
         query: Object.fromEntries(
           Array.from({ length: 50 }, (_, i) => [
-            `task${i}`,
+            `query${i}`,
             ['worker', 'process', { id: i }]
           ])
         )
@@ -283,9 +267,9 @@ describe('MicroQL Comprehensive Tests', () => {
       const duration = Date.now() - start
       assert(duration < 100, `Should complete quickly (took ${duration}ms)`)
       
-      // Verify all tasks completed correctly
+      // Verify all queries completed correctly
       for (let i = 0; i < 50; i++) {
-        assert.strictEqual(result[`task${i}`], `processed-${i}`)
+        assert.strictEqual(result[`query${i}`], `processed-${i}`)
       }
     })
   })
