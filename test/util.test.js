@@ -373,7 +373,7 @@ describe('Util Service Tests', () => {
         methods: ['util'],
         query: {
           result: ['$.given.message', 'util:print', { 
-            inspect: { maxStringLength: 30 },
+            settings: { inspect: { maxStringLength: 30 } },
             color: 'green',
             ts: false
           }]

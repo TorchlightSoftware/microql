@@ -53,43 +53,44 @@ const getServiceColor = (serviceName) => {
 /**
  * Create unified debug printer for all MicroQL debug output
  * Always uses util service - no defensive programming needed since it's in same codebase
- * @param {Object} utilService - The util service
  * @param {Object} querySettings - Query settings with inspect configuration
  * @returns {Object} Debug functions
  */
-const createDebugPrinter = (utilService, querySettings = {}) => {
+const createDebugPrinter = (querySettings = {}) => {
   return {
     // Service debug messages: serviceName, action, message, value
-    async service(serviceName, action, message, value) {
+    async service(serviceName, action, status, value) {
       const color = getServiceColor(serviceName)
-      const formattedMessage = `${message} ${serviceName}:${action}`
+      const formattedMessage = `${status} ${serviceName}:${action}`
 
       await utilService.print({
-        on: typeof value === 'string' ? `${formattedMessage}\n   ${value}` : formattedMessage,
+        on: formattedMessage,
         color,
-        inspect: querySettings.inspect
+        settings: querySettings
       })
 
       if (typeof value !== 'string') {
         await utilService.print({
           on: value,
-          inspect: querySettings.inspect,
+          color,
+          settings: querySettings,
           ts: false
         })
       }
     },
 
-    // Query debug messages: queryName, message, result
-    async query(queryName, message, result = null) {
+    // Query debug messages: queryName, status, result
+    async query(queryName, status, result = null) {
       await utilService.print({
-        on: `${message} ${queryName}`,
+        on: `${status} ${queryName}`,
         color: 'white',
       })
 
       if (result !== null) {
         await utilService.print({
           on: result,
-          inspect: querySettings.inspect,
+          settings: querySettings,
+          color: 'white',
           ts: false
         })
       }
@@ -100,15 +101,11 @@ const createDebugPrinter = (utilService, querySettings = {}) => {
 /**
  * Format error with consistent MicroQL format
  * @param {Error} error - The error to format
- * @param {string} queryName - Query name where error occurred
- * @param {string} serviceName - Service name
- * @param {string} action - Service action
- * @param {Object} args - Service arguments
  * @param {Object} inspectSettings - Inspect settings for formatting args
- * @param {Array} serviceChain - Chain of service calls leading to error
  * @returns {string} Formatted error message
  */
-const formatError = (error, queryName, serviceName, action, args, inspectSettings, serviceChain = []) => {
+const formatError = (error, inspectSettings) => {
+  const {queryName, serviceName, action, args, serviceChain} = error
   const queryPrefix = queryName ? `:${queryName}: ` : ''
   const chainStr = serviceChain.length > 0 ? serviceChain.map(s => `[${s}]`).join('') : ''
   const serviceStr = `[${serviceName}:${action}]`
@@ -143,15 +140,7 @@ const defaultErrorHandler = (error, context, settings = {}) => {
   // defaultErrorHandler doesn't need debug printing anyway
   let formattedError
   if (error.serviceName && error.action && error.queryName) {
-    formattedError = formatError(
-      error,
-      error.queryName,
-      error.serviceName,
-      error.action,
-      error.args,
-      settings.inspect,
-      error.serviceChain
-    )
+    formattedError = formatError(error, settings.inspect)
   } else {
     formattedError = `${context ? `In ${context}: ` : ''}${error.message}`
   }
@@ -490,10 +479,7 @@ const guardServiceExecution = async (serviceName, action, args, service, queryCo
   try {
     // Debug logging when entering service
     if (querySettings?.debug && debugPrinter) {
-      await debugPrinter.service(serviceName, action, '🔵 ENTERING', `Args: ${typeof args}`)
-      if (typeof args === 'object' && args !== null) {
-        await debugPrinter.service(serviceName, action, '   Args:', args)
-      }
+      await debugPrinter.service(serviceName, action, '🔵 ENTERING', args)
     }
 
     const result = await service(action, args)
@@ -546,7 +532,7 @@ const executeService = async (serviceName, action, args, services, source, conte
   // Build set of parameters that should skip resolution
   const skipParams = new Set()
   const functionsToCompile = {}
-  const inspectToCompile = {}
+  const settingsToCompile = {}
 
   // Add reserved MicroQL parameters to skip list
   skipParams.add('timeout')
@@ -565,9 +551,9 @@ const executeService = async (serviceName, action, args, services, source, conte
       // Mark template for compilation to function
       functionsToCompile[key] = value
       skipParams.add(key)
-    } else if (paramInfo?.type === 'inspect') {
-      // Mark for inspect compilation
-      inspectToCompile[key] = value
+    } else if (paramInfo?.type === 'settings') {
+      // Mark for settings compilation
+      settingsToCompile[key] = value
       skipParams.add(key)
     }
   }
@@ -591,16 +577,10 @@ const executeService = async (serviceName, action, args, services, source, conte
     }
   }
 
-  // Handle inspect compilation - pass the inspector function or create from settings
-  for (const [key, value] of Object.entries(inspectToCompile)) {
-    if (typeof value === 'object' && value !== null) {
-      // Custom inspect settings provided - create inspector with these settings
-      const customInspector = (obj) => inspect(obj, { ...querySettings?.inspect, ...value })
-      finalArgs[key] = customInspector
-    } else {
-      // Use query-level inspect settings
-      finalArgs[key] = (obj) => inspect(obj, querySettings?.inspect)
-    }
+  // Handle settings compilation - pass the resolved settings
+  for (const [key, value] of Object.entries(settingsToCompile)) {
+    // Always pass the full resolved settings
+    finalArgs[key] = querySettings
   }
 
   // Handle timeout, retry, onError, and ignoreErrors logic
@@ -662,7 +642,7 @@ const executeService = async (serviceName, action, args, services, source, conte
   }
 
   // Create unified debug printer if debug mode is enabled
-  const debugPrinter = querySettings?.debug ? createDebugPrinter(services.util, querySettings) : null
+  const debugPrinter = querySettings?.debug ? createDebugPrinter(querySettings) : null
 
   // Execute service with retry, guard, timeout, and error handling
   const executeWithRetry = async () => {
@@ -812,7 +792,7 @@ export default async function query(config) {
 
   // Create unified debug printer for all debug output
   const debugPrinter = resolvedSettings.debug ?
-    createDebugPrinter(preparedServices.util, resolvedSettings) : null
+    createDebugPrinter(resolvedSettings) : null
 
 
   const results = {}

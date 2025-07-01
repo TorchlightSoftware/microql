@@ -146,8 +146,8 @@ const util = {
    * Print values to console with formatting options and color coding
    * Uses query-level inspect settings for consistent formatting
    */
-  async print({ on, inspect, color, ts = true }) {
-    if (inspect && typeof inspect !== 'object') throw new Error("`inspect` if provided must be an object")
+  async print({ on, settings, color, ts = true }) {
+    if (settings && typeof settings !== 'object') throw new Error("`settings` if provided must be an object")
 
     const inspectSettings = {
       depth: 3,
@@ -155,7 +155,7 @@ const util = {
       compact: false,
       maxArrayLength: 10,
       maxStringLength: 200,
-      ...inspect
+      ...settings?.inspect
     }
 
     // Format timestamp if enabled
@@ -221,7 +221,7 @@ util.when._params = {
 }
 
 util.print._params = {
-  // No special parameters - all arguments passed as-is
+  settings: {type: 'settings'}
 }
 
 export default util

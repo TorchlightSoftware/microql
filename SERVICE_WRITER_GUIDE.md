@@ -111,9 +111,9 @@ For both service and template functions:
 - Returns the resolved template object with all @ symbols properly resolved
 - Can be called with @, @@, @@@, etc. to represent first, second, third level context within the query.
 
-### Inspect Parameter
+### Settings Parameter
 
-- **`{type: 'inspect'}`** - Parameter receives the query's inspect configuration for consistent application of verbosity levels throughout our logging.
+- **`{type: 'settings'}`** - Parameter receives the query's resolved settings object, which includes timeout, inspect, and debug configurations.
 
 #### Template Parameters
 
