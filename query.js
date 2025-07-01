@@ -118,7 +118,6 @@ const formatError = (error, inspectSettings) => {
   const errorLine = `Error: ${queryPrefix}${chainStr}${serviceStr} ${message}`
 
   if (args && typeof args === 'object' && Object.keys(args).length > 0) {
-    // Inspector already handles filtering hidden properties
     const argsStr = inspect(args, inspectSettings)
     return `${errorLine}\nArgs: ${argsStr}`
   }

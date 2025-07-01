@@ -178,7 +178,7 @@ const util = {
       return val
     }
 
-    // Use provided inspect settings or defaults if inspector function wasn't passed
+    // use util.inspect with provided settings
     const util = await import('util')
     let formatted
 
