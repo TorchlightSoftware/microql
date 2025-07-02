@@ -41,8 +41,8 @@ const result = await query({
 
 - **Service Object Auto-Wrapping**: Provide service objects that get automatically wrapped
 - **Method Syntax**: Use cleaner syntax like `['@.data', 'service:method', args]`
-- **Service Chains**: Chain operations using the `@` symbol for context flow
-- **Context References**: Use `@`, `@@`, `@@@` for sophisticated nested data access
+- **Service Chains**: Chain operations using the `@` symbol for chain flow
+- **Chain References**: Use `@`, `@@`, `@@@` for sophisticated nested data access
 - **Built-in Reliability**: Timeout and retry mechanisms
 
 For detailed examples and advanced usage, see [HOW_MICROQL_WORKS.md](HOW_MICROQL_WORKS.md).
@@ -75,9 +75,9 @@ Services can be functions or objects (auto-wrapped). For complete service writin
 
 ### @ Symbol Usage
 
-- `@` - first level context
-- `@@` - second level context
-- `@.field` - Access field of context
+- `@` - first level in chain
+- `@@` - second level in chain  
+- `@.field` - Access field from chain level
 
 ## Timeouts & Reliability
 

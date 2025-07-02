@@ -13,7 +13,7 @@
  *
  * Key features:
  * - Promise-based async service orchestration
- * - Context stack for nested @ symbol resolution (@, @@, @@@)
+ * - Chain stack for nested @ symbol resolution (@, @@, @@@)
  * - Method syntax sugar: ['@.data', 'service:method', args]
  * - Automatic service object wrapping
  * - Comprehensive error context for debugging
@@ -25,12 +25,22 @@ import retrieve from './retrieve.js'
 import { COLOR_NAMES } from './util.js'
 import utilService from './util.js'
 import { inspect } from 'util'
+import { ExecutionContext } from './executionContext.js'
+import { processParameters, setCompileServiceFunction } from './processParameters.js'
 
 /** @type {RegExp} JSONPath dependency pattern for $.queryName references */
 const DEP_REGEX = /\$\.(\w+)/
 
 /** @type {RegExp} Context reference pattern for @ symbols */
 const AT_REGEX = /^@+/
+
+/**
+ * Better type checking utility (from law)
+ * Returns precise type instead of just "object" for arrays, dates, etc.
+ */
+const getType = (obj) => {
+  return Object.prototype.toString.call(obj).slice(8, -1)
+}
 
 /**
  * Service color assignment for debug logging
@@ -494,19 +504,19 @@ const countAtSymbols = (str) => {
  * Ensures proper error messages when context stack depth is insufficient
  * @param {number} atCount - Number of @ symbols (1 for @, 2 for @@, etc.)
  * @param {number} contextIndex - Calculated context index (atCount - 1)
- * @param {Array} contextStack - Current context stack
+ * @param {Array} chainStack - Current chain stack
  * @throws {Error} If context index is invalid
  */
-const validateContextIndex = (atCount, contextIndex, contextStack) => {
-  if (contextIndex < 0 || contextIndex >= contextStack.length) {
-    throw new Error(`${'@'.repeat(atCount)} used but only ${contextStack.length} context levels available (@ through ${'@'.repeat(contextStack.length)})`)
+const validateContextIndex = (atCount, contextIndex, chainStack) => {
+  if (contextIndex < 0 || contextIndex >= chainStack.length) {
+    throw new Error(`${'@'.repeat(atCount)} used but only ${chainStack.length} context levels available (@ through ${'@'.repeat(chainStack.length)})`)
   }
 }
 
 /**
  * Compile a service descriptor into a wrapped function that accepts iteration context
  */
-const compileServiceFunction = (serviceDescriptor, services, source, contextStack = [], querySettings = {}, debugPrinter = null) => {
+const compileServiceFunction = (serviceDescriptor, ctx) => {
   // Extract service information for wrapper metadata
   let serviceName, action, args, timeoutMs = null, retryCount = 0
   
@@ -526,27 +536,27 @@ const compileServiceFunction = (serviceDescriptor, services, source, contextStac
     }
     
     // Use service-specific timeout from settings if no arg timeout provided
-    if (timeoutMs === null && querySettings?.timeout?.[serviceName] !== undefined) {
-      timeoutMs = querySettings.timeout[serviceName]
+    if (timeoutMs === null && ctx.querySettings?.timeout?.[serviceName] !== undefined) {
+      timeoutMs = ctx.querySettings.timeout[serviceName]
     }
     
     // Use default timeout from settings if nothing else specified
-    if (timeoutMs === null && querySettings?.timeout?.default !== undefined) {
-      timeoutMs = querySettings.timeout.default
+    if (timeoutMs === null && ctx.querySettings?.timeout?.default !== undefined) {
+      timeoutMs = ctx.querySettings.timeout.default
     }
   }
 
   // Create base function
   const baseFunction = async (iterationItem) => {
-    const newContextStack = [...contextStack, iterationItem]
+    const newChainStack = [...ctx.chainStack, iterationItem]
 
     // Check if this is a chain (array of arrays)
     if (Array.isArray(serviceDescriptor) && serviceDescriptor.length > 0 && Array.isArray(serviceDescriptor[0])) {
-      // Execute as chain
-      return await executeChain(serviceDescriptor, services, source, newContextStack, null, querySettings)
+      // Execute as chain  
+      return await executeChain(serviceDescriptor, ctx.with({ chainStack: newChainStack }))
     } else if (Array.isArray(serviceDescriptor) && serviceDescriptor.length >= 3) {
       // Execute as regular service call - but use simplified executeService without wrappers
-      return await executeServiceCore(serviceName, action, args, services, source, newContextStack, null, querySettings, debugPrinter)
+      return await executeServiceCore(serviceName, action, args, newChainStack, ctx)
     }
 
     throw new Error('Invalid service descriptor for function compilation')
@@ -567,12 +577,12 @@ const compileServiceFunction = (serviceDescriptor, services, source, contextStac
       wrappedFunction = withTimeoutWrapper(wrappedFunction, timeoutMs, serviceName, action, queryContext)
     }
     
-    if (debugPrinter) {
+    if (ctx.debugPrinter) {
       wrappedFunction = withGuard(wrappedFunction, {
         serviceName,
         action,
-        debugPrinter,
-        querySettings,
+        debugPrinter: ctx.debugPrinter,
+        querySettings: ctx.querySettings,
         queryContext
       })
     }
@@ -587,41 +597,41 @@ const compileServiceFunction = (serviceDescriptor, services, source, contextStac
  * Resolve @ symbols and JSONPath in arguments with context stack support
  * @param {*} args - Arguments to resolve (can be object, array, or primitive)
  * @param {Object} source - Source data object containing query results
- * @param {Array} contextStack - Stack of context items for @ symbol resolution (absolute indexing)
+ * @param {Array} chainStack - Stack of chain items for @ symbol resolution (absolute indexing)
  * @param {Set} skipParams - Set of parameter names to skip resolution for
  * @returns {*} Resolved arguments with @ symbols and JSONPath replaced
  */
-export const resolveArgsWithContext = (args, source, contextStack = [], skipParams = new Set()) => {
+export const resolveArgsWithContext = (args, source, chainStack = [], skipParams = new Set()) => {
   const resolve = (value) => {
     if (typeof value !== 'string') return value
 
-    // Handle @ symbol with context stack
+    // Handle @ symbol with chain stack
     if (AT_REGEX.test(value)) {
       const atCount = countAtSymbols(value)
 
       if (value === '@'.repeat(atCount)) {
         // Pure @ symbols - @ refers to absolute context indexing
-        // @ = first context (contextStack[0]), @@ = second context (contextStack[1]), etc.
+        // @ = first chain level (chainStack[0]), @@ = second chain level (chainStack[1]), etc.
         const contextIndex = atCount - 1
 
-        validateContextIndex(atCount, contextIndex, contextStack)
+        validateContextIndex(atCount, contextIndex, chainStack)
 
-        return contextStack[contextIndex] || null
+        return chainStack[contextIndex] || null
       }
 
-      // Handle @.field with context stack
+      // Handle @.field with chain stack
       if (value.startsWith('@'.repeat(atCount) + '.')) {
         const fieldPath = value.slice(atCount + 1) // Remove @ symbols and dot
-        // @ refers to context level
+        // @ refers to chain level
         const contextIndex = atCount - 1
 
-        validateContextIndex(atCount, contextIndex, contextStack)
+        validateContextIndex(atCount, contextIndex, chainStack)
 
-        const contextItem = contextStack[contextIndex] || null
+        const contextItem = chainStack[contextIndex] || null
 
         // $ sign here represents JSONPath syntax, not MicroQL
         // We're using JSONPath to query the path, even though
-        // @ context is the target
+        // @ chain item is the target
         if (contextItem && fieldPath) {
           const path = '$.' + fieldPath
           return retrieve(path, contextItem)
@@ -647,7 +657,7 @@ export const resolveArgsWithContext = (args, source, contextStack = [], skipPara
         // Skip resolution for this parameter - keep as-is
         resolved[key] = value
       } else if (typeof value === 'object' && value !== null) {
-        resolved[key] = resolveArgsWithContext(value, source, contextStack, skipParams)
+        resolved[key] = resolveArgsWithContext(value, source, chainStack, skipParams)
       } else {
         resolved[key] = resolve(value)
       }
@@ -696,101 +706,20 @@ const guardServiceExecution = async (serviceName, action, args, service, queryCo
 /**
  * Core service execution without wrappers - used by compiled functions
  */
-const executeServiceCore = async (serviceName, action, args, services, source, contextStack = [], queryContext = null, querySettings = {}, debugPrinter = null) => {
-  const service = services[serviceName]
+const executeServiceCore = async (serviceName, action, args, chainStack, ctx) => {
+  const service = ctx.services[serviceName]
   if (!service) {
-    const queryInfo = queryContext ? ` in query '${queryContext.queryName}'` : ''
-    const descriptorInfo = queryContext?.descriptor ? `\nService descriptor: ${JSON.stringify(queryContext.descriptor)}` : ''
-    throw new Error(`Service '${serviceName}' not found${queryInfo}${descriptorInfo}`)
+    const queryInfo = ctx.queryName ? ` in query '${ctx.queryName}'` : ''
+    throw new Error(`Service '${serviceName}' not found${queryInfo}`)
   }
 
-  // Extract timeout and retry values from args and settings (same logic as executeService)
-  let timeoutMs = null, retryCount = 0
-  
-  if (args && typeof args === 'object') {
-    if (args.timeout !== undefined) {
-      timeoutMs = args.timeout
-    }
-    if (args.retry !== undefined) {
-      retryCount = Math.max(0, parseInt(args.retry) || 0)
-    }
-  }
+  // Extract timeout and retry values using context methods
+  const timeoutMs = ctx.getTimeout(serviceName, args?.timeout)
+  const retryCount = ctx.getRetry(args?.retry)
 
-  // Use service-specific timeout from settings if no arg timeout provided
-  if (timeoutMs === null && querySettings?.timeout?.[serviceName] !== undefined) {
-    timeoutMs = querySettings.timeout[serviceName]
-  }
-
-  // Use default timeout from settings if nothing else specified
-  if (timeoutMs === null && querySettings?.timeout?.default !== undefined) {
-    timeoutMs = querySettings.timeout.default
-  }
-
-  // Check for parameter metadata to determine function compilation
-  let paramMetadata = {}
-  if (typeof service === 'function' && service._originalService) {
-    // This is a wrapped service object, get metadata from the original
-    paramMetadata = service._originalService[action]?._params || {}
-  } else if (typeof service === 'object') {
-    // Direct service object access
-    const serviceMethod = service[action]
-    paramMetadata = serviceMethod?._params || {}
-  }
-
-  // Build set of parameters that should skip resolution
-  const skipParams = new Set()
-  const functionsToCompile = {}
-  const settingsToCompile = {}
-
-  // Add reserved MicroQL parameters to skip list
-  skipParams.add('timeout')
-  skipParams.add('retry')
-  skipParams.add('onError')
-  skipParams.add('ignoreErrors')
-
-  for (const [key, value] of Object.entries(args)) {
-    const paramInfo = paramMetadata[key]
-
-    if (paramInfo?.type === 'function' && Array.isArray(value)) {
-      // Mark for function compilation
-      functionsToCompile[key] = value
-      skipParams.add(key)
-    } else if (paramInfo?.type === 'template' && typeof value === 'object' && value !== null) {
-      // Mark template for compilation to function
-      functionsToCompile[key] = value
-      skipParams.add(key)
-    } else if (paramInfo?.type === 'settings') {
-      // Mark for settings compilation
-      settingsToCompile[key] = value
-      skipParams.add(key)
-    }
-  }
-
-  // Resolve arguments while skipping special parameters
-  const finalArgs = resolveArgsWithContext(args, source, contextStack, skipParams)
-
-  // Now handle function compilation - use passed debugPrinter for nested compilations
-  
-  for (const [key, value] of Object.entries(functionsToCompile)) {
-    const paramInfo = paramMetadata[key]
-
-    if (paramInfo?.type === 'template') {
-      // Compile template to function with context layer
-      finalArgs[key] = async (iterationItem) => {
-        const newContextStack = [...contextStack, iterationItem]
-        return resolveArgsWithContext(value, source, newContextStack)
-      }
-    } else {
-      // Compile service descriptor to function
-      finalArgs[key] = compileServiceFunction(value, services, source, contextStack, querySettings, debugPrinter)
-    }
-  }
-
-  // Handle settings compilation - deep merge provided settings with query settings
-  for (const [key, value] of Object.entries(settingsToCompile)) {
-    // Deep merge the service call settings with query settings, giving precedence to service call settings
-    finalArgs[key] = deepMerge(querySettings, value)
-  }
+  // Process parameters using the new parameter processor
+  const processCtx = ctx.with({ chainStack })
+  const finalArgs = processParameters(args, service, action, processCtx)
 
   // Remove non-service reserved parameters for service execution
   // timeout and retry are passed to services according to SERVICE_WRITER_GUIDE.md
@@ -809,9 +738,12 @@ const executeServiceCore = async (serviceName, action, args, services, source, c
   // Special handling for util service (legacy)
   if (serviceName === 'util') {
     // Provide util service with access to other services and context
-    argsWithoutReserved._services = services
-    argsWithoutReserved._context = source
+    argsWithoutReserved._services = ctx.services
+    argsWithoutReserved._context = ctx.source
   }
+
+  // Track service usage for tearDown
+  ctx.trackService(serviceName)
 
   // Execute the service directly
   return await service(action, argsWithoutReserved)
@@ -820,39 +752,17 @@ const executeServiceCore = async (serviceName, action, args, services, source, c
 /**
  * Execute a single service call with full wrapper support
  */
-const executeService = async (serviceName, action, args, services, source, contextStack = [], queryContext = null, querySettings = {}, debugPrinter = null) => {
+const executeService = async (serviceName, action, args, chainStack, ctx) => {
   // Extract wrapper parameters
-  let timeoutMs = null, retryCount = 0, onErrorFunction = null, ignoreErrors = false
-  
-  if (args && typeof args === 'object') {
-    if (args.timeout !== undefined) {
-      timeoutMs = args.timeout
-    }
-    if (args.retry !== undefined) {
-      retryCount = Math.max(0, parseInt(args.retry) || 0)
-    }
-    if (args.onError !== undefined && Array.isArray(args.onError)) {
-      onErrorFunction = args.onError
-    }
-    if (args.ignoreErrors !== undefined) {
-      ignoreErrors = Boolean(args.ignoreErrors)
-    }
-  }
-
-  // Use service-specific timeout from settings if no arg timeout provided
-  if (timeoutMs === null && querySettings?.timeout?.[serviceName] !== undefined) {
-    timeoutMs = querySettings.timeout[serviceName]
-  }
-
-  // Use default timeout from settings if nothing else specified
-  if (timeoutMs === null && querySettings?.timeout?.default !== undefined) {
-    timeoutMs = querySettings.timeout.default
-  }
+  const timeoutMs = ctx.getTimeout(serviceName, args?.timeout)
+  const retryCount = ctx.getRetry(args?.retry)
+  const onErrorFunction = args?.onError
+  const ignoreErrors = Boolean(args?.ignoreErrors)
 
   // Create base service execution function
   const baseFunction = async () => {
     try {
-      return await executeServiceCore(serviceName, action, args, services, source, contextStack, queryContext, querySettings, debugPrinter)
+      return await executeServiceCore(serviceName, action, args, chainStack, ctx)
     } catch (error) {
       // Handle onError if defined
       if (onErrorFunction) {
@@ -873,11 +783,11 @@ const executeService = async (serviceName, action, args, services, source, conte
           serviceName,
           action,
           args: argsForErrorContext,
-          queryName: queryContext?.queryName
+          queryName: ctx.queryName
         }
 
         try {
-          const compiledOnError = compileServiceFunction(onErrorFunction, services, source, [errorContext], querySettings, debugPrinter)
+          const compiledOnError = compileServiceFunction(onErrorFunction, ctx.with({ chainStack: [errorContext] }))
           await compiledOnError(errorContext)
         } catch (onErrorErr) {
           console.error(`onError handler failed: ${onErrorErr.message}`)
@@ -903,16 +813,16 @@ const executeService = async (serviceName, action, args, services, source, conte
   }
 
   if (timeoutMs && timeoutMs > 0) {
-    wrappedFunction = withTimeoutWrapper(wrappedFunction, timeoutMs, serviceName, action, queryContext)
+    wrappedFunction = withTimeoutWrapper(wrappedFunction, timeoutMs, serviceName, action, { queryName: ctx.queryName })
   }
 
-  if (debugPrinter) {
+  if (ctx.debugPrinter) {
     wrappedFunction = withGuard(wrappedFunction, {
       serviceName,
       action,
-      debugPrinter,
-      querySettings,
-      queryContext
+      debugPrinter: ctx.debugPrinter,
+      querySettings: ctx.querySettings,
+      queryContext: { queryName: ctx.queryName }
     })
   }
 
@@ -922,7 +832,7 @@ const executeService = async (serviceName, action, args, services, source, conte
 /**
  * Execute a chain of service calls
  */
-const executeChain = async (chain, services, source, contextStack = [], queryContext = null, querySettings = {}, debugPrinter = null) => {
+const executeChain = async (chain, ctx) => {
   let result = null
 
   for (let i = 0; i < chain.length; i++) {
@@ -934,20 +844,12 @@ const executeChain = async (chain, services, source, contextStack = [], queryCon
 
     const [serviceName, action, args] = actualDescriptor
 
-    // Add step context to query context
-    const stepContext = queryContext ? {
-      ...queryContext,
-      chainStep: i + 1,
-      chainTotal: chain.length,
-      descriptor: descriptor
-    } : null
-
     // For chains, update the iteration value at the current nesting level
     // Each chain step's result becomes the new iteration value at this level
-    const currentContextStack = result !== null ? [result, ...contextStack.slice(1)] : contextStack
+    const currentChainStack = result !== null ? [result, ...ctx.chainStack.slice(1)] : ctx.chainStack
 
     try {
-      result = await executeService(serviceName, action, args, services, source, currentContextStack, stepContext, querySettings, debugPrinter)
+      result = await executeService(serviceName, action, args, currentChainStack, ctx.with({ queryName: `${ctx.queryName}-chain-${i+1}` }))
     } catch (error) {
       // Add chain step to service chain for error context
       if (!error.serviceChain) {
@@ -1025,6 +927,9 @@ export default async function query(config) {
 
   const preparedServices = prepareServices(servicesWithUtil)
 
+  // Track which services are actually used for tearDown
+  const usedServices = new Set()
+
   // Create unified debug printer for all debug output
   const debugPrinter = resolvedSettings.debug ?
     createDebugPrinter(resolvedSettings) : null
@@ -1055,7 +960,18 @@ export default async function query(config) {
 
       queryMap.set(queryName, {
         deps: Array.from(allDeps),
-        execute: () => executeChain(chain, preparedServices, results, [], { queryName: queryName, descriptor: chain }, resolvedSettings, debugPrinter)
+        execute: () => {
+          const ctx = new ExecutionContext({
+            services: preparedServices,
+            source: results,
+            chainStack: [],
+            querySettings: resolvedSettings,
+            debugPrinter,
+            queryName,
+            usedServices
+          })
+          return executeChain(chain, ctx)
+        }
       })
       continue
     }
@@ -1079,7 +995,16 @@ export default async function query(config) {
           // Resolve the data source first
           const data = dataSource.startsWith('$.') ? retrieve(dataSource, results) : dataSource
           const finalArgs = withOnParameter(args, data)
-          return await executeService(serviceName, action, finalArgs, preparedServices, results, [], { queryName: queryName, descriptor: descriptor }, resolvedSettings, debugPrinter)
+          const ctx = new ExecutionContext({
+            services: preparedServices,
+            source: results,
+            chainStack: [],
+            querySettings: resolvedSettings,
+            debugPrinter,
+            queryName,
+            usedServices
+          })
+          return await executeService(serviceName, action, finalArgs, [], ctx)
         }
       })
       continue
@@ -1092,7 +1017,18 @@ export default async function query(config) {
 
       queryMap.set(queryName, {
         deps,
-        execute: () => executeService(serviceName, action, args, preparedServices, results, [], { queryName: queryName, descriptor: descriptor }, resolvedSettings, debugPrinter)
+        execute: () => {
+          const ctx = new ExecutionContext({
+            services: preparedServices,
+            source: results,
+            chainStack: [],
+            querySettings: resolvedSettings,
+            debugPrinter,
+            queryName,
+            usedServices
+          })
+          return executeService(serviceName, action, args, [], ctx)
+        }
       })
       continue
     }
@@ -1206,7 +1142,16 @@ export default async function query(config) {
           query: queries
         }
 
-        const compiledOnError = compileServiceFunction(queryOnError, preparedServices, results, [errorContext], resolvedSettings, debugPrinter)
+        const ctx = new ExecutionContext({
+          services: preparedServices,
+          source: results,
+          chainStack: [errorContext],
+          querySettings: resolvedSettings,
+          debugPrinter,
+          queryName: 'query-error-handler',
+          usedServices
+        })
+        const compiledOnError = compileServiceFunction(queryOnError, ctx)
         await compiledOnError(errorContext)
       } catch (onErrorErr) {
         console.error(`Query-level onError handler failed: ${onErrorErr.message}`)
@@ -1221,3 +1166,6 @@ export default async function query(config) {
     throw error
   }
 }
+
+// Set up circular dependency for parameter processing
+setCompileServiceFunction(compileServiceFunction)
