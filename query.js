@@ -177,7 +177,13 @@ const defaultErrorHandler = (error, context, settings = {}) => {
   }
 
   // Only print and exit if not in test environment
-  if (process.env.NODE_ENV !== 'test' && !process.env.MOCHA) {
+  // Check for Mocha globals as well as environment variables
+  const isTestEnvironment = process.env.NODE_ENV === 'test' || 
+                           process.env.MOCHA || 
+                           typeof describe !== 'undefined' || 
+                           typeof it !== 'undefined'
+  
+  if (!isTestEnvironment) {
     console.error(`${red}${formattedError}${reset}`)
     process.exit(1)
   }
@@ -398,11 +404,16 @@ const withErrorHandling = (fn, onErrorFunction, ignoreErrors, ctx, serviceName, 
         }
 
         try {
-          // Preserve original chainStack and add errorContext
-          const errorCtx = ctx.with({ chainStack: [...ctx.chainStack, errorContext] })
+          // Execute onError handler with proper argument resolution
+          const [onErrorServiceName, onErrorAction, onErrorArgs] = onErrorFunction
+          const onErrorService = ctx.services[onErrorServiceName]
           
-          const compiledOnError = compileServiceFunction(onErrorFunction, errorCtx)
-          await compiledOnError(errorContext)
+          // Resolve arguments with errorContext as the first item in chain stack
+          const onErrorCtx = ctx.with({ chainStack: [...ctx.chainStack, errorContext] })
+          const finalArgs = processParameters(onErrorArgs, onErrorService, onErrorAction, onErrorCtx)
+          
+          // Call service method directly
+          await onErrorService(onErrorAction, finalArgs)
         } catch (onErrorErr) {
           console.error(`onError handler failed: ${onErrorErr.message}`)
         }
@@ -1102,7 +1113,8 @@ export default async function query(config) {
       throw new Error(`Query '${queryName}' not found`)
     }
 
-    const promise = (async () => {
+    // Create promise without IIFE to avoid await hanging issue
+    async function executeQueryInner() {
       try {
         if (debugPrinter) {
           await debugPrinter.query(queryName, '🔄 Starting QUERY')
@@ -1132,10 +1144,11 @@ export default async function query(config) {
         }
         throw error
       }
-    })()
+    }
 
+    const promise = executeQueryInner()
     executing.set(queryName, promise)
-    return await promise
+    return promise
   }
 
   try {

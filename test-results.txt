@@ -1,0 +1,22 @@
+
+> microql@0.3.2 test
+> mocha
+
+
+
+  Absolute Indexing Context Tests
+    ✔ should use absolute indexing for @ symbols
+    ✔ should handle chain results in context stack
+    - should throw clear error for invalid context levels
+
+  MicroQL Comprehensive Tests
+    Basic Functionality
+      ✔ should handle basic dependency chain
+      ✔ should auto-wrap service objects
+      ✔ should handle method syntax with data transformation
+      ✔ should handle service chains with @ symbol
+      ✔ should handle complex @ symbol field access
+      ✔ should execute queries in parallel when possible
+      ✔ should handle select functionality
+    Error Handling
+[31mIn query execution: Error in query 'result': Service 'nonexistent' not found in query 'result'[0m
