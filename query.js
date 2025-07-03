@@ -376,9 +376,6 @@ const withErrorHandling = (fn, onErrorFunction, ignoreErrors, ctx, serviceName, 
     } catch (error) {
       // Handle onError if defined
       if (onErrorFunction) {
-        // DEBUG: Log current ctx.chainStack before error
-        console.log('🔍 DEBUG - Current ctx.chainStack before error:', ctx.chainStack)
-        
         // Create args for error context with resolved timeout but without reserved params
         const argsForErrorContext = { ...args }
         delete argsForErrorContext.onError
@@ -400,18 +397,9 @@ const withErrorHandling = (fn, onErrorFunction, ignoreErrors, ctx, serviceName, 
           queryName: ctx.queryName
         }
 
-        // DEBUG: Log what gets passed to the error handler
-        console.log('🔍 DEBUG - Error context passed to handler:', errorContext)
-
         try {
           // Preserve original chainStack and add errorContext
           const errorCtx = ctx.with({ chainStack: [...ctx.chainStack, errorContext] })
-          
-          // DEBUG: Log what @, @@, @@@ would resolve to
-          console.log('🔍 DEBUG - Context resolution:')
-          console.log('  @ would resolve to:', errorCtx.chainStack[0] || 'undefined')
-          console.log('  @@ would resolve to:', errorCtx.chainStack[1] || 'undefined')
-          console.log('  @@@ would resolve to:', errorCtx.chainStack[2] || 'undefined')
           
           const compiledOnError = compileServiceFunction(onErrorFunction, errorCtx)
           await compiledOnError(errorContext)
