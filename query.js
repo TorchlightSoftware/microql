@@ -35,7 +35,6 @@ const DEP_REGEX = /\$\.(\w+)/
 const AT_REGEX = /^@+/
 
 /**
- * Better type checking utility (from law)
  * Returns precise type instead of just "object" for arrays, dates, etc.
  */
 const getType = (obj) => {
@@ -62,7 +61,6 @@ const getServiceColor = (serviceName) => {
 
 /**
  * Create unified debug printer for all MicroQL debug output
- * Always uses util service - no defensive programming needed since it's in same codebase
  * @param {Object} querySettings - Query settings with inspect configuration
  * @returns {Object} Debug functions
  */
@@ -357,6 +355,82 @@ const withRetryWrapper = (fn, retries, serviceName, action) => {
 }
 
 /**
+ * Wrap a function with error handling logic (onError and ignoreErrors)
+ * @param {Function} fn - Function to wrap
+ * @param {Array|null} onErrorFunction - onError handler service call descriptor
+ * @param {boolean} ignoreErrors - Whether to ignore errors (return null instead of throwing)
+ * @param {Object} ctx - Execution context
+ * @param {string} serviceName - Service name for error context
+ * @param {string} action - Action name for error context
+ * @param {Object} args - Original service arguments for error context
+ * @returns {Function} Wrapped function with error handling logic
+ */
+const withErrorHandling = (fn, onErrorFunction, ignoreErrors, ctx, serviceName, action, args) => {
+  if (!onErrorFunction && !ignoreErrors) {
+    return fn
+  }
+  
+  return async (...fnArgs) => {
+    try {
+      return await fn(...fnArgs)
+    } catch (error) {
+      // Handle onError if defined
+      if (onErrorFunction) {
+        // DEBUG: Log current ctx.chainStack before error
+        console.log('🔍 DEBUG - Current ctx.chainStack before error:', ctx.chainStack)
+        
+        // Create args for error context with resolved timeout but without reserved params
+        const argsForErrorContext = { ...args }
+        delete argsForErrorContext.onError
+        delete argsForErrorContext.ignoreErrors
+        delete argsForErrorContext.retry
+        
+        // Add resolved timeout if it was determined
+        const timeoutMs = ctx.getTimeout(serviceName, args?.timeout)
+        if (timeoutMs !== null) {
+          argsForErrorContext.timeout = timeoutMs
+        }
+        
+        const errorContext = {
+          error: error.message,
+          originalError: error,
+          serviceName,
+          action,
+          args: argsForErrorContext,
+          queryName: ctx.queryName
+        }
+
+        // DEBUG: Log what gets passed to the error handler
+        console.log('🔍 DEBUG - Error context passed to handler:', errorContext)
+
+        try {
+          // Preserve original chainStack and add errorContext
+          const errorCtx = ctx.with({ chainStack: [...ctx.chainStack, errorContext] })
+          
+          // DEBUG: Log what @, @@, @@@ would resolve to
+          console.log('🔍 DEBUG - Context resolution:')
+          console.log('  @ would resolve to:', errorCtx.chainStack[0] || 'undefined')
+          console.log('  @@ would resolve to:', errorCtx.chainStack[1] || 'undefined')
+          console.log('  @@@ would resolve to:', errorCtx.chainStack[2] || 'undefined')
+          
+          const compiledOnError = compileServiceFunction(onErrorFunction, errorCtx)
+          await compiledOnError(errorContext)
+        } catch (onErrorErr) {
+          console.error(`onError handler failed: ${onErrorErr.message}`)
+        }
+      }
+
+      // If ignoreErrors is true, return null instead of throwing
+      if (ignoreErrors) {
+        return null
+      }
+
+      throw error
+    }
+  }
+}
+
+/**
  * Auto-wrap service objects to make them compatible with function-based services
  * Converts object-based services { action1() {}, action2() {} } to function-based
  * services that can be called as service(action, args)
@@ -518,14 +592,14 @@ const validateContextIndex = (atCount, contextIndex, chainStack) => {
  */
 const compileServiceFunction = (serviceDescriptor, ctx) => {
   // Extract service information for wrapper metadata
-  let serviceName, action, args, timeoutMs = null, retryCount = 0
+  let serviceName, action, args, timeoutMs = null, retryCount = 0, onErrorFunction = null, ignoreErrors = false
   
   if (Array.isArray(serviceDescriptor) && serviceDescriptor.length >= 3) {
     const transformed = transformMethodSyntax(serviceDescriptor)
     const actualDescriptor = transformed ? transformed.transformedDescriptor : serviceDescriptor
     ;[serviceName, action, args] = actualDescriptor
     
-    // Extract timeout and retry from args if present
+    // Extract wrapper parameters from args if present
     if (args && typeof args === 'object') {
       if (args.timeout !== undefined) {
         timeoutMs = args.timeout
@@ -533,6 +607,8 @@ const compileServiceFunction = (serviceDescriptor, ctx) => {
       if (args.retry !== undefined) {
         retryCount = Math.max(0, parseInt(args.retry) || 0)
       }
+      onErrorFunction = args.onError
+      ignoreErrors = Boolean(args.ignoreErrors)
     }
     
     // Use service-specific timeout from settings if no arg timeout provided
@@ -566,8 +642,11 @@ const compileServiceFunction = (serviceDescriptor, ctx) => {
   if (serviceName && action) {
     const queryContext = { queryName: 'compiled-function' }
     
-    // Apply wrappers in order: retry -> timeout -> guard
+    // Apply wrappers in order: errorHandling -> retry -> timeout -> guard
     let wrappedFunction = baseFunction
+    
+    // Apply error handling wrapper first to catch all errors
+    wrappedFunction = withErrorHandling(wrappedFunction, onErrorFunction, ignoreErrors, ctx, serviceName, action, args)
     
     if (retryCount > 0) {
       wrappedFunction = withRetryWrapper(wrappedFunction, retryCount, serviceName, action)
@@ -641,7 +720,10 @@ export const resolveArgsWithContext = (args, source, chainStack = [], skipParams
       }
     }
 
-    // Handle regular JSONPath
+    // Handle regular JSONPath - including bare $ for entire results
+    if (value === '$') {
+      return source
+    }
     const match = value.match(DEP_REGEX)
     return match ? retrieve(value, source) : value
   }
@@ -735,13 +817,6 @@ const executeServiceCore = async (serviceName, action, args, chainStack, ctx) =>
     argsWithoutReserved.retry = retryCount
   }
 
-  // Special handling for util service (legacy)
-  if (serviceName === 'util') {
-    // Provide util service with access to other services and context
-    argsWithoutReserved._services = ctx.services
-    argsWithoutReserved._context = ctx.source
-  }
-
   // Track service usage for tearDown
   ctx.trackService(serviceName)
 
@@ -761,52 +836,14 @@ const executeService = async (serviceName, action, args, chainStack, ctx) => {
 
   // Create base service execution function
   const baseFunction = async () => {
-    try {
-      return await executeServiceCore(serviceName, action, args, chainStack, ctx)
-    } catch (error) {
-      // Handle onError if defined
-      if (onErrorFunction) {
-        // Create args for error context with resolved timeout but without reserved params
-        const argsForErrorContext = { ...args }
-        delete argsForErrorContext.onError
-        delete argsForErrorContext.ignoreErrors
-        delete argsForErrorContext.retry
-        
-        // Add resolved timeout if it was determined
-        if (timeoutMs !== null) {
-          argsForErrorContext.timeout = timeoutMs
-        }
-        
-        const errorContext = {
-          error: error.message,
-          originalError: error,
-          serviceName,
-          action,
-          args: argsForErrorContext,
-          queryName: ctx.queryName
-        }
-
-        try {
-          const compiledOnError = compileServiceFunction(onErrorFunction, ctx.with({ chainStack: [errorContext] }))
-          await compiledOnError(errorContext)
-        } catch (onErrorErr) {
-          console.error(`onError handler failed: ${onErrorErr.message}`)
-        }
-      }
-
-      // If ignoreErrors is true, return null instead of throwing
-      if (ignoreErrors) {
-        return null
-      }
-
-      throw error
-    }
+    return await executeServiceCore(serviceName, action, args, chainStack, ctx)
   }
 
-  // Use singleton debug printer from query level (passed as parameter)
-
-  // Apply wrappers in order: retry -> timeout -> guard
+  // Apply wrappers in order: errorHandling -> retry -> timeout -> guard
   let wrappedFunction = baseFunction
+
+  // Apply error handling wrapper first to catch all errors
+  wrappedFunction = withErrorHandling(wrappedFunction, onErrorFunction, ignoreErrors, ctx, serviceName, action, args)
 
   if (retryCount > 0) {
     wrappedFunction = withRetryWrapper(wrappedFunction, retryCount, serviceName, action)
@@ -897,7 +934,8 @@ export default async function query(config) {
     methods = [],
     select,
     onError: queryOnError,
-    settings = {}
+    settings = {},
+    snapshot: snapshotFile
   } = config
 
   // Setup default settings
@@ -917,15 +955,7 @@ export default async function query(config) {
     debug: settings.debug
   }
 
-  // Prepare services (auto-wrap objects)
-  const servicesWithUtil = { ...services }
-
-  // Auto-include util service for debug functionality if not already present
-  if (resolvedSettings.debug && !servicesWithUtil.util) {
-    servicesWithUtil.util = utilService
-  }
-
-  const preparedServices = prepareServices(servicesWithUtil)
+  const preparedServices = prepareServices(services)
 
   // Track which services are actually used for tearDown
   const usedServices = new Set()
@@ -938,7 +968,25 @@ export default async function query(config) {
   const results = {}
   const queryMap = new Map()
 
-  // Add given data to results immediately
+  // Load snapshot if provided
+  if (snapshotFile) {
+    try {
+      const fs = await import('fs-extra')
+      if (await fs.default.pathExists(snapshotFile)) {
+        const snapshotData = JSON.parse(await fs.default.readFile(snapshotFile, 'utf8'))
+        if (snapshotData.results) {
+          Object.assign(results, snapshotData.results)
+          if (debugPrinter) {
+            await debugPrinter.query('snapshot', 'loaded', `from ${snapshotFile}`)
+          }
+        }
+      }
+    } catch (error) {
+      throw new Error(`Failed to load snapshot from ${snapshotFile}: ${error.message}`)
+    }
+  }
+
+  // Add given data to results immediately (may override snapshot data)
   if (given) {
     results.given = given
   }
@@ -1040,6 +1088,15 @@ export default async function query(config) {
   const executed = new Set()
   const executing = new Map()
   executed.add('given')
+
+  // Mark snapshot-loaded queries as executed
+  if (snapshotFile) {
+    for (const key of Object.keys(results)) {
+      if (key !== 'given') { // given is already added above
+        executed.add(key)
+      }
+    }
+  }
 
   const executeQuery = async (queryName) => {
     // If already executed, return cached result

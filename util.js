@@ -1,10 +1,9 @@
 /**
  * @fileoverview Utility service for common data transformations in MicroQL
- * Provides map, filter, flatMap, concat and other operations with proper context handling
+ * Provides map, filter, flatMap, concat and other operations
  */
 
 import retrieve from './retrieve.js'
-import { resolveArgsWithContext } from './query.js'
 
 /**
  * Available color names for util:print service
@@ -27,7 +26,7 @@ const COLOR_NAMES = ['green', 'yellow', 'blue', 'magenta', 'cyan', 'white']
 
 /**
  * Utility service for common data transformations in MicroQL
- * Provides map, filter, flatMap, concat and other operations with sophisticated context handling
+ * Provides map, filter, flatMap, concat and other operations
  */
 const util = {
   /**
@@ -189,6 +188,59 @@ const util = {
 
     // Return the original value for chaining
     return on
+  },
+
+  /**
+   * Save data to a JSON snapshot file
+   * @param {Object} params - Parameters  
+   * @param {*} params.on - Data being passed through the chain
+   * @param {*} params.capture - Data to capture in snapshot (resolved from MicroQL context)
+   * @param {string} params.out - Output file path
+   * @returns {*} Returns the on parameter for chaining
+   */
+  async snapshot({ on, capture, out }) {
+    if (!out) {
+      throw new Error('snapshot requires "out" parameter specifying file path')
+    }
+
+    // Clean functions and _ properties from snapshot data
+    const cleanForSnapshot = (obj) => {
+      if (obj === null || obj === undefined) return obj
+      if (typeof obj === 'function') return undefined
+      if (Array.isArray(obj)) {
+        return obj.map(cleanForSnapshot).filter(item => item !== undefined)
+      }
+      if (typeof obj === 'object') {
+        const cleaned = {}
+        for (const [key, value] of Object.entries(obj)) {
+          if (!key.startsWith('_')) {
+            const cleanedValue = cleanForSnapshot(value)
+            if (cleanedValue !== undefined) {
+              cleaned[key] = cleanedValue
+            }
+          }
+        }
+        return cleaned
+      }
+      return obj
+    }
+
+    const snapshotData = {
+      timestamp: new Date().toISOString(),
+      results: cleanForSnapshot(capture)
+    }
+
+    const fs = await import('fs-extra')
+    const path = await import('path')
+    
+    // Ensure directory exists
+    await fs.default.ensureDir(path.default.dirname(out))
+    
+    // Write snapshot file
+    await fs.default.writeFile(out, JSON.stringify(snapshotData, null, 2))
+
+    // Return the on parameter for chaining (not the captured data)
+    return on
   }
 }
 
@@ -213,6 +265,11 @@ util.when._params = {
 
 util.print._params = {
   settings: {type: 'settings'}
+}
+
+util.snapshot._params = {
+  // capture parameter will be resolved by MicroQL context ($ references)
+  // out parameter is a simple string path
 }
 
 export default util
