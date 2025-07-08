@@ -241,6 +241,53 @@ const util = {
 
     // Return the on parameter for chaining (not the captured data)
     return on
+  },
+
+  /**
+   * Record a failure to disk with error context from MicroQL
+   * @param {Object} params - Parameters
+   * @param {Object} params.on - Error context from MicroQL onError
+   * @param {string} params.location - Directory path where to save failure records
+   * @returns {Object} The error context for potential chaining
+   */
+  async recordFailure({ on, location }) {
+    if (!location) {
+      throw new Error('recordFailure requires "location" parameter specifying directory path')
+    }
+
+    if (!on || typeof on !== 'object') {
+      throw new Error('recordFailure expects error context from MicroQL onError')
+    }
+
+    const fs = await import('fs-extra')
+    const path = await import('path')
+    
+    // Ensure directory exists
+    await fs.default.ensureDir(location)
+
+    // Create failure record
+    const failureRecord = {
+      timestamp: new Date().toISOString(),
+      error: on.error,
+      serviceName: on.serviceName,
+      action: on.action,
+      queryName: on.queryName,
+      args: on.args,
+      // Include stack trace if available
+      stack: on.originalError?.stack
+    }
+
+    // Generate filename with timestamp
+    const filename = `failure-${Date.now()}.json`
+    const filePath = path.default.join(location, filename)
+
+    // Write failure record
+    await fs.default.writeFile(filePath, JSON.stringify(failureRecord, null, 2))
+
+    console.error(`❌ Failure recorded: ${path.default.relative(process.cwd(), filePath)}`)
+
+    // Return the error context for potential chaining
+    return on
   }
 }
 

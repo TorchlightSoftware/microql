@@ -382,11 +382,8 @@ const withErrorHandling = (fn, onErrorFunction, ignoreErrors, ctx, serviceName, 
     } catch (error) {
       // Handle onError if defined
       if (onErrorFunction) {
-        // Create args for error context with resolved timeout but without reserved params
-        const argsForErrorContext = { ...args }
-        delete argsForErrorContext.onError
-        delete argsForErrorContext.ignoreErrors
-        delete argsForErrorContext.retry
+        // Use resolved args from error object if available, otherwise fall back to original args
+        const argsForErrorContext = error.resolvedArgs ? { ...error.resolvedArgs } : { ...args }
         
         // Add resolved timeout if it was determined
         const timeoutMs = ctx.getTimeout(serviceName, args?.timeout)
@@ -404,15 +401,21 @@ const withErrorHandling = (fn, onErrorFunction, ignoreErrors, ctx, serviceName, 
         }
 
         try {
-          // Execute onError handler with proper argument resolution
-          const [onErrorServiceName, onErrorAction, onErrorArgs] = onErrorFunction
+          // Transform method syntax if needed for onError handler
+          const transformed = transformMethodSyntax(onErrorFunction)
+          const actualDescriptor = transformed ? transformed.transformedDescriptor : onErrorFunction
+          const [onErrorServiceName, onErrorAction, onErrorArgs] = actualDescriptor
           const onErrorService = ctx.services[onErrorServiceName]
+          
+          if (!onErrorService) {
+            throw new Error(`onError service '${onErrorServiceName}' not found`)
+          }
           
           // Resolve arguments with errorContext as the first item in chain stack
           const onErrorCtx = ctx.with({ chainStack: [...ctx.chainStack, errorContext] })
           const finalArgs = processParameters(onErrorArgs, onErrorService, onErrorAction, onErrorCtx)
           
-          // Call service method directly
+          // Call service (either wrapped or function-based)
           await onErrorService(onErrorAction, finalArgs)
         } catch (onErrorErr) {
           console.error(`onError handler failed: ${onErrorErr.message}`)
@@ -819,8 +822,14 @@ const executeServiceCore = async (serviceName, action, args, chainStack, ctx) =>
   // Track service usage for tearDown
   ctx.trackService(serviceName)
 
-  // Execute the service directly
-  return await service(action, argsWithoutReserved)
+  // Execute the service directly, enhancing any errors with resolved args
+  try {
+    return await service(action, argsWithoutReserved)
+  } catch (error) {
+    // Attach resolved args to error for use in error handlers
+    error.resolvedArgs = finalArgs
+    throw error
+  }
 }
 
 /**
