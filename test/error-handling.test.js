@@ -156,7 +156,12 @@ describe('Error Handling Tests', () => {
       assert.strictEqual(capturedContext.error, 'Service failed')
       assert.strictEqual(capturedContext.serviceName, 'error')
       assert.strictEqual(capturedContext.action, 'fail')
-      assert.deepStrictEqual(capturedContext.args, { someArg: 'value', timeout: 5000 })
+      assert.deepStrictEqual(capturedContext.args, { 
+        someArg: 'value', 
+        timeout: 5000,
+        onError: ['capture', 'capture', { on: '@' }],
+        ignoreErrors: true
+      })
       assert.strictEqual(capturedContext.queryName, 'testQuery')
     })
   })

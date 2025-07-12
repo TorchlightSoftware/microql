@@ -42,7 +42,7 @@ const result = await query({
 - **Service Object Auto-Wrapping**: Provide service objects that get automatically wrapped
 - **Method Syntax**: Use cleaner syntax like `['@.data', 'service:method', args]`
 - **Service Chains**: Chain operations using the `@` symbol for chain flow
-- **Chain References**: Use `@`, `@@`, `@@@` for sophisticated nested data access
+- **Context References**: Use `@`, `@@`, `@@@` for current, parent, or grandparent context
 - **Built-in Reliability**: Timeout and retry mechanisms
 
 For detailed examples and advanced usage, see [HOW_MICROQL_WORKS.md](HOW_MICROQL_WORKS.md).

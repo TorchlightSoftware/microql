@@ -932,6 +932,32 @@ const getDependencies = (args) => {
 }
 
 /**
+ * Call tearDown on all used services
+ * @param {Set} usedServices - Set of service names that were used
+ * @param {Object} preparedServices - Map of service objects
+ * @param {Object} settings - Query settings for error handling
+ */
+async function callTearDownOnUsedServices(usedServices, preparedServices, settings) {
+  for (const serviceName of usedServices) {
+    const wrappedService = preparedServices[serviceName]
+    
+    // Check if it's a wrapped service with _originalService property
+    const service = wrappedService?._originalService || wrappedService
+    
+    if (service && typeof service.tearDown === 'function') {
+      try {
+        await service.tearDown()
+      } catch (error) {
+        // Handle tearDown errors gracefully - don't fail the entire query
+        if (settings?.debug) {
+          console.error(`Warning: tearDown failed for service ${serviceName}:`, error.message)
+        }
+      }
+    }
+  }
+}
+
+/**
  * Promise-based query execution
  */
 export default async function query(config) {
@@ -1196,6 +1222,9 @@ export default async function query(config) {
       console.log(`📤 FINAL RESULT: All results returned`)
     }
 
+    // Call tearDown on all used services
+    await callTearDownOnUsedServices(usedServices, preparedServices, resolvedSettings)
+
     return results
   } catch (error) {
     // Handle query-level errors
@@ -1228,6 +1257,9 @@ export default async function query(config) {
       // If no handler, default handler will exit the process
       defaultErrorHandler(error, 'query execution', resolvedSettings)
     }
+
+    // Call tearDown on all used services even if query fails
+    await callTearDownOnUsedServices(usedServices, preparedServices, resolvedSettings)
 
     // Re-throw the error to maintain normal flow
     throw error

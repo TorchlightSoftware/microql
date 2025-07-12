@@ -130,8 +130,7 @@ describe('Relative Indexing Context Tests', () => {
     assert.strictEqual(result.result[0].chain2, 1)
   })
   
-  it.skip('should throw clear error for invalid context levels', async () => {
-    // TODO: This test hangs - needs investigation
+  it('should throw clear error for invalid context levels', async () => {
     try {
       await query({
         given: { items: [1, 2] },
