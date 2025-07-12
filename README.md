@@ -71,7 +71,7 @@ For detailed examples and advanced usage, see [HOW_MICROQL_WORKS.md](HOW_MICROQL
 
 ### Service Types
 
-Services can be functions or objects (auto-wrapped). For complete service writing guidance including best practices, parameter handling, and examples, see [SERVICE_WRITER_GUIDE.md](SERVICE_WRITER_GUIDE.md).
+Services can be functions or objects (auto-wrapped). For complete service writing guidance including best practices, argument handling, and examples, see [SERVICE_WRITER_GUIDE.md](SERVICE_WRITER_GUIDE.md).
 
 ### @ Symbol Usage
 
@@ -89,13 +89,13 @@ MicroQL provides built-in reliability features:
 - **Error Context**: Rich error messages with query context
 - **Error Handling**: Flexible error handling with onError and ignoreErrors
 
-### Implicit Parameters
+### Implicit Arguments
 
-All service calls support these reserved parameters:
+All service calls support these reserved arguments:
 
 ```js
 query: {
-  // All implicit parameters example
+  // All implicit arguments example
   data: ['api', 'getData', { 
     id: '$.given.id',
     timeout: 5000,      // 5 second timeout
