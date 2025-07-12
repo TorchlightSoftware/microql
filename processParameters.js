@@ -44,7 +44,9 @@ const paramHandlers = {
   },
   
   settings: (key, value, context) => {
-    return deepMerge(context.querySettings, value)
+    // If no value provided, use query settings directly
+    // If value provided, merge with query settings
+    return value ? deepMerge(context.querySettings, value) : context.querySettings
   }
 }
 
@@ -86,6 +88,15 @@ export function processParameters(args, service, action, context) {
     
     if (paramType && paramHandlers[paramType]) {
       specialParams[key] = { type: paramType, value }
+      skipParams.add(key)
+    }
+  }
+  
+  // Auto-inject settings parameter if defined in metadata but not in args
+  // This is specifically for the settings type only
+  for (const [key, paramInfo] of Object.entries(paramMetadata)) {
+    if (paramInfo?.type === 'settings' && !(key in args)) {
+      specialParams[key] = { type: 'settings', value: undefined }
       skipParams.add(key)
     }
   }

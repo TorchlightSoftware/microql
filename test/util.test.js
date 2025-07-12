@@ -316,7 +316,7 @@ describe('Util Service Tests', () => {
       assert(blueOutput.includes('Hello World'), 'Should contain the message')
     })
 
-    it.skip('should print with query-level inspect settings', async () => {
+    it('should print with query-level inspect settings', async () => {
       const testData = {
         users: [
           { id: 1, name: 'Alice', profile: { email: 'alice@example.com', preferences: { theme: 'dark', notifications: true } } },
@@ -336,14 +336,13 @@ describe('Util Service Tests', () => {
         },
         query: {
           printed: ['util', 'print', { 
-            value: '$.given.users', 
+            on: '$.given.users', 
             color: 'blue',
             ts: false
           }]
         },
         select: 'printed'
       })
-
 
       // Should return the printed value for chaining
       assert.deepStrictEqual(result, testData.users)
@@ -352,13 +351,11 @@ describe('Util Service Tests', () => {
       assert(capturedOutput.length > 0, 'Should have captured some output')
       
       // Find the output that contains the blue color (from our print call)
-      const blueOutput = capturedOutput.find(output => output.includes('\\x1b[34m'))
+      const blueOutput = capturedOutput.find(output => output.includes('\x1b[34m'))
       assert(blueOutput, 'Should find output with blue color')
       
       // Should contain ANSI blue color codes
-      // Already checked that blueOutput contains blue color
       assert(blueOutput.includes('\x1b[0m'), 'Should contain reset color code')
-      
       
       // Should show truncation due to maxArrayLength: 1
       assert(blueOutput.includes('... 1 more item'), 'Should truncate array due to maxArrayLength setting')
