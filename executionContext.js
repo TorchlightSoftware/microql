@@ -2,7 +2,7 @@
  * @fileoverview Execution context for MicroQL query execution
  * 
  * Provides a unified context object for query execution environment,
- * replacing long parameter lists with a clean context pattern.
+ * replacing long argument lists with a clean context pattern.
  */
 
 /**

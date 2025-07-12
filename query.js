@@ -26,7 +26,7 @@ import { COLOR_NAMES } from './util.js'
 import utilService from './util.js'
 import { inspect } from 'util'
 import { ExecutionContext } from './executionContext.js'
-import { processParameters, setCompileServiceFunction } from './processParameters.js'
+import { processArguments, setCompileServiceFunction } from './processArguments.js'
 
 /** @type {RegExp} JSONPath dependency pattern for $.queryName references */
 const DEP_REGEX = /\$\.(\w+)/
@@ -413,7 +413,7 @@ const withErrorHandling = (fn, onErrorFunction, ignoreErrors, ctx, serviceName, 
           
           // Resolve arguments with errorContext as the first item in chain stack
           const onErrorCtx = ctx.with({ chainStack: [...ctx.chainStack, errorContext] })
-          const finalArgs = processParameters(onErrorArgs, onErrorService, onErrorAction, onErrorCtx)
+          const finalArgs = processArguments(onErrorArgs, onErrorService, onErrorAction, onErrorCtx)
           
           // Call service (either wrapped or function-based)
           await onErrorService(onErrorAction, finalArgs)
@@ -554,11 +554,11 @@ const parseMethodCall = (descriptor, methods) => {
 }
 
 /**
- * Merge arguments with 'on' parameter (common pattern in MicroQL)
+ * Merge arguments with 'on' argument (common pattern in MicroQL)
  * Used for method syntax transformation and service argument preparation
  * @param {Object} args - Base arguments object
- * @param {*} onValue - Value for the 'on' parameter
- * @returns {Object} Merged arguments with 'on' parameter
+ * @param {*} onValue - Value for the 'on' argument
+ * @returns {Object} Merged arguments with 'on' argument
  */
 const withOnParameter = (args, onValue) => ({ on: onValue, ...args })
 
@@ -601,7 +601,7 @@ const compileServiceFunction = (serviceDescriptor, ctx) => {
     const actualDescriptor = transformed ? transformed.transformedDescriptor : serviceDescriptor
     ;[serviceName, action, args] = actualDescriptor
     
-    // Extract wrapper parameters from args if present
+    // Extract wrapper arguments from args if present
     if (args && typeof args === 'object') {
       if (args.timeout !== undefined) {
         timeoutMs = args.timeout
@@ -679,10 +679,10 @@ const compileServiceFunction = (serviceDescriptor, ctx) => {
  * @param {*} args - Arguments to resolve (can be object, array, or primitive)
  * @param {Object} source - Source data object containing query results
  * @param {Array} chainStack - Stack of chain items for @ symbol resolution (relative indexing)
- * @param {Set} skipParams - Set of parameter names to skip resolution for
+ * @param {Set} skipArgs - Set of argument names to skip resolution for
  * @returns {*} Resolved arguments with @ symbols and JSONPath replaced
  */
-export const resolveArgsWithContext = (args, source, chainStack = [], skipParams = new Set()) => {
+export const resolveArgsWithContext = (args, source, chainStack = [], skipArgs = new Set()) => {
   const resolve = (value) => {
     if (typeof value !== 'string') return value
 
@@ -737,11 +737,11 @@ export const resolveArgsWithContext = (args, source, chainStack = [], skipParams
   if (typeof args === 'object' && args !== null) {
     const resolved = {}
     for (const [key, value] of Object.entries(args)) {
-      if (skipParams.has(key)) {
-        // Skip resolution for this parameter - keep as-is
+      if (skipArgs.has(key)) {
+        // Skip resolution for this argument - keep as-is
         resolved[key] = value
       } else if (typeof value === 'object' && value !== null) {
-        resolved[key] = resolveArgsWithContext(value, source, chainStack, skipParams)
+        resolved[key] = resolveArgsWithContext(value, source, chainStack, skipArgs)
       } else {
         resolved[key] = resolve(value)
       }
@@ -801,11 +801,11 @@ const executeServiceCore = async (serviceName, action, args, chainStack, ctx) =>
   const timeoutMs = ctx.getTimeout(serviceName, args?.timeout)
   const retryCount = ctx.getRetry(args?.retry)
 
-  // Process parameters using the new parameter processor
+  // Process arguments using the new argument processor
   const processCtx = ctx.with({ chainStack })
-  const finalArgs = processParameters(args, service, action, processCtx)
+  const finalArgs = processArguments(args, service, action, processCtx)
 
-  // Remove non-service reserved parameters for service execution
+  // Remove non-service reserved arguments for service execution
   // timeout and retry are passed to services according to SERVICE_WRITER_GUIDE.md
   const argsWithoutReserved = { ...finalArgs }
   delete argsWithoutReserved.onError
@@ -836,7 +836,7 @@ const executeServiceCore = async (serviceName, action, args, chainStack, ctx) =>
  * Execute a single service call with full wrapper support
  */
 const executeService = async (serviceName, action, args, chainStack, ctx) => {
-  // Extract wrapper parameters
+  // Extract wrapper arguments
   const timeoutMs = ctx.getTimeout(serviceName, args?.timeout)
   const retryCount = ctx.getRetry(args?.retry)
   const onErrorFunction = args?.onError
@@ -1266,5 +1266,5 @@ export default async function query(config) {
   }
 }
 
-// Set up circular dependency for parameter processing
+// Set up circular dependency for argument processing
 setCompileServiceFunction(compileServiceFunction)

@@ -196,11 +196,11 @@ const util = {
    * @param {*} args.on - Data being passed through the chain
    * @param {*} args.capture - Data to capture in snapshot (resolved from MicroQL context)
    * @param {string} args.out - Output file path
-   * @returns {*} Returns the on parameter for chaining
+   * @returns {*} Returns the on argument for chaining
    */
   async snapshot({ on, capture, out }) {
     if (!out) {
-      throw new Error('snapshot requires "out" parameter specifying file path')
+      throw new Error('snapshot requires "out" argument specifying file path')
     }
 
     // Clean functions and _ properties from snapshot data
@@ -239,7 +239,7 @@ const util = {
     // Write snapshot file
     await fs.default.writeFile(out, JSON.stringify(snapshotData, null, 2))
 
-    // Return the on parameter for chaining (not the captured data)
+    // Return the on argument for chaining (not the captured data)
     return on
   },
 
@@ -252,7 +252,7 @@ const util = {
    */
   async recordFailure({ on, location }) {
     if (!location) {
-      throw new Error('recordFailure requires "location" parameter specifying directory path')
+      throw new Error('recordFailure requires "location" argument specifying directory path')
     }
 
     if (!on || typeof on !== 'object') {
@@ -315,8 +315,8 @@ util.print._argtypes = {
 }
 
 util.snapshot._argtypes = {
-  // capture parameter will be resolved by MicroQL context ($ references)
-  // out parameter is a simple string path
+  // capture argument will be resolved by MicroQL context ($ references)
+  // out argument is a simple string path
 }
 
 export default util

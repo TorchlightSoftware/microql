@@ -1,7 +1,7 @@
 /**
- * @fileoverview Parameter processing for MicroQL services
+ * @fileoverview Argument processing for MicroQL services
  * 
- * Handles compilation of function, template, and settings parameters
+ * Handles compilation of function, template, and settings arguments
  * with proper type detection and transformation.
  */
 
@@ -29,9 +29,9 @@ const deepMerge = (target, source) => {
 }
 
 /**
- * Parameter type handlers
+ * Argument type handlers
  */
-const paramHandlers = {
+const argHandlers = {
   function: (key, value, context) => {
     return compileServiceFunction(value, context)
   },
@@ -51,9 +51,9 @@ const paramHandlers = {
 }
 
 /**
- * Get service method metadata for parameter compilation
+ * Get service method metadata for argument compilation
  */
-function getParameterMetadata(service, action) {
+function getArgumentMetadata(service, action) {
   if (typeof service === 'function' && service._originalService) {
     // This is a wrapped service object, get metadata from the original
     return service._originalService[action]?._argtypes || {}
@@ -66,47 +66,47 @@ function getParameterMetadata(service, action) {
 }
 
 /**
- * Process service parameters with type-aware compilation
+ * Process service arguments with type-aware compilation
  */
-export function processParameters(args, service, action, context) {
-  const paramMetadata = getParameterMetadata(service, action)
+export function processArguments(args, service, action, context) {
+  const argMetadata = getArgumentMetadata(service, action)
   
-  // Build set of parameters that should skip resolution
-  const skipParams = new Set()
-  const specialParams = {}
+  // Build set of arguments that should skip resolution
+  const skipArgs = new Set()
+  const specialArgs = {}
   
-  // Add reserved MicroQL parameters to skip list
-  skipParams.add('timeout')
-  skipParams.add('retry')
-  skipParams.add('onError')
-  skipParams.add('ignoreErrors')
+  // Add reserved MicroQL arguments to skip list
+  skipArgs.add('timeout')
+  skipArgs.add('retry')
+  skipArgs.add('onError')
+  skipArgs.add('ignoreErrors')
   
-  // First pass: identify special parameters
+  // First pass: identify special arguments
   for (const [key, value] of Object.entries(args)) {
-    const paramInfo = paramMetadata[key]
-    const paramType = paramInfo?.type
+    const argInfo = argMetadata[key]
+    const argType = argInfo?.type
     
-    if (paramType && paramHandlers[paramType]) {
-      specialParams[key] = { type: paramType, value }
-      skipParams.add(key)
+    if (argType && argHandlers[argType]) {
+      specialArgs[key] = { type: argType, value }
+      skipArgs.add(key)
     }
   }
   
-  // Auto-inject settings parameter if defined in metadata but not in args
+  // Auto-inject settings argument if defined in metadata but not in args
   // This is specifically for the settings type only
-  for (const [key, paramInfo] of Object.entries(paramMetadata)) {
-    if (paramInfo?.type === 'settings' && !(key in args)) {
-      specialParams[key] = { type: 'settings', value: undefined }
-      skipParams.add(key)
+  for (const [key, argInfo] of Object.entries(argMetadata)) {
+    if (argInfo?.type === 'settings' && !(key in args)) {
+      specialArgs[key] = { type: 'settings', value: undefined }
+      skipArgs.add(key)
     }
   }
   
-  // Resolve regular arguments while skipping special parameters
-  const finalArgs = resolveArgsWithContext(args, context.source, context.chainStack, skipParams)
+  // Resolve regular arguments while skipping special arguments
+  const finalArgs = resolveArgsWithContext(args, context.source, context.chainStack, skipArgs)
   
-  // Second pass: process special parameters
-  for (const [key, { type, value }] of Object.entries(specialParams)) {
-    const handler = paramHandlers[type]
+  // Second pass: process special arguments
+  for (const [key, { type, value }] of Object.entries(specialArgs)) {
+    const handler = argHandlers[type]
     if (handler) {
       finalArgs[key] = handler(key, value, context)
     }
