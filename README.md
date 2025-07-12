@@ -75,9 +75,10 @@ Services can be functions or objects (auto-wrapped). For complete service writin
 
 ### @ Symbol Usage
 
-- `@` - first level in chain
-- `@@` - second level in chain  
-- `@.field` - Access field from chain level
+- `@` - current context (innermost)
+- `@@` - parent context  
+- `@@@` - grandparent context
+- `@.field` - Access field from current context
 
 ## Timeouts & Reliability
 

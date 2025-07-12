@@ -3,7 +3,7 @@ import assert from 'assert'
 import query from '../query.js'
 import util from '../util.js'
 
-describe('Absolute Indexing Context Tests', () => {
+describe('Relative Indexing Context Tests', () => {
   
   // Test data with nested structure
   const testData = {
@@ -42,7 +42,7 @@ describe('Absolute Indexing Context Tests', () => {
   
   const services = { util, test: testService }
   
-  it('should use absolute indexing for @ symbols', async () => {
+  it('should use relative indexing for @ symbols', async () => {
     // Simpler test first - just one level of nesting
     const result = await query({
       given: { items: [1, 2] },
@@ -77,22 +77,22 @@ describe('Absolute Indexing Context Tests', () => {
           fn: ['util', 'map', {
             on: '@.inner',
             fn: ['test', 'checkContext', {
-              level1: '@',      // Should be outer item (contextStack[0])
-              level2: '@@'      // Should be inner item (contextStack[1])
+              level1: '@',      // Should be inner item (current context)
+              level2: '@@'      // Should be outer item (parent context)
             }]
           }]
         }]
       }
     })
     
-    // Verify absolute indexing with nested iteration
+    // Verify relative indexing with nested iteration
     assert.strictEqual(result2.nested.length, 4) // 2 outer × 2 inner = 4 results
     
     const firstResult = result2.nested[0]
-    // @ should refer to the outer item (first context level)
-    assert.deepStrictEqual(firstResult.level1, { inner: [1, 2] })
-    // @@ should refer to the inner item (second context level)
-    assert.strictEqual(firstResult.level2, 1)
+    // @ should refer to the inner item (current context)
+    assert.strictEqual(firstResult.level1, 1)
+    // @@ should refer to the outer item (parent context)
+    assert.deepStrictEqual(firstResult.level2, { inner: [1, 2] })
   })
   
   it('should handle chain results in context stack', async () => {
@@ -147,8 +147,8 @@ describe('Absolute Indexing Context Tests', () => {
       })
       assert.fail('Should have thrown error for invalid context level')
     } catch (error) {
-      assert(error.message.includes('@@@@ used but only'))
-      assert(error.message.includes('context levels available'))
+      assert(error.message.includes('@@@@ used but context not deep enough'))
+      assert(error.message.includes('levels available'))
     }
   })
 })

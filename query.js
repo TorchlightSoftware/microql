@@ -13,7 +13,7 @@
  *
  * Key features:
  * - Promise-based async service orchestration
- * - Chain stack for nested @ symbol resolution (@, @@, @@@)
+ * - Chain stack for nested @ symbol resolution (@ = current, @@ = parent, @@@ = grandparent)
  * - Method syntax sugar: ['@.data', 'service:method', args]
  * - Automatic service object wrapping
  * - Comprehensive error context for debugging
@@ -564,7 +564,7 @@ const withOnParameter = (args, onValue) => ({ on: onValue, ...args })
 
 /**
  * Count the number of @ symbols at the start of a string
- * Used for context stack indexing: @ = 0, @@ = 1, @@@ = 2, etc.
+ * Used for relative context indexing: @ = current, @@ = parent, @@@ = grandparent
  *
  * @param {string} str - String to analyze
  * @returns {number} Number of consecutive @ symbols at start
@@ -579,13 +579,13 @@ const countAtSymbols = (str) => {
  * Validate context index for @ symbol resolution
  * Ensures proper error messages when context stack depth is insufficient
  * @param {number} atCount - Number of @ symbols (1 for @, 2 for @@, etc.)
- * @param {number} contextIndex - Calculated context index (atCount - 1)
+ * @param {number} contextIndex - Calculated context index (chainStack.length - atCount)
  * @param {Array} chainStack - Current chain stack
  * @throws {Error} If context index is invalid
  */
 const validateContextIndex = (atCount, contextIndex, chainStack) => {
   if (contextIndex < 0 || contextIndex >= chainStack.length) {
-    throw new Error(`${'@'.repeat(atCount)} used but only ${chainStack.length} context levels available (@ through ${'@'.repeat(chainStack.length)})`)
+    throw new Error(`${'@'.repeat(atCount)} used but context not deep enough (only ${chainStack.length} levels available)`)
   }
 }
 
@@ -678,7 +678,7 @@ const compileServiceFunction = (serviceDescriptor, ctx) => {
  * Resolve @ symbols and JSONPath in arguments with context stack support
  * @param {*} args - Arguments to resolve (can be object, array, or primitive)
  * @param {Object} source - Source data object containing query results
- * @param {Array} chainStack - Stack of chain items for @ symbol resolution (absolute indexing)
+ * @param {Array} chainStack - Stack of chain items for @ symbol resolution (relative indexing)
  * @param {Set} skipParams - Set of parameter names to skip resolution for
  * @returns {*} Resolved arguments with @ symbols and JSONPath replaced
  */
@@ -691,9 +691,9 @@ export const resolveArgsWithContext = (args, source, chainStack = [], skipParams
       const atCount = countAtSymbols(value)
 
       if (value === '@'.repeat(atCount)) {
-        // Pure @ symbols - @ refers to absolute context indexing
-        // @ = first chain level (chainStack[0]), @@ = second chain level (chainStack[1]), etc.
-        const contextIndex = atCount - 1
+        // Pure @ symbols - @ refers to relative context indexing
+        // @ = current context (chainStack[length-1]), @@ = parent context (chainStack[length-2]), etc.
+        const contextIndex = chainStack.length - atCount
 
         validateContextIndex(atCount, contextIndex, chainStack)
 
@@ -703,8 +703,8 @@ export const resolveArgsWithContext = (args, source, chainStack = [], skipParams
       // Handle @.field with chain stack
       if (value.startsWith('@'.repeat(atCount) + '.')) {
         const fieldPath = value.slice(atCount + 1) // Remove @ symbols and dot
-        // @ refers to chain level
-        const contextIndex = atCount - 1
+        // @ refers to relative context level
+        const contextIndex = chainStack.length - atCount
 
         validateContextIndex(atCount, contextIndex, chainStack)
 
