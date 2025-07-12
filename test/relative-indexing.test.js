@@ -34,7 +34,7 @@ describe('Relative Indexing Context Tests', () => {
     }
   }
   
-  testService.checkContext._params = {
+  testService.checkContext._argtypes = {
     level1: {},
     level2: {},
     level3: {}
@@ -105,9 +105,9 @@ describe('Relative Indexing Context Tests', () => {
       })
     }
     
-    chainService.step1._params = {}
-    chainService.step2._params = {}
-    chainService.final._params = {}
+    chainService.step1._argtypes = {}
+    chainService.step2._argtypes = {}
+    chainService.final._argtypes = {}
     
     const result = await query({
       given: { value: 'test' },

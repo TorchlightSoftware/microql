@@ -56,11 +56,11 @@ const paramHandlers = {
 function getParameterMetadata(service, action) {
   if (typeof service === 'function' && service._originalService) {
     // This is a wrapped service object, get metadata from the original
-    return service._originalService[action]?._params || {}
+    return service._originalService[action]?._argtypes || {}
   } else if (typeof service === 'object') {
     // Direct service object access
     const serviceMethod = service[action]
-    return serviceMethod?._params || {}
+    return serviceMethod?._argtypes || {}
   }
   return {}
 }

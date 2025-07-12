@@ -192,10 +192,10 @@ const util = {
 
   /**
    * Save data to a JSON snapshot file
-   * @param {Object} params - Parameters  
-   * @param {*} params.on - Data being passed through the chain
-   * @param {*} params.capture - Data to capture in snapshot (resolved from MicroQL context)
-   * @param {string} params.out - Output file path
+   * @param {Object} args - Arguments  
+   * @param {*} args.on - Data being passed through the chain
+   * @param {*} args.capture - Data to capture in snapshot (resolved from MicroQL context)
+   * @param {string} args.out - Output file path
    * @returns {*} Returns the on parameter for chaining
    */
   async snapshot({ on, capture, out }) {
@@ -245,9 +245,9 @@ const util = {
 
   /**
    * Record a failure to disk with error context from MicroQL
-   * @param {Object} params - Parameters
-   * @param {Object} params.on - Error context from MicroQL onError
-   * @param {string} params.location - Directory path where to save failure records
+   * @param {Object} args - Arguments
+   * @param {Object} args.on - Error context from MicroQL onError
+   * @param {string} args.location - Directory path where to save failure records
    * @returns {Object} The error context for potential chaining
    */
   async recordFailure({ on, location }) {
@@ -291,30 +291,30 @@ const util = {
   }
 }
 
-// Parameter metadata for MicroQL function compilation
-util.map._params = {
+// Argument type metadata for MicroQL function compilation
+util.map._argtypes = {
   fn: { type: 'function' },
   template: { type: 'template' }
 }
 
-util.filter._params = {
+util.filter._argtypes = {
   predicate: { type: 'function' }
 }
 
-util.flatMap._params = {
+util.flatMap._argtypes = {
   fn: { type: 'function' },
   template: { type: 'template' }
 }
 
-util.when._params = {
+util.when._argtypes = {
   test: { type: 'function' }  // Test can be a service call
 }
 
-util.print._params = {
+util.print._argtypes = {
   settings: {type: 'settings'}
 }
 
-util.snapshot._params = {
+util.snapshot._argtypes = {
   // capture parameter will be resolved by MicroQL context ($ references)
   // out parameter is a simple string path
 }
