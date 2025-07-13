@@ -140,14 +140,18 @@ const compileChainNode = (queryName, chainDescriptor, config, parentContextNode)
     steps: [],
     dependencies: new Set(),
     parentContextNode,
+    parent: null, // Will be set by calling context
     value: null,
     completed: false
   }
   
-  // Chain nodes have no current context - context() should throw
-  node.context = () => {
-    throw new Error(`@ is not available at the chain level`)
-  }
+  // Chain nodes have no current context - context getter should throw
+  Object.defineProperty(node, 'context', {
+    get() {
+      throw new Error(`@ is not available at the chain level`)
+    },
+    configurable: true
+  })
   
   // Mark that chain nodes don't have semantic context
   node.hasContext = false
@@ -155,21 +159,38 @@ const compileChainNode = (queryName, chainDescriptor, config, parentContextNode)
   // Compile each step in the chain
   let previousStep = null
   for (const stepDescriptor of chainDescriptor) {
-    const step = compileServiceNode(null, stepDescriptor, config, node)
+    const step = compileServiceNode(null, stepDescriptor, config, node, true)
+    
+    // Set structural parent reference
+    step.parent = node
     
     // Wire context for service nodes in chains
     if (previousStep) {
-      // Service node in chain: context() will be set up at execution time
-      step.context = () => {
-        throw new Error(`@ context not available - should be set up during execution`)
-      }
+      // Service node in chain: context getter accesses previous step via AST
+      Object.defineProperty(step, 'context', {
+        get() {
+          const myIndex = this.parent.steps.indexOf(this)
+          if (myIndex === 0) {
+            throw new Error(`@ is not available for the first step in a chain`)
+          }
+          const previousStep = this.parent.steps[myIndex - 1]
+          if (!previousStep.completed) {
+            throw new Error(`Previous step has not been executed yet - step ${myIndex} waiting for step ${myIndex - 1}`)
+          }
+          return previousStep.value
+        },
+        configurable: true
+      })
       // Set parentContextNode to previous step (which has context), not the chain
       step.parentContextNode = previousStep
     } else {
-      // First step in chain: context() should throw (no previous step)
-      step.context = () => {
-        throw new Error(`@ is not available for the first step in a chain`)
-      }
+      // First step in chain: context getter should throw (no previous step)
+      Object.defineProperty(step, 'context', {
+        get() {
+          throw new Error(`@ is not available for the first step in a chain`)
+        },
+        configurable: true
+      })
       // First step's parent should be the chain's parent (skipping chain node)
       step.parentContextNode = parentContextNode
     }
@@ -193,7 +214,7 @@ const compileChainNode = (queryName, chainDescriptor, config, parentContextNode)
 /**
  * Compile service node
  */
-const compileServiceNode = (queryName, descriptor, config, parentContextNode) => {
+const compileServiceNode = (queryName, descriptor, config, parentContextNode, isChainStep = false) => {
   const transformed = transformMethodSyntax(descriptor)
   const [serviceName, action, rawArgs = {}] = transformed.descriptor
   
@@ -246,13 +267,20 @@ const compileServiceNode = (queryName, descriptor, config, parentContextNode) =>
     functionArgs,
     dependencies,
     parentContextNode,
+    parent: null, // Will be set by calling context
     value: null,
     completed: false
   }
   
-  // Top-level service nodes have no current context - context() should throw
-  node.context = () => {
-    throw new Error(`@ is not available at the query level`)
+  // Top-level service nodes have no current context - context getter should throw
+  // (Skip this for chain steps since they will define their own context)
+  if (!isChainStep) {
+    Object.defineProperty(node, 'context', {
+      get() {
+        throw new Error(`@ is not available at the query level`)
+      },
+      configurable: true
+    })
   }
   
   // Mark that service nodes don't have semantic context at query level
@@ -350,27 +378,33 @@ const separateArguments = (args, config, argtypes) => {
  * Compile service descriptor to function with context capture
  */
 const compileServiceFunction = (descriptor, config) => {
-  const node = compileServiceNode(null, descriptor, config, null)
+  const node = compileServiceNode(null, descriptor, config, null, false)
   
-  // Function/template nodes: context() should throw - they get values directly from withArgs
-  node.context = () => {
-    throw new Error(`@ is not available in compiled function - context should be passed as arguments`)
-  }
+  // Function/template nodes: override context getter - they get values directly from withArgs
+  Object.defineProperty(node, 'context', {
+    get() {
+      throw new Error(`@ is not available in compiled function - context should be passed as arguments`)
+    },
+    configurable: true
+  })
   
   // Return a function that executes the compiled node
   const compiledFunction = async (contextValue) => {
     // Create a temporary context function that returns the passed contextValue
     const contextFunction = () => contextValue
     
-    // Bind the node with resolution context for execution
-    const boundFunction = node.wrappedFunction.bind({
-      ...node,
-      context: contextFunction,  // Override the context function to return contextValue
-      resolutionContext: { 
-        queryResults: new Map(),
-        inputData: contextValue
-      }
+    // Create a new node with context getter for this execution
+    const executionNode = Object.create(node)
+    Object.defineProperty(executionNode, 'context', {
+      get() { return contextValue }
     })
+    executionNode.resolutionContext = { 
+      queryResults: new Map(),
+      inputData: contextValue
+    }
+    
+    // Bind the node with resolution context for execution
+    const boundFunction = node.wrappedFunction.bind(executionNode)
     
     // Execute the wrapped function
     return await boundFunction()
@@ -521,8 +555,11 @@ const withArgs = (fn, staticArgs, dependentArgs, functionArgs) => {
               // Create virtual node for this iteration using prototype chain
               const virtualNode = Object.create(baseNode)
               
-              // Set up context function to return iteration value
-              virtualNode.context = () => itemValue
+              // Set up context getter to return iteration value
+              Object.defineProperty(virtualNode, 'context', {
+                get() { return itemValue },
+                configurable: true
+              })
               
               // Set up parent context getter to point to current executing node
               // CRITICAL: Use 'this' (the current executing node) as parent, 
@@ -598,9 +635,9 @@ const getContext = (node, level, path) => {
   // Walk up the context chain
   for (let i = 0; i <= level; i++) {
     if (i === 0 && level === 0) {
-      // @ = current context - use the node's context() function
+      // @ = current context - use the node's context getter
       try {
-        const value = current.context()
+        const value = current.context
         if (path) {
           return retrieve(path, value)
         }
@@ -620,12 +657,15 @@ const getContext = (node, level, path) => {
   
   // For higher levels (@@, @@@, etc.), get the value from the parent node
   let value
-  if (current.context && typeof current.context === 'function') {
-    value = current.context()
-  } else if (current.value !== undefined) {
-    value = current.value
-  } else {
-    throw new Error(`Context value not available for ${'@'.repeat(level + 1)}`)
+  try {
+    value = current.context
+  } catch (e) {
+    // If context getter fails, try using stored value
+    if (current.value !== undefined) {
+      value = current.value
+    } else {
+      throw new Error(`Context value not available for ${'@'.repeat(level + 1)}`)
+    }
   }
   
   // Apply JSONPath if provided

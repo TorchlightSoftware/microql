@@ -94,17 +94,11 @@ export const executeAST = async (ast, given, select) => {
     for (let i = 0; i < chainNode.steps.length; i++) {
       const step = chainNode.steps[i]
       
-      // Set up context function for this step - only if not first step
-      if (i > 0) {
-        const prevResult = result  // Capture previous result
-        step.context = () => prevResult
-      }
+      // Context is now set up at compile time as getter, no runtime override needed
       
-      // Execute the step with updated context
-      const boundFunction = step.wrappedFunction.bind({
-        ...step,
-        resolutionContext: context
-      })
+      // Execute the step with updated context (preserve getters)
+      step.resolutionContext = context
+      const boundFunction = step.wrappedFunction.bind(step)
       
       step.value = await boundFunction()
       step.completed = true
