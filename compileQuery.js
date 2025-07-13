@@ -86,17 +86,27 @@ export const compileQuery = (config) => {
   const ast = {
     queries: {},
     executionOrder: [],
-    given: config.given || {},
     services: config.services || {},
     settings: config.settings || {}
   }
   
-  // Phase 1: Create base AST nodes for all queries
+  // Phase 1: Add given as pre-resolved query if present
+  if (config.given) {
+    ast.queries.given = {
+      type: 'resolved',
+      reference: 'given',
+      value: config.given,
+      completed: true,
+      dependencies: []
+    }
+  }
+  
+  // Phase 2: Create base AST nodes for all queries
   for (const [queryName, queryDescriptor] of Object.entries(config.query || {})) {
     ast.queries[queryName] = compileQueryNode(queryName, queryDescriptor, config, null)
   }
   
-  // Phase 2: Resolve dependencies and determine execution order
+  // Phase 3: Resolve dependencies and determine execution order
   ast.executionOrder = resolveDependencies(ast.queries)
   
   return ast
@@ -698,15 +708,35 @@ const resolveValue = async (value, node) => {
     // Handle $ references
     const depMatch = value.match(DEP_REGEX)
     if (depMatch) {
-      // Resolve through the resolution context
-      if (node && node.resolutionContext && global.__microqlResolver) {
-        return await global.__microqlResolver(value)
+      // Parse $.queryName.field notation
+      if (node && node.resolutionContext) {
+        const parts = value.substring(2).split('.')
+        const queryName = parts[0]
+        const context = node.resolutionContext
+        
+        // Check if query result is available
+        if (!context.queryResults.has(queryName)) {
+          // Check if query is currently executing and wait for it
+          if (context.executing && context.executing.has(queryName)) {
+            const result = await context.executing.get(queryName)
+            context.queryResults.set(queryName, result)
+          } else {
+            throw new Error(`Query '${queryName}' has not been executed yet (referenced as '${value}')`)
+          }
+        }
+        
+        // Get the query result and use retrieve for field navigation
+        const queryResult = context.queryResults.get(queryName)
+        if (parts.length === 1) {
+          // Just $.queryName
+          return queryResult
+        } else {
+          // $.queryName.field.subfield - use retrieve for field access
+          const fieldPath = '$.' + parts.slice(1).join('.')
+          return retrieve(fieldPath, queryResult)
+        }
       }
-      // Try direct resolution if we have the global resolver
-      if (global.__microqlResolver) {
-        return await global.__microqlResolver(value)
-      }
-      // Fallback - return as-is
+      // Fallback - return as-is if no resolution context
       return value
     }
     
@@ -722,28 +752,6 @@ const resolveValue = async (value, node) => {
   }
   
   return value
-}
-
-// resolveContextValue removed - replaced with getContext helper
-
-/**
- * Get nested property from object
- */
-const getNestedProperty = (obj, path) => {
-  // Remove leading dot if present
-  const cleanPath = path.startsWith('.') ? path.slice(1) : path
-  
-  if (!cleanPath) return obj
-  
-  const parts = cleanPath.split('.')
-  let current = obj
-  
-  for (const part of parts) {
-    if (current == null) return undefined
-    current = current[part]
-  }
-  
-  return current
 }
 
 /**
@@ -902,11 +910,6 @@ const resolveDependencies = (queries) => {
     
     const query = queries[queryName]
     if (!query) {
-      // Special case: 'given' is not a query but input data
-      if (queryName === 'given') {
-        visiting.delete(queryName)
-        return
-      }
       throw new Error(`Query '${queryName}' not found (referenced as dependency)`)
     }
     

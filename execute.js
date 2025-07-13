@@ -13,8 +13,10 @@
  * @returns {*} Query results
  */
 export const executeAST = async (ast, given, select) => {
-  // Use provided given or fall back to AST's given
-  const inputData = given !== undefined ? given : ast.given
+  // If given is provided at execution time, update the given query
+  if (given !== undefined && ast.queries.given) {
+    ast.queries.given.value = given
+  }
   
   // Track query results for $ references
   const queryResults = new Map()
@@ -22,10 +24,16 @@ export const executeAST = async (ast, given, select) => {
   // Track executing promises to avoid duplicate execution
   const executing = new Map()
   
+  // Pre-populate resolved queries (like given) in queryResults
+  for (const [queryName, queryNode] of Object.entries(ast.queries)) {
+    if (queryNode.type === 'resolved') {
+      queryResults.set(queryName, queryNode.value)
+    }
+  }
+  
   // Create context for $ resolution
   const resolutionContext = {
     queryResults,
-    inputData,
     executing,
     settings: ast.settings
   }
@@ -64,6 +72,10 @@ export const executeAST = async (ast, given, select) => {
    */
   const executeQueryNode = async (node, context) => {
     switch (node.type) {
+      case 'resolved':
+        // Pre-resolved queries (like given) - return stored value
+        return node.value
+        
       case 'alias':
         // Execute the target query
         return await executeQuery(node.target)
@@ -111,106 +123,36 @@ export const executeAST = async (ast, given, select) => {
     return result
   }
   
-  // Override the global resolver for $ references
-  const originalResolver = global.__microqlResolver
-  global.__microqlResolver = createDollarResolver(resolutionContext)
+  // Start all queries in parallel - dependency resolution will coordinate automatically
+  const allPromises = ast.executionOrder.map(queryName => executeQuery(queryName))
+  await Promise.all(allPromises)
   
-  try {
-    // Start all queries in parallel - dependency resolution will coordinate automatically
-    const allPromises = ast.executionOrder.map(queryName => executeQuery(queryName))
-    await Promise.all(allPromises)
-    
-    // Return selected query or all results
-    if (select) {
-      if (Array.isArray(select)) {
-        // Select multiple queries
-        const selectedResults = {}
-        for (const queryName of select) {
-          if (!queryResults.has(queryName)) {
-            throw new Error(`Query '${queryName}' not found`)
-          }
-          selectedResults[queryName] = queryResults.get(queryName)
+  // Return selected query or all results
+  if (select) {
+    if (Array.isArray(select)) {
+      // Select multiple queries
+      const selectedResults = {}
+      for (const queryName of select) {
+        if (!queryResults.has(queryName)) {
+          throw new Error(`Query '${queryName}' not found`)
         }
-        return selectedResults
-      } else {
-        // Select single query
-        if (!queryResults.has(select)) {
-          throw new Error(`Query '${select}' not found`)
-        }
-        return queryResults.get(select)
+        selectedResults[queryName] = queryResults.get(queryName)
       }
+      return selectedResults
+    } else {
+      // Select single query
+      if (!queryResults.has(select)) {
+        throw new Error(`Query '${select}' not found`)
+      }
+      return queryResults.get(select)
     }
-    
-    // Convert Map to object for return
-    const results = {}
-    for (const [key, value] of queryResults) {
-      results[key] = value
-    }
-    return results
-    
-  } finally {
-    // Restore original resolver
-    global.__microqlResolver = originalResolver
   }
+  
+  // Convert Map to object for return
+  const results = {}
+  for (const [key, value] of queryResults) {
+    results[key] = value
+  }
+  return results
 }
 
-/**
- * Create a resolver for $ references
- */
-const createDollarResolver = (context) => {
-  return async (path) => {
-    // Parse $.queryName.field notation
-    if (!path.startsWith('$.')) {
-      return path
-    }
-    
-    const parts = path.substring(2).split('.')
-    const queryName = parts[0]
-    
-    // Special case for $.given
-    if (queryName === 'given') {
-      let value = context.inputData
-      
-      // Navigate nested path
-      for (let i = 1; i < parts.length; i++) {
-        if (value == null) return undefined
-        value = value[parts[i]]
-      }
-      
-      return value
-    }
-    
-    // Check if query result is available
-    if (!context.queryResults.has(queryName)) {
-      // Check if query is currently executing and wait for it
-      if (context.executing && context.executing.has(queryName)) {
-        const result = await context.executing.get(queryName)
-        context.queryResults.set(queryName, result)
-      } else {
-        throw new Error(`Query '${queryName}' has not been executed yet (referenced as '${path}')`)
-      }
-    }
-    
-    let value = context.queryResults.get(queryName)
-    
-    // Navigate nested path
-    for (let i = 1; i < parts.length; i++) {
-      if (value == null) return undefined
-      value = value[parts[i]]
-    }
-    
-    return value
-  }
-}
-
-// Temporary integration with withArgs wrapper
-// This will be called during execution to resolve $ references
-export const resolveDollarReference = (value) => {
-  if (typeof value === 'string' && value.startsWith('$.')) {
-    const resolver = global.__microqlResolver
-    if (resolver) {
-      return resolver(value)
-    }
-  }
-  return value
-}
