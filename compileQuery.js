@@ -437,6 +437,15 @@ const withArgs = (fn, staticArgs, dependentArgs, functionArgs) => {
 }
 
 /**
+ * Count @ symbols at start of string
+ */
+const countAtSymbols = (str) => {
+  if (typeof str !== 'string') return 0
+  const match = str.match(/^(@+)/)
+  return match ? match[1].length : 0
+}
+
+/**
  * Resolve a value that may contain @ or $ references
  */
 const resolveValue = async (value, node) => {
@@ -444,12 +453,14 @@ const resolveValue = async (value, node) => {
     // Handle @ references
     const atMatch = value.match(AT_REGEX)
     if (atMatch) {
-      const contextValue = await resolveContextValue(node)
+      const atCount = countAtSymbols(value)
+      const contextValue = await resolveContextValue(node, atCount)
       const path = value.substring(atMatch[0].length)
       
       if (path) {
-        // Access nested property
-        return getNestedProperty(contextValue, path)
+        // Remove leading dot if present and access nested property
+        const cleanPath = path.startsWith('.') ? path.slice(1) : path
+        return getNestedProperty(contextValue, cleanPath)
       }
       return contextValue
     }
@@ -490,22 +501,62 @@ const resolveValue = async (value, node) => {
 /**
  * Resolve context value for @ references
  */
-const resolveContextValue = async (node) => {
+const resolveContextValue = async (node, atCount = 1) => {
   try {
-    // If we have a context getter, use it with the node as context
-    if (node.context) {
-      const result = node.context.call(node)
-      return result // Don't await - the context getter returns the value directly
+    // For single @ level, use simpler approach for now
+    if (atCount === 1) {
+      // If we have a context getter, use it with the node as context
+      if (node.context) {
+        const result = node.context.call(node)
+        return result // Don't await - the context getter returns the value directly
+      }
+      
+      // If we have contextSource, use its value
+      if (node.contextSource) {
+        if (node.contextSource.context) {
+          return node.contextSource.context()
+        }
+        return await node.contextSource.value
+      }
+      
+      throw new Error('No context available')
     }
     
-    // If we have contextSource, use its value
-    if (node.contextSource) {
-      return await node.contextSource.value
+    // For multiple @ levels, build context chain by walking up parentContextNode relationships
+    const contextChain = []
+    let currentNode = node
+    
+    // Walk up the chain to build context stack
+    while (currentNode && contextChain.length < atCount) {
+      if (currentNode.contextSource) {
+        // For execution-time bound contexts
+        if (currentNode.contextSource.context) {
+          contextChain.push(currentNode.contextSource.context())
+        } else {
+          contextChain.push(await currentNode.contextSource.value)
+        }
+      } else if (currentNode.context) {
+        // For compile-time contexts
+        contextChain.push(currentNode.context.call(currentNode))
+      }
+      
+      // Move to parent
+      currentNode = currentNode.parentContextNode
     }
     
-    throw new Error('No context available')
+    // Validate we have enough context levels
+    if (atCount > contextChain.length) {
+      throw new Error(`${'@'.repeat(atCount)} used but context not deep enough (only ${contextChain.length} levels available)`)
+    }
+    
+    // Return the context at the requested level (1-indexed from current)
+    return contextChain[atCount - 1]
+    
   } catch (error) {
-    throw new Error(`@ is not available at this level`)
+    if (error.message.includes('context not deep enough')) {
+      throw error
+    }
+    throw new Error(`${'@'.repeat(atCount)} is not available at this level`)
   }
 }
 
