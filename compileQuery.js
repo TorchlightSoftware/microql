@@ -24,6 +24,62 @@ const DEP_REGEX = /\$\.(\w+)/
 const AT_REGEX = /^@+/
 
 /**
+ * Generic utility to transform object properties asynchronously
+ * @param {Object} obj - Object to transform
+ * @param {Function} transform - Async transform function (value, key, context) => newValue
+ * @param {*} context - Context to pass to transform function
+ * @returns {Promise<Object>} Transformed object
+ */
+const transformObjectAsync = async (obj, transform, context) => {
+  const result = {}
+  for (const [key, value] of Object.entries(obj)) {
+    result[key] = await transform(value, key, context)
+  }
+  return result
+}
+
+/**
+ * Categorize object properties based on classification rules
+ * @param {Object} obj - Object to categorize
+ * @param {Object} classifiers - Object mapping category names to classifier functions
+ * @returns {Object} Object with categorized properties
+ */
+const categorizeObject = (obj, classifiers) => {
+  const result = Object.fromEntries(Object.keys(classifiers).map(cat => [cat, {}]))
+  
+  for (const [key, value] of Object.entries(obj)) {
+    for (const [category, classifier] of Object.entries(classifiers)) {
+      if (classifier(key, value)) {
+        result[category][key] = value
+        break
+      }
+    }
+  }
+  
+  return result
+}
+
+/**
+ * Argument classification configuration
+ */
+const ARG_CATEGORIES = {
+  special: ['timeout', 'retry', 'onError', 'ignoreErrors'],
+  passThrough: ['timeout', 'retry'],
+  template: ['template', 'predicate', 'condition', 'test'],
+  function: ['fn', 'template', 'predicate', 'mapFunction', 'filterFunction', 'test', 'condition']
+}
+
+/**
+ * Apply an array of wrapper functions to a base function
+ * @param {Function} baseFunction - The base function to wrap
+ * @param {Array} wrappers - Array of wrapper functions (applied in order)
+ * @returns {Function} The composed function
+ */
+const applyWrappers = (baseFunction, wrappers) => {
+  return wrappers.filter(Boolean).reduce((fn, wrapper) => wrapper(fn), baseFunction)
+}
+
+/**
  * Main compilation entry point
  * @param {Object} config - MicroQL configuration with services, queries, settings
  * @returns {Object} Compiled AST ready for execution
@@ -219,16 +275,16 @@ const separateArguments = (args, config) => {
   
   for (const [key, value] of Object.entries(args)) {
     // Handle special wrapper arguments
-    if (['timeout', 'retry', 'onError', 'ignoreErrors'].includes(key)) {
+    if (ARG_CATEGORIES.special.includes(key)) {
       specialArgs[key] = value
       
       // timeout and retry should also be passed to the service
-      if (key === 'timeout' || key === 'retry') {
+      if (ARG_CATEGORIES.passThrough.includes(key)) {
         staticArgs[key] = value
       }
       
       // onError and ignoreErrors are wrapper-only, don't pass to service
-      if (key === 'onError' || key === 'ignoreErrors') {
+      if (!ARG_CATEGORIES.passThrough.includes(key)) {
         continue
       }
     }
@@ -252,7 +308,7 @@ const separateArguments = (args, config) => {
     } else if (containsReferences(value)) {
       // For template-like arguments (objects/arrays with @ symbols), 
       // create a function that resolves @ symbols at execution time
-      if (['template', 'predicate', 'condition', 'test'].includes(key) && typeof value === 'object') {
+      if (ARG_CATEGORIES.template.includes(key) && typeof value === 'object') {
         functionArgs[key] = createTemplateFunction(value)
       } else {
         dependentArgs[key] = value
@@ -315,11 +371,7 @@ const resolveTemplate = async (template, contextNode) => {
   }
   
   if (template && typeof template === 'object') {
-    const resolved = {}
-    for (const [key, value] of Object.entries(template)) {
-      resolved[key] = await resolveTemplate(value, contextNode)
-    }
-    return resolved
+    return await transformObjectAsync(template, (value) => resolveTemplate(value, contextNode), contextNode)
   }
   
   return template
@@ -447,43 +499,33 @@ const createWrappedFunction = (
     }
   }
   
-  // Apply wrappers in canonical order
-  
-  // 1. withArgs - resolves @ and $ references
-  wrappedFunction = withArgs(wrappedFunction, staticArgs, dependentArgs, functionArgs)
-  
-  // 2. withGuard - debug logging
-  if (config.settings?.debug) {
-    wrappedFunction = withGuard(wrappedFunction, serviceName, action, config.settings)
-  }
-  
-  // 3. withTimeout
+  // Extract configuration values
   const timeoutMs = specialArgs.timeout ?? 
     config.settings?.timeout?.[serviceName] ?? 
     config.settings?.timeout?.default
-    
-  if (timeoutMs && timeoutMs > 0) {
-    wrappedFunction = withTimeout(wrappedFunction, timeoutMs, serviceName, action)
-  }
-  
-  // 4. withRetry
   const retryCount = specialArgs.retry ?? config.settings?.retry?.default ?? 0
-  if (retryCount > 0) {
-    wrappedFunction = withRetry(wrappedFunction, retryCount, serviceName, action)
-  }
   
-  // 5. withErrorHandling (outermost)
-  if (specialArgs.onError || specialArgs.ignoreErrors) {
-    wrappedFunction = withErrorHandling(
-      wrappedFunction,
-      specialArgs.onError,
-      specialArgs.ignoreErrors,
-      serviceName,
-      action,
-      config,
-      rawArgs  // Pass original args for error context
-    )
-  }
+  // Build wrapper array in canonical order
+  const wrappers = [
+    // 1. withArgs - resolves @ and $ references
+    fn => withArgs(fn, staticArgs, dependentArgs, functionArgs),
+    
+    // 2. withGuard - debug logging
+    config.settings?.debug ? fn => withGuard(fn, serviceName, action, config.settings) : null,
+    
+    // 3. withTimeout
+    (timeoutMs && timeoutMs > 0) ? fn => withTimeout(fn, timeoutMs, serviceName, action) : null,
+    
+    // 4. withRetry
+    retryCount > 0 ? fn => withRetry(fn, retryCount, serviceName, action) : null,
+    
+    // 5. withErrorHandling (outermost)
+    (specialArgs.onError || specialArgs.ignoreErrors) ? 
+      fn => withErrorHandling(fn, specialArgs.onError, specialArgs.ignoreErrors, serviceName, action, config, rawArgs) : null
+  ]
+  
+  // Apply all wrappers using functional composition
+  wrappedFunction = applyWrappers(wrappedFunction, wrappers)
   
   // Return a function that can be called during execution
   return async function executeWrappedFunction() {
@@ -511,7 +553,7 @@ const withArgs = (fn, staticArgs, dependentArgs, functionArgs) => {
       if (typeof func === 'function') {
         // For services that expect function arguments (like util.map), 
         // wrap the function to maintain context chain
-        if (['fn', 'template', 'predicate', 'mapFunction', 'filterFunction', 'test', 'condition'].includes(key)) {
+        if (ARG_CATEGORIES.function.includes(key)) {
           // Create a context-aware wrapper that captures the current execution context
           resolvedFunctions[key] = async (itemValue) => {
             // For template functions, we need to set up the context chain properly
@@ -665,11 +707,7 @@ const resolveValue = async (value, node) => {
   }
   
   if (value && typeof value === 'object') {
-    const resolved = {}
-    for (const [key, val] of Object.entries(value)) {
-      resolved[key] = await resolveValue(val, node)
-    }
-    return resolved
+    return await transformObjectAsync(value, (val) => resolveValue(val, node), node)
   }
   
   return value

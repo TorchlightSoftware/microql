@@ -25,6 +25,22 @@ const COLORS = {
 const COLOR_NAMES = ['green', 'yellow', 'blue', 'magenta', 'cyan', 'white']
 
 /**
+ * Validation utility for checking argument types
+ * @param {*} value - Value to validate
+ * @param {string} expectedType - Expected type ('array', 'object', etc.)
+ * @param {string} name - Parameter name for error message
+ * @throws {Error} If validation fails
+ */
+const validateType = (value, expectedType, name) => {
+  if (expectedType === 'array' && !Array.isArray(value)) {
+    throw new Error(`${name}: expected array, got ${typeof value}`)
+  }
+  if (expectedType === 'object' && (!value || typeof value !== 'object' || Array.isArray(value))) {
+    throw new Error(`${name}: expected object, got ${typeof value}`)
+  }
+}
+
+/**
  * Utility service for common data transformations in MicroQL
  * Provides map, filter, flatMap, concat and other operations
  */
@@ -33,7 +49,7 @@ const util = {
    * Transform each item in a collection using a function or template
    */
   async map({ on, fn, template }) {
-    if (!Array.isArray(on)) throw new Error(`expected array, got ${typeof on}`)
+    validateType(on, 'array', 'on')
 
     // Both templates and functions are now compiled functions by MicroQL
     const mapFunction = template || fn
@@ -48,7 +64,7 @@ const util = {
    * Filter collection based on a predicate function
    */
   async filter({ on, predicate }) {
-    if (!Array.isArray(on)) throw new Error(`expected array, got ${typeof on}`)
+    validateType(on, 'array', 'on')
 
     if (!predicate || typeof predicate !== 'function') {
       throw new Error('Predicate function is required for filter operation')
