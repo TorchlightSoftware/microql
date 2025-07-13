@@ -65,8 +65,7 @@ const categorizeObject = (obj, classifiers) => {
 const ARG_CATEGORIES = {
   special: ['timeout', 'retry', 'onError', 'ignoreErrors'],
   passThrough: ['timeout', 'retry'],
-  template: ['template', 'predicate', 'condition', 'test'],
-  function: ['fn', 'template', 'predicate', 'mapFunction', 'filterFunction', 'test', 'condition']
+  function: ['fn', 'predicate', 'mapFunction', 'filterFunction', 'test', 'condition']
 }
 
 /**
@@ -328,16 +327,27 @@ const separateArguments = (args, config) => {
           staticArgs[key] = value
         }
       }
+    } else if (ARG_CATEGORIES.function.includes(key) && 
+               typeof value === 'object' && 
+               !Array.isArray(value) && 
+               value !== null) {
+      // Template syntax transform: plain object -> ['util', 'template', object]
+      try {
+        const templateDescriptor = ['util', 'template', value]
+        const compiledFunction = compileServiceFunction(templateDescriptor, config)
+        functionArgs[key] = compiledFunction
+      } catch (e) {
+        // If template compilation fails, treat as dependent arg
+        if (containsReferences(value)) {
+          dependentArgs[key] = value
+        } else {
+          staticArgs[key] = value
+        }
+      }
     } else if (typeof value === 'function') {
       functionArgs[key] = value
     } else if (containsReferences(value)) {
-      // For template-like arguments (objects/arrays with @ symbols), 
-      // create a function that resolves @ symbols at execution time
-      if (ARG_CATEGORIES.template.includes(key) && typeof value === 'object') {
-        functionArgs[key] = createTemplateFunction(value)
-      } else {
-        dependentArgs[key] = value
-      }
+      dependentArgs[key] = value
     } else {
       staticArgs[key] = value
     }
@@ -346,54 +356,6 @@ const separateArguments = (args, config) => {
   return { staticArgs, dependentArgs, functionArgs, specialArgs }
 }
 
-/**
- * Create a template function that resolves @ symbols at execution time
- */
-const createTemplateFunction = (template) => {
-  return async (contextValue) => {
-    // Resolve all @ symbols in the template using direct substitution
-    return await resolveTemplateDirectly(template, contextValue)
-  }
-}
-
-/**
- * Resolve @ symbols in templates using direct value substitution (no AST traversal)
- */
-const resolveTemplateDirectly = async (template, contextValue) => {
-  if (typeof template === 'string') {
-    // Handle @ references
-    const atMatch = template.match(AT_REGEX)
-    if (atMatch) {
-      const atCount = countAtSymbols(template)
-      if (atCount > 1) {
-        // @@, @@@, etc. not available in templates - they only get the current iteration value
-        throw new Error(`${'@'.repeat(atCount)} not available in template - only @ (current value) is available`)
-      }
-      
-      const path = template.substring(atMatch[0].length)
-      
-      if (path) {
-        // Handle field access like @.field
-        const jsonPath = path.startsWith('.') ? '$' + path : '$.' + path
-        return retrieve(jsonPath, contextValue)
-      } else {
-        // Handle pure @ symbol
-        return contextValue
-      }
-    }
-    return template
-  }
-  
-  if (Array.isArray(template)) {
-    return Promise.all(template.map(item => resolveTemplateDirectly(item, contextValue)))
-  }
-  
-  if (template && typeof template === 'object') {
-    return await transformObjectAsync(template, (value) => resolveTemplateDirectly(value, contextValue), contextValue)
-  }
-  
-  return template
-}
 
 /**
  * Recursively resolve @ symbols in a template object/array (LEGACY - for AST nodes)

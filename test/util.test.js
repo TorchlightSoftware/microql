@@ -129,7 +129,7 @@ describe('Util Service Tests', () => {
         query: {
           summary: ['util', 'map', {
             on: '$.given.people',
-            template: {
+            fn: {
               name: '@.name',
               info: '@.department'
             }
@@ -224,7 +224,7 @@ describe('Util Service Tests', () => {
         methods: ['util'],
         query: {
           processed: ['$.given.items', 'util:map', {
-            template: { original: '@.id', processed: true }
+            fn: { original: '@.id', processed: true }
           }]
         },
         select: 'processed'

@@ -46,18 +46,16 @@ const validateType = (value, expectedType, name) => {
  */
 const util = {
   /**
-   * Transform each item in a collection using a function or template
+   * Transform each item in a collection using a function
    */
-  async map({ on, fn, template }) {
+  async map({ on, fn }) {
     validateType(on, 'array', 'on')
 
-    // Both templates and functions are now compiled functions by MicroQL
-    const mapFunction = template || fn
-    if (mapFunction && typeof mapFunction === 'function') {
-      return Promise.all(on.map(mapFunction))
+    if (fn && typeof fn === 'function') {
+      return Promise.all(on.map(fn))
     }
 
-    throw new Error('Either template or fn must be provided for map operation')
+    throw new Error('fn must be provided for map operation')
   },
 
   /**
@@ -77,8 +75,8 @@ const util = {
   /**
    * Map and then flatten the results
    */
-  async flatMap({ on, template, fn }) {
-    const results = await util.map({on, template, fn})
+  async flatMap({ on, fn }) {
+    const results = await util.map({on, fn})
     return results.flat()
   },
 
@@ -304,13 +302,22 @@ const util = {
 
     // Return the error context for potential chaining
     return on
+  },
+
+  /**
+   * Template service - returns the provided template object
+   * MicroQL handles @ symbol resolution automatically through arg compilation
+   */
+  template(templateArgs) {
+    // Remove any non-template arguments (like auto-injected settings)
+    const { settings, ...template } = templateArgs
+    return template
   }
 }
 
 // Argument type metadata for MicroQL function compilation
 util.map._argtypes = {
-  fn: { type: 'function' },
-  template: { type: 'template' }
+  fn: { type: 'function' }
 }
 
 util.filter._argtypes = {
@@ -318,8 +325,7 @@ util.filter._argtypes = {
 }
 
 util.flatMap._argtypes = {
-  fn: { type: 'function' },
-  template: { type: 'template' }
+  fn: { type: 'function' }
 }
 
 util.when._argtypes = {
@@ -334,6 +340,8 @@ util.snapshot._argtypes = {
   // capture argument will be resolved by MicroQL context ($ references)
   // out argument is a simple string path
 }
+
+util.template._argtypes = {}
 
 export default util
 export { COLOR_NAMES }
