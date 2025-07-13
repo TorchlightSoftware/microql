@@ -42,10 +42,12 @@ describe('Error Handling Tests', () => {
         }
       }
       
-      await assert.rejects(
-        () => query(config),
-        /Service failed/
-      )
+      const result = await query(config)
+      assert.deepStrictEqual(result.result, {
+        logged: true,
+        error: 'Service failed',
+        service: 'error.fail'
+      })
     })
     
     it('should ignore errors when ignoreErrors is true', async () => {

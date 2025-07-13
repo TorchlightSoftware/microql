@@ -118,27 +118,27 @@ export default async function query(config) {
     methods
   }
   
-  try {
-    // Phase 1: Compile queries into AST
-    const ast = compileQuery(compileConfig)
-    
-    // Hook service tracking into AST
-    for (const queryNode of Object.values(ast.queries)) {
-      const trackUsage = (node) => {
-        if (node.type === 'service' && node.serviceName) {
-          const originalFn = node.wrappedFunction
-          node.wrappedFunction = async function() {
-            usedServices.add(this.serviceName || node.serviceName)
-            return await originalFn.apply(this, arguments)
-          }
-        } else if (node.type === 'chain') {
-          node.steps.forEach(trackUsage)
+  // Phase 1: Compile queries into AST (let compilation errors propagate)
+  const ast = compileQuery(compileConfig)
+  
+  // Hook service tracking into AST
+  for (const queryNode of Object.values(ast.queries)) {
+    const trackUsage = (node) => {
+      if (node.type === 'service' && node.serviceName) {
+        const originalFn = node.wrappedFunction
+        node.wrappedFunction = async function() {
+          usedServices.add(this.serviceName || node.serviceName)
+          return await originalFn.apply(this, arguments)
         }
+      } else if (node.type === 'chain') {
+        node.steps.forEach(trackUsage)
       }
-      trackUsage(queryNode)
     }
-    
-    // Phase 2: Execute the AST
+    trackUsage(queryNode)
+  }
+  
+  try {
+    // Phase 2: Execute the AST (only catch execution errors)
     let results
     
     // Load snapshot if provided
@@ -188,7 +188,7 @@ export default async function query(config) {
     return results
     
   } catch (error) {
-    // Handle query-level errors
+    // Handle execution-level errors only (not compilation errors)
     if (queryOnError && Array.isArray(queryOnError)) {
       try {
         // Create error context
@@ -213,9 +213,6 @@ export default async function query(config) {
       } catch (onErrorErr) {
         console.error(`Query-level onError handler failed: ${onErrorErr.message}`)
       }
-    } else {
-      // Default error handling
-      defaultErrorHandler(error, 'query execution', resolvedSettings)
     }
     
     // Call tearDown even if query fails

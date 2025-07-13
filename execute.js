@@ -25,7 +25,8 @@ export const executeAST = async (ast, given, select) => {
   // Create context for $ resolution
   const resolutionContext = {
     queryResults,
-    inputData
+    inputData,
+    executing
   }
   
   /**
@@ -47,10 +48,10 @@ export const executeAST = async (ast, given, select) => {
     
     // Track the promise
     executing.set(queryName, promise)
-    queryNode.value = promise
     
     // Store result when complete
     const result = await promise
+    queryNode.value = result        // Store actual value, not promise
     queryResults.set(queryName, result)
     
     return result
@@ -119,10 +120,9 @@ export const executeAST = async (ast, given, select) => {
   global.__microqlResolver = createDollarResolver(resolutionContext)
   
   try {
-    // Execute queries in dependency order (sequential for now)
-    for (const queryName of ast.executionOrder) {
-      await executeQuery(queryName)
-    }
+    // Start all queries in parallel - dependency resolution will coordinate automatically
+    const allPromises = ast.executionOrder.map(queryName => executeQuery(queryName))
+    await Promise.all(allPromises)
     
     // Return selected query or all results
     if (select) {
@@ -162,7 +162,7 @@ export const executeAST = async (ast, given, select) => {
  * Create a resolver for $ references
  */
 const createDollarResolver = (context) => {
-  return (path) => {
+  return async (path) => {
     // Parse $.queryName.field notation
     if (!path.startsWith('$.')) {
       return path
@@ -184,8 +184,15 @@ const createDollarResolver = (context) => {
       return value
     }
     
+    // Check if query result is available
     if (!context.queryResults.has(queryName)) {
-      throw new Error(`Query '${queryName}' has not been executed yet (referenced as '${path}')`)
+      // Check if query is currently executing and wait for it
+      if (context.executing && context.executing.has(queryName)) {
+        const result = await context.executing.get(queryName)
+        context.queryResults.set(queryName, result)
+      } else {
+        throw new Error(`Query '${queryName}' has not been executed yet (referenced as '${path}')`)
+      }
     }
     
     let value = context.queryResults.get(queryName)

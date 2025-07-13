@@ -6,6 +6,7 @@
  */
 
 import { inspect } from 'util'
+import retrieve from './retrieve.js'
 
 /**
  * Method syntax regex pattern
@@ -129,6 +130,11 @@ const compileServiceNode = (queryName, descriptor, config, parentContextNode) =>
     throw new Error(`Service '${serviceName}' not found`)
   }
   
+  // Validate service type at compile time
+  if (typeof service !== 'function' && (typeof service !== 'object' || service === null || Array.isArray(service))) {
+    throw new Error(`Invalid service '${serviceName}': must be a function or object`)
+  }
+  
   // Validate method exists at compile time
   if (typeof service !== 'function' && !service[action]) {
     throw new Error(`Service method '${action}' not found`)
@@ -218,19 +224,29 @@ const separateArguments = (args, config) => {
       continue
     }
     
-    // Check if value contains @ or $ references
-    if (containsReferences(value)) {
-      dependentArgs[key] = value
-    } else if (typeof value === 'function') {
-      functionArgs[key] = value
-    } else if (Array.isArray(value) && value.length >= 2 && typeof value[0] === 'string') {
-      // Might be a service descriptor for compilation
+    // Check if this looks like a service descriptor first
+    if (Array.isArray(value) && value.length >= 2 && typeof value[0] === 'string') {
+      // Try to compile as service descriptor
       try {
         const compiledFunction = compileServiceFunction(value, config)
         functionArgs[key] = compiledFunction
       } catch (e) {
-        // Not a valid service descriptor, treat as static
-        staticArgs[key] = value
+        // Not a valid service descriptor, check for references
+        if (containsReferences(value)) {
+          dependentArgs[key] = value
+        } else {
+          staticArgs[key] = value
+        }
+      }
+    } else if (typeof value === 'function') {
+      functionArgs[key] = value
+    } else if (containsReferences(value)) {
+      // For template-like arguments (objects/arrays with @ symbols), 
+      // create a function that resolves @ symbols at execution time
+      if (['template', 'predicate', 'condition'].includes(key) && typeof value === 'object') {
+        functionArgs[key] = createTemplateFunction(value)
+      } else {
+        dependentArgs[key] = value
       }
     } else {
       staticArgs[key] = value
@@ -241,13 +257,73 @@ const separateArguments = (args, config) => {
 }
 
 /**
- * Compile service descriptor to function
+ * Create a template function that resolves @ symbols at execution time
+ */
+const createTemplateFunction = (template) => {
+  return async (contextValue, parentContext = null) => {
+    // Create a temporary context node for @ resolution that matches getContext expectations
+    const contextSource = {
+      value: Promise.resolve(contextValue),
+      context: () => contextValue
+    }
+    
+    const tempContextNode = {
+      contextSource: contextSource,
+      parentContextNode: parentContext
+    }
+    
+    // Resolve all @ symbols in the template using the current context
+    return await resolveTemplate(template, tempContextNode)
+  }
+}
+
+/**
+ * Recursively resolve @ symbols in a template object/array
+ */
+const resolveTemplate = async (template, contextNode) => {
+  if (typeof template === 'string') {
+    // Handle @ references
+    const atMatch = template.match(AT_REGEX)
+    if (atMatch) {
+      const atCount = countAtSymbols(template)
+      const level = atCount - 1  // Convert to 0-based index
+      const path = template.substring(atMatch[0].length)
+      
+      if (path) {
+        // Handle field access like @.field or @@.field
+        const jsonPath = path.startsWith('.') ? '$' + path : '$.' + path
+        return getContext(contextNode, level, jsonPath)
+      } else {
+        // Handle pure @ symbols
+        return getContext(contextNode, level)
+      }
+    }
+    return template
+  }
+  
+  if (Array.isArray(template)) {
+    return Promise.all(template.map(item => resolveTemplate(item, contextNode)))
+  }
+  
+  if (template && typeof template === 'object') {
+    const resolved = {}
+    for (const [key, value] of Object.entries(template)) {
+      resolved[key] = await resolveTemplate(value, contextNode)
+    }
+    return resolved
+  }
+  
+  return template
+}
+
+/**
+ * Compile service descriptor to function with context capture
  */
 const compileServiceFunction = (descriptor, config) => {
   const node = compileServiceNode(null, descriptor, config, null)
   
   // Return a function that executes the compiled node
-  return async (contextValue) => {
+  return async (contextValue, parentContext = null) => {
     // Create a temporary context node
     const tempContextNode = {
       value: Promise.resolve(contextValue),
@@ -255,10 +331,13 @@ const compileServiceFunction = (descriptor, config) => {
     }
     
     node.contextSource = tempContextNode
+    node.parentContextNode = parentContext  // Use provided parent context
     
     // Bind the node with resolution context for execution
     const boundFunction = node.wrappedFunction.bind({
       ...node,
+      contextSource: tempContextNode,
+      parentContextNode: parentContext,
       resolutionContext: { 
         queryResults: new Map(),
         inputData: contextValue
@@ -391,7 +470,8 @@ const createWrappedFunction = (
       specialArgs.ignoreErrors,
       serviceName,
       action,
-      config
+      config,
+      rawArgs  // Pass original args for error context
     )
   }
   
@@ -419,9 +499,45 @@ const withArgs = (fn, staticArgs, dependentArgs, functionArgs) => {
     const resolvedFunctions = {}
     for (const [key, func] of Object.entries(functionArgs)) {
       if (typeof func === 'function') {
-        // Call function with current context
-        const contextValue = await resolveContextValue(node)
-        resolvedFunctions[key] = await func(contextValue)
+        // For services that expect function arguments (like util.map), 
+        // wrap the function to maintain context chain
+        if (['fn', 'template', 'predicate', 'mapFunction', 'filterFunction'].includes(key)) {
+          // Create a context-aware wrapper that captures the current execution context
+          resolvedFunctions[key] = async (itemValue) => {
+            // For template functions, we need to set up the context chain properly
+            // The itemValue becomes the current context (@)
+            // The service's context (if any) becomes the parent context (@@)
+            
+            let parentContextNode = null
+            
+            // Try to create a parent context node from the service's context
+            try {
+              let parentContextValue = null
+              if (node.context && typeof node.context === 'function') {
+                parentContextValue = node.context()
+              } else if (node.contextSource && node.contextSource.context) {
+                parentContextValue = node.contextSource.context()
+              }
+              
+              if (parentContextValue !== null) {
+                parentContextNode = {
+                  value: Promise.resolve(parentContextValue),
+                  context: () => parentContextValue,
+                  parentContextNode: node.parentContextNode
+                }
+              }
+            } catch (e) {
+              // If context is not available, parent will be null
+            }
+            
+            return await func(itemValue, parentContextNode)
+          }
+        } else {
+          // Call function with current context for other cases
+          const contextValue = getContext(node, 0)  // @ = level 0
+          // Pass parent context for compiled service functions
+          resolvedFunctions[key] = await func(contextValue, node)
+        }
       }
     }
     
@@ -446,6 +562,48 @@ const countAtSymbols = (str) => {
 }
 
 /**
+ * Get context at specified level using AST relationships
+ * @param {Object} node - Current AST node
+ * @param {number} level - Context level (0 = @, 1 = @@, 2 = @@@, etc.)
+ * @param {string} path - Optional JSONPath for field access (e.g., '$.field')
+ */
+const getContext = (node, level, path) => {
+  let current = node
+  
+  // Walk up the context chain
+  for (let i = 0; i <= level; i++) {
+    if (i === 0) {
+      // @ = current context from contextSource
+      current = current.contextSource
+    } else {
+      // @@, @@@, etc. = walk up parent chain
+      current = current.parentContextNode
+    }
+    
+    if (!current) {
+      throw new Error(`${'@'.repeat(level + 1)} not available - context not deep enough (only ${i} levels available)`)
+    }
+  }
+  
+  // Get the actual value
+  let value
+  if (current.context && typeof current.context === 'function') {
+    value = current.context()
+  } else if (current.value !== undefined) {
+    value = current.value
+  } else {
+    throw new Error(`Context value not available for ${'@'.repeat(level + 1)}`)
+  }
+  
+  // Apply JSONPath if provided
+  if (path) {
+    return retrieve(path, value)
+  }
+  
+  return value
+}
+
+/**
  * Resolve a value that may contain @ or $ references
  */
 const resolveValue = async (value, node) => {
@@ -454,15 +612,17 @@ const resolveValue = async (value, node) => {
     const atMatch = value.match(AT_REGEX)
     if (atMatch) {
       const atCount = countAtSymbols(value)
-      const contextValue = await resolveContextValue(node, atCount)
+      const level = atCount - 1  // Convert to 0-based index
       const path = value.substring(atMatch[0].length)
       
       if (path) {
-        // Remove leading dot if present and access nested property
-        const cleanPath = path.startsWith('.') ? path.slice(1) : path
-        return getNestedProperty(contextValue, cleanPath)
+        // Handle field access like @.field or @@.field
+        const jsonPath = path.startsWith('.') ? '$' + path : '$.' + path
+        return getContext(node, level, jsonPath)
+      } else {
+        // Handle pure @ symbols
+        return getContext(node, level)
       }
-      return contextValue
     }
     
     // Handle $ references
@@ -470,11 +630,11 @@ const resolveValue = async (value, node) => {
     if (depMatch) {
       // Resolve through the resolution context
       if (node && node.resolutionContext && global.__microqlResolver) {
-        return global.__microqlResolver(value)
+        return await global.__microqlResolver(value)
       }
       // Try direct resolution if we have the global resolver
       if (global.__microqlResolver) {
-        return global.__microqlResolver(value)
+        return await global.__microqlResolver(value)
       }
       // Fallback - return as-is
       return value
@@ -498,67 +658,7 @@ const resolveValue = async (value, node) => {
   return value
 }
 
-/**
- * Resolve context value for @ references
- */
-const resolveContextValue = async (node, atCount = 1) => {
-  try {
-    // For single @ level, use simpler approach for now
-    if (atCount === 1) {
-      // If we have a context getter, use it with the node as context
-      if (node.context) {
-        const result = node.context.call(node)
-        return result // Don't await - the context getter returns the value directly
-      }
-      
-      // If we have contextSource, use its value
-      if (node.contextSource) {
-        if (node.contextSource.context) {
-          return node.contextSource.context()
-        }
-        return await node.contextSource.value
-      }
-      
-      throw new Error('No context available')
-    }
-    
-    // For multiple @ levels, build context chain by walking up parentContextNode relationships
-    const contextChain = []
-    let currentNode = node
-    
-    // Walk up the chain to build context stack
-    while (currentNode && contextChain.length < atCount) {
-      if (currentNode.contextSource) {
-        // For execution-time bound contexts
-        if (currentNode.contextSource.context) {
-          contextChain.push(currentNode.contextSource.context())
-        } else {
-          contextChain.push(await currentNode.contextSource.value)
-        }
-      } else if (currentNode.context) {
-        // For compile-time contexts
-        contextChain.push(currentNode.context.call(currentNode))
-      }
-      
-      // Move to parent
-      currentNode = currentNode.parentContextNode
-    }
-    
-    // Validate we have enough context levels
-    if (atCount > contextChain.length) {
-      throw new Error(`${'@'.repeat(atCount)} used but context not deep enough (only ${contextChain.length} levels available)`)
-    }
-    
-    // Return the context at the requested level (1-indexed from current)
-    return contextChain[atCount - 1]
-    
-  } catch (error) {
-    if (error.message.includes('context not deep enough')) {
-      throw error
-    }
-    throw new Error(`${'@'.repeat(atCount)} is not available at this level`)
-  }
-}
+// resolveContextValue removed - replaced with getContext helper
 
 /**
  * Get nested property from object
@@ -651,18 +751,36 @@ const withRetry = (fn, retryCount, serviceName, action) => {
 /**
  * Wrapper: Error handling
  */
-const withErrorHandling = (fn, onErrorDescriptor, ignoreErrors, serviceName, action, config) => {
-  return async function(args) {
+const withErrorHandling = (fn, onErrorDescriptor, ignoreErrors, serviceName, action, config, rawArgs) => {
+  return async function(resolvedArgs) {
     try {
-      return await fn.call(this, args)
+      return await fn.call(this, resolvedArgs)
     } catch (error) {
-      // Prepare error context
+      // Prepare complete args including defaults for error context
+      const completeArgs = { ...rawArgs }
+      
+      // Add resolved timeout if applicable
+      const timeoutMs = rawArgs.timeout ?? 
+        config.settings?.timeout?.[serviceName] ?? 
+        config.settings?.timeout?.default
+      if (timeoutMs && timeoutMs > 0) {
+        completeArgs.timeout = timeoutMs
+      }
+      
+      // Add retry if applicable  
+      const retryCount = rawArgs.retry ?? config.settings?.retry?.default ?? 0
+      if (retryCount > 0) {
+        completeArgs.retry = retryCount
+      }
+      
+      // Prepare error context with complete args + query name
       const errorContext = {
         error: error.message,
         originalError: error,
         serviceName,
         action,
-        args
+        args: completeArgs,
+        queryName: this?.reference || 'unknown'
       }
       
       // Handle with onError if provided
@@ -670,7 +788,15 @@ const withErrorHandling = (fn, onErrorDescriptor, ignoreErrors, serviceName, act
         try {
           // Compile the error handler
           const errorHandler = compileServiceFunction(onErrorDescriptor, config)
-          return await errorHandler(errorContext)
+          const handlerResult = await errorHandler(errorContext, this)
+          
+          // If ignoreErrors is true, run handler for side effects but return null
+          if (ignoreErrors) {
+            return null
+          }
+          
+          // Otherwise return the handler result
+          return handlerResult
         } catch (handlerError) {
           // Error handler failed
           if (!ignoreErrors) {
