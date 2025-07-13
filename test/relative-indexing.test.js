@@ -150,4 +150,68 @@ describe('Relative Indexing Context Tests', () => {
       assert(error.message.includes('levels available'))
     }
   })
+  
+  it('should handle deep nesting: chainA -> mapB -> chainC -> mapD', async () => {
+    // This test captures the complex pattern that requires virtual AST nodes
+    const chainService = {
+      step1: async ({ input }) => input.map(dataset => ({ 
+        dataset, 
+        step: 'chainA',
+        processed: dataset.batches
+      })),
+      step2: async ({ input }) => input.map(batch => ({
+        batch,
+        step: 'chainC', 
+        items: batch.items
+      }))
+    }
+    
+    chainService.step1._argtypes = {}
+    chainService.step2._argtypes = {}
+    
+    const services = { util, test: testService, chain: chainService }
+    
+    const result = await query({
+      given: {
+        datasets: [
+          { batches: [{ items: [1, 2] }] },
+          { batches: [{ items: [3, 4] }] }
+        ]
+      },
+      services,
+      methods: ['util'],
+      query: {
+        deepNested: [
+          // ChainA: Transform datasets
+          ['chain', 'step1', { input: '$.given.datasets' }],
+          // MapB: Iterate over each transformed dataset
+          ['util', 'flatMap', {
+            on: '@',
+            fn: ['chain', 'step2', { input: '@.processed' }]
+          }],
+          // MapC: Iterate over the flattened batches
+          ['util', 'flatMap', {
+            on: '@',
+            fn: ['test', 'checkContext', {
+              level1: '@.items',        // Current batch items
+              level2: '@@',             // Current batch (from previous map)
+              level3: '@@@'             // Current dataset (from mapB)
+            }]
+          }]
+        ]
+      }
+    })
+    
+    // Verify the deep nesting works correctly
+    assert(Array.isArray(result.deepNested))
+    assert(result.deepNested.length > 0)
+    
+    // Check first result from the nested iteration
+    const firstResult = result.deepNested[0]
+    assert(Array.isArray(firstResult.level1))  // Should be [1, 2] or [3, 4]
+    assert(firstResult.level2.batch)           // Should be the batch object
+    assert(firstResult.level3.dataset)         // Should be the original dataset
+    
+    console.log('Deep nesting test result:', JSON.stringify(firstResult, null, 2))
+  })
 })

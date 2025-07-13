@@ -90,22 +90,18 @@ export const executeAST = async (ast, given, select) => {
     let result = context.inputData // Start with input data
     
     // Execute each step in sequence
-    for (const step of chainNode.steps) {
-      // Set the context for this step
-      const stepContext = {
-        value: Promise.resolve(result),
-        context: () => result
-      }
+    for (let i = 0; i < chainNode.steps.length; i++) {
+      const step = chainNode.steps[i]
       
-      // Wire the context
-      if (!step.contextSource) {
-        step.contextSource = stepContext
+      // Update context function to return the current result
+      if (i > 0) {
+        // For steps after the first, update context to return previous result
+        step.context = () => result
       }
       
       // Execute the step with updated context
       const boundFunction = step.wrappedFunction.bind({
         ...step,
-        contextSource: stepContext,
         resolutionContext: context
       })
       

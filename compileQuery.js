@@ -145,19 +145,30 @@ const compileChainNode = (queryName, chainDescriptor, config, parentContextNode)
     value: null
   }
   
-  // Wire up context getter
-  node.context = createContextGetter(node)
+  // Chain nodes have no current context - context() should throw
+  node.context = () => {
+    throw new Error(`@ is not available at the chain level`)
+  }
   
   // Compile each step in the chain
   let previousStep = null
   for (const stepDescriptor of chainDescriptor) {
     const step = compileServiceNode(null, stepDescriptor, config, node)
     
-    // Wire context to previous step or parent
+    // Wire context for service nodes in chains
     if (previousStep) {
-      step.contextSource = previousStep
-    } else if (parentContextNode) {
-      step.contextSource = parentContextNode
+      // Service node in chain: context() returns previous step's result
+      step.context = () => {
+        if (previousStep.value === null) {
+          throw new Error(`Previous step has not been executed yet`)
+        }
+        return previousStep.value
+      }
+    } else {
+      // First step in chain: context() should throw (no previous step)
+      step.context = () => {
+        throw new Error(`@ is not available for the first step in a chain`)
+      }
     }
     
     // Collect dependencies from step
@@ -226,12 +237,13 @@ const compileServiceNode = (queryName, descriptor, config, parentContextNode) =>
     functionArgs,
     dependencies,
     parentContextNode,
-    contextSource: null, // Set by parent chain if applicable
     value: null
   }
   
-  // Wire up context getter
-  node.context = createContextGetter(node)
+  // Top-level service nodes have no current context - context() should throw
+  node.context = () => {
+    throw new Error(`@ is not available at the query level`)
+  }
   
   return node
 }
@@ -325,25 +337,53 @@ const separateArguments = (args, config) => {
  * Create a template function that resolves @ symbols at execution time
  */
 const createTemplateFunction = (template) => {
-  return async (contextValue, parentContext = null) => {
-    // Create a temporary context node for @ resolution that matches getContext expectations
-    const contextSource = {
-      value: Promise.resolve(contextValue),
-      context: () => contextValue
-    }
-    
-    const tempContextNode = {
-      contextSource: contextSource,
-      parentContextNode: parentContext
-    }
-    
-    // Resolve all @ symbols in the template using the current context
-    return await resolveTemplate(template, tempContextNode)
+  return async (contextValue) => {
+    // Resolve all @ symbols in the template using direct substitution
+    return await resolveTemplateDirectly(template, contextValue)
   }
 }
 
 /**
- * Recursively resolve @ symbols in a template object/array
+ * Resolve @ symbols in templates using direct value substitution (no AST traversal)
+ */
+const resolveTemplateDirectly = async (template, contextValue) => {
+  if (typeof template === 'string') {
+    // Handle @ references
+    const atMatch = template.match(AT_REGEX)
+    if (atMatch) {
+      const atCount = countAtSymbols(template)
+      if (atCount > 1) {
+        // @@, @@@, etc. not available in templates - they only get the current iteration value
+        throw new Error(`${'@'.repeat(atCount)} not available in template - only @ (current value) is available`)
+      }
+      
+      const path = template.substring(atMatch[0].length)
+      
+      if (path) {
+        // Handle field access like @.field
+        const jsonPath = path.startsWith('.') ? '$' + path : '$.' + path
+        return retrieve(jsonPath, contextValue)
+      } else {
+        // Handle pure @ symbol
+        return contextValue
+      }
+    }
+    return template
+  }
+  
+  if (Array.isArray(template)) {
+    return Promise.all(template.map(item => resolveTemplateDirectly(item, contextValue)))
+  }
+  
+  if (template && typeof template === 'object') {
+    return await transformObjectAsync(template, (value) => resolveTemplateDirectly(value, contextValue), contextValue)
+  }
+  
+  return template
+}
+
+/**
+ * Recursively resolve @ symbols in a template object/array (LEGACY - for AST nodes)
  */
 const resolveTemplate = async (template, contextNode) => {
   if (typeof template === 'string') {
@@ -383,23 +423,20 @@ const resolveTemplate = async (template, contextNode) => {
 const compileServiceFunction = (descriptor, config) => {
   const node = compileServiceNode(null, descriptor, config, null)
   
+  // Function/template nodes: context() should throw - they get values directly from withArgs
+  node.context = () => {
+    throw new Error(`@ is not available in compiled function - context should be passed as arguments`)
+  }
+  
   // Return a function that executes the compiled node
-  return async (contextValue, parentContext = null) => {
-    // Create a temporary context node
-    const tempContextNode = {
-      value: Promise.resolve(contextValue),
-      context: () => contextValue,
-      parentContextNode: parentContext
-    }
-    
-    node.contextSource = tempContextNode
-    node.parentContextNode = parentContext  // Use provided parent context
+  const compiledFunction = async (contextValue) => {
+    // Create a temporary context function that returns the passed contextValue
+    const contextFunction = () => contextValue
     
     // Bind the node with resolution context for execution
     const boundFunction = node.wrappedFunction.bind({
       ...node,
-      contextSource: tempContextNode,
-      parentContextNode: parentContext,
+      context: contextFunction,  // Override the context function to return contextValue
       resolutionContext: { 
         queryResults: new Map(),
         inputData: contextValue
@@ -409,6 +446,11 @@ const compileServiceFunction = (descriptor, config) => {
     // Execute the wrapped function
     return await boundFunction()
   }
+  
+  // Store reference to the compiled node for nested function calls
+  compiledFunction.__compiledNode = node
+  
+  return compiledFunction
 }
 
 /**
@@ -453,26 +495,6 @@ const extractDependencies = (dependentArgs) => {
   return Array.from(deps)
 }
 
-/**
- * Create a context getter for @ resolution
- */
-const createContextGetter = (node) => {
-  return function() {
-    // Runtime resolution - check this (the bound execution context)
-    if (this && this.contextSource && this.contextSource.context) {
-      // Use the context function from stepContext
-      return this.contextSource.context()
-    }
-    
-    // For service nodes in a chain, use contextSource
-    if (node.contextSource && node.contextSource.context) {
-      return node.contextSource.context()
-    }
-    
-    // For chain nodes or top-level services, context not available
-    throw new Error(`@ is not available at the query level`)
-  }
-}
 
 /**
  * Create wrapped function with all wrappers applied at compile time
@@ -554,43 +576,44 @@ const withArgs = (fn, staticArgs, dependentArgs, functionArgs) => {
         // For services that expect function arguments (like util.map), 
         // wrap the function to maintain context chain
         if (ARG_CATEGORIES.function.includes(key)) {
-          // Create a context-aware wrapper that captures the current execution context
+          // Create a context-aware wrapper that creates virtual nodes for iteration
           resolvedFunctions[key] = async (itemValue) => {
-            // For template functions, we need to set up the context chain properly
-            // The itemValue becomes the current context (@)
-            // The service's context (if any) becomes the parent context (@@)
+            // Get the base compiled node
+            const baseNode = func.__compiledNode
             
-            let parentContextNode = null
-            
-            // Try to create a parent context node from the current execution context
-            try {
-              let parentContextValue = null
+            if (baseNode) {
+              // Create virtual node for this iteration using prototype chain
+              const virtualNode = Object.create(baseNode)
               
-              // Check if we're in an execution context with available context
-              if (this && this.context && typeof this.context === 'function') {
-                parentContextValue = this.context()
-              } else if (this && this.contextSource && this.contextSource.context) {
-                parentContextValue = this.contextSource.context()
-              }
+              // Set up context function to return iteration value
+              virtualNode.context = () => itemValue
               
-              if (parentContextValue !== null) {
-                parentContextNode = {
-                  value: Promise.resolve(parentContextValue),
-                  context: () => parentContextValue,
-                  parentContextNode: this.parentContextNode || node.parentContextNode
-                }
-              }
-            } catch (e) {
-              // If context is not available, parent will be null
+              // Set up parent context getter to point to current executing node
+              Object.defineProperty(virtualNode, 'parentContextNode', {
+                get() { return node }
+              })
+              
+              // Add debugging flag
+              virtualNode.isVirtual = true
+              
+              // Set resolution context
+              virtualNode.resolutionContext = this.resolutionContext
+              
+              // Add execute method for cleaner calling
+              virtualNode.execute = () => virtualNode.wrappedFunction.call(virtualNode)
+              
+              // Execute using virtual node
+              return await virtualNode.execute()
+            } else {
+              // Fallback for non-compiled functions (templates, etc.)
+              return await func(itemValue)
             }
-            
-            return await func(itemValue, parentContextNode)
           }
         } else {
           // Call function with current context for other cases
           const contextValue = getContext(node, 0)  // @ = level 0
-          // Pass parent context for compiled service functions
-          resolvedFunctions[key] = await func(contextValue, node)
+          // Templates and functions now have identical runtime signatures
+          resolvedFunctions[key] = await func(contextValue)
         }
       }
     }
@@ -631,20 +654,28 @@ const getContext = (node, level, path) => {
   
   // Walk up the context chain
   for (let i = 0; i <= level; i++) {
-    if (i === 0) {
-      // @ = current context from contextSource
-      current = current.contextSource
-    } else {
+    if (i === 0 && level === 0) {
+      // @ = current context - use the node's context() function
+      try {
+        const value = current.context()
+        if (path) {
+          return retrieve(path, value)
+        }
+        return value
+      } catch (e) {
+        throw new Error(`${'@'.repeat(level + 1)} not available - ${e.message}`)
+      }
+    } else if (i > 0) {
       // @@, @@@, etc. = walk up parent chain
       current = current.parentContextNode
+      if (!current) {
+        throw new Error(`${'@'.repeat(level + 1)} not available - context not deep enough (only ${i} levels available)`)
+      }
     }
-    
-    if (!current) {
-      throw new Error(`${'@'.repeat(level + 1)} not available - context not deep enough (only ${i} levels available)`)
-    }
+    // For i === 0 && level > 0, continue to next iteration to walk up
   }
   
-  // Get the actual value
+  // For higher levels (@@, @@@, etc.), get the value from the parent node
   let value
   if (current.context && typeof current.context === 'function') {
     value = current.context()
@@ -843,7 +874,7 @@ const withErrorHandling = (fn, onErrorDescriptor, ignoreErrors, serviceName, act
         try {
           // Compile the error handler
           const errorHandler = compileServiceFunction(onErrorDescriptor, config)
-          const handlerResult = await errorHandler(errorContext, this)
+          const handlerResult = await errorHandler(errorContext)
           
           // If ignoreErrors is true, run handler for side effects but return null
           if (ignoreErrors) {
