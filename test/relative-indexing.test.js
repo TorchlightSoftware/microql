@@ -208,10 +208,19 @@ describe('Relative Indexing Context Tests', () => {
     
     // Check first result from the nested iteration
     const firstResult = result.deepNested[0]
-    assert(Array.isArray(firstResult.level1))  // Should be [1, 2] or [3, 4]
-    assert(firstResult.level2.batch)           // Should be the batch object
-    assert(firstResult.level3.dataset)         // Should be the original dataset
     
-    console.log('Deep nesting test result:', JSON.stringify(firstResult, null, 2))
+    // Verify the context resolution worked correctly
+    assert(Array.isArray(firstResult.level1))  // @ resolves to current batch items
+    assert(Array.isArray(firstResult.level2))  // @@ resolves to parent context (array of batches)
+    assert(Array.isArray(firstResult.level3))  // @@@ resolves to grandparent context
+    
+    // CRITICAL: @@ and @@@ should resolve to different values
+    assert.notStrictEqual(firstResult.level2, firstResult.level3, 
+      '@@ and @@@ should resolve to different contexts, but they are the same')
+    
+    // Verify the actual data structure
+    assert.strictEqual(firstResult.level1.length, 2)  // [1, 2] or [3, 4]
+    assert(firstResult.level2.length > 0)             // Array of batch objects
+    assert(firstResult.level2[0].step === 'chainC')   // Batches from chainC step
   })
 })

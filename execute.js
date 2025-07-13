@@ -93,10 +93,16 @@ export const executeAST = async (ast, given, select) => {
     for (let i = 0; i < chainNode.steps.length; i++) {
       const step = chainNode.steps[i]
       
-      // Update context function to return the current result
-      if (i > 0) {
-        // For steps after the first, update context to return previous result
-        step.context = () => result
+      // Set up context function for this step based on its position
+      if (i === 0) {
+        // First step context should throw
+        step.context = () => {
+          throw new Error(`@ is not available for the first step in a chain`)
+        }
+      } else {
+        // For subsequent steps, capture the current result value
+        const stepInput = result
+        step.context = () => stepInput
       }
       
       // Execute the step with updated context
@@ -107,6 +113,9 @@ export const executeAST = async (ast, given, select) => {
       
       step.value = boundFunction()
       result = await step.value
+      
+      // Store the step's result for its context
+      step.stepResult = result
     }
     
     return result

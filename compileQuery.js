@@ -150,6 +150,9 @@ const compileChainNode = (queryName, chainDescriptor, config, parentContextNode)
     throw new Error(`@ is not available at the chain level`)
   }
   
+  // Mark that chain nodes don't have semantic context
+  node.hasContext = false
+  
   // Compile each step in the chain
   let previousStep = null
   for (const stepDescriptor of chainDescriptor) {
@@ -164,12 +167,19 @@ const compileChainNode = (queryName, chainDescriptor, config, parentContextNode)
         }
         return previousStep.value
       }
+      // Set parentContextNode to previous step (which has context), not the chain
+      step.parentContextNode = previousStep
     } else {
       // First step in chain: context() should throw (no previous step)
       step.context = () => {
         throw new Error(`@ is not available for the first step in a chain`)
       }
+      // First step's parent should be the chain's parent (skipping chain node)
+      step.parentContextNode = parentContextNode
     }
+    
+    // Mark that this node has semantic context
+    step.hasContext = true
     
     // Collect dependencies from step
     if (step.dependencies) {
@@ -244,6 +254,9 @@ const compileServiceNode = (queryName, descriptor, config, parentContextNode) =>
   node.context = () => {
     throw new Error(`@ is not available at the query level`)
   }
+  
+  // Mark that service nodes don't have semantic context at query level
+  node.hasContext = false
   
   return node
 }
@@ -589,12 +602,19 @@ const withArgs = (fn, staticArgs, dependentArgs, functionArgs) => {
               virtualNode.context = () => itemValue
               
               // Set up parent context getter to point to current executing node
+              // CRITICAL: Use 'this' (the current executing node) as parent, 
+              // which could be another virtual node from a parent iteration
+              const currentNode = this
+              
+              // If the current node is a virtual node, we're in a nested iteration
+              // and should chain to it. Otherwise use the base node.
               Object.defineProperty(virtualNode, 'parentContextNode', {
-                get() { return node }
+                get() { return currentNode }
               })
               
-              // Add debugging flag
+              // Add debugging flag and context marker
               virtualNode.isVirtual = true
+              virtualNode.hasContext = true
               
               // Set resolution context
               virtualNode.resolutionContext = this.resolutionContext
