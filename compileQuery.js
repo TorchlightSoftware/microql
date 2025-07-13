@@ -159,7 +159,7 @@ const compileChainNode = (queryName, chainDescriptor, config, parentContextNode)
   // Compile each step in the chain
   let previousStep = null
   for (const stepDescriptor of chainDescriptor) {
-    const step = compileServiceNode(null, stepDescriptor, config, node, true)
+    const step = compileServiceNode(null, stepDescriptor, config, node)
     
     // Set structural parent reference
     step.parent = node
@@ -214,7 +214,7 @@ const compileChainNode = (queryName, chainDescriptor, config, parentContextNode)
 /**
  * Compile service node
  */
-const compileServiceNode = (queryName, descriptor, config, parentContextNode, isChainStep = false) => {
+const compileServiceNode = (queryName, descriptor, config, parentContextNode) => {
   const transformed = transformMethodSyntax(descriptor)
   const [serviceName, action, rawArgs = {}] = transformed.descriptor
   
@@ -272,18 +272,15 @@ const compileServiceNode = (queryName, descriptor, config, parentContextNode, is
     completed: false
   }
   
-  // Top-level service nodes have no current context - context getter should throw
-  // (Skip this for chain steps since they will define their own context)
-  if (!isChainStep) {
-    Object.defineProperty(node, 'context', {
-      get() {
-        throw new Error(`@ is not available at the query level`)
-      },
-      configurable: true
-    })
-  }
+  // Default: context is not defined for any node
+  Object.defineProperty(node, 'context', {
+    get() {
+      throw new Error(`Context is not defined`)
+    },
+    configurable: true
+  })
   
-  // Mark that service nodes don't have semantic context at query level
+  // Mark that service nodes don't have semantic context by default
   node.hasContext = false
   
   return node
@@ -378,12 +375,12 @@ const separateArguments = (args, config, argtypes) => {
  * Compile service descriptor to function with context capture
  */
 const compileServiceFunction = (descriptor, config) => {
-  const node = compileServiceNode(null, descriptor, config, null, false)
+  const node = compileServiceNode(null, descriptor, config, null)
   
   // Function/template nodes: override context getter - they get values directly from withArgs
   Object.defineProperty(node, 'context', {
     get() {
-      throw new Error(`@ is not available in compiled function - context should be passed as arguments`)
+      throw new Error(`AST node context is not available in compiled function`)
     },
     configurable: true
   })
