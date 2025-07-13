@@ -53,6 +53,7 @@ export const executeAST = async (ast, given, select) => {
     // Store result when complete
     const result = await promise
     queryNode.value = result        // Store actual value, not promise
+    queryNode.completed = true
     queryResults.set(queryName, result)
     
     return result
@@ -93,16 +94,10 @@ export const executeAST = async (ast, given, select) => {
     for (let i = 0; i < chainNode.steps.length; i++) {
       const step = chainNode.steps[i]
       
-      // Set up context function for this step based on its position
-      if (i === 0) {
-        // First step context should throw
-        step.context = () => {
-          throw new Error(`@ is not available for the first step in a chain`)
-        }
-      } else {
-        // For subsequent steps, capture the current result value
-        const stepInput = result
-        step.context = () => stepInput
+      // Set up context function for this step - only if not first step
+      if (i > 0) {
+        const prevResult = result  // Capture previous result
+        step.context = () => prevResult
       }
       
       // Execute the step with updated context
@@ -111,8 +106,9 @@ export const executeAST = async (ast, given, select) => {
         resolutionContext: context
       })
       
-      step.value = boundFunction()
-      result = await step.value
+      step.value = await boundFunction()
+      step.completed = true
+      result = step.value
       
       // Store the step's result for its context
       step.stepResult = result

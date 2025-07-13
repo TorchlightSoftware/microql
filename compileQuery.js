@@ -74,7 +74,7 @@ const ARG_CATEGORIES = {
  * @returns {Function} The composed function
  */
 const applyWrappers = (baseFunction, wrappers) => {
-  return wrappers.filter(Boolean).reduce((fn, wrapper) => wrapper(fn), baseFunction)
+  return wrappers.reduce((fn, wrapper) => wrapper(fn), baseFunction)
 }
 
 /**
@@ -140,7 +140,8 @@ const compileChainNode = (queryName, chainDescriptor, config, parentContextNode)
     steps: [],
     dependencies: new Set(),
     parentContextNode,
-    value: null
+    value: null,
+    completed: false
   }
   
   // Chain nodes have no current context - context() should throw
@@ -158,12 +159,9 @@ const compileChainNode = (queryName, chainDescriptor, config, parentContextNode)
     
     // Wire context for service nodes in chains
     if (previousStep) {
-      // Service node in chain: context() returns previous step's result
+      // Service node in chain: context() will be set up at execution time
       step.context = () => {
-        if (previousStep.value === null) {
-          throw new Error(`Previous step has not been executed yet`)
-        }
-        return previousStep.value
+        throw new Error(`@ context not available - should be set up during execution`)
       }
       // Set parentContextNode to previous step (which has context), not the chain
       step.parentContextNode = previousStep
@@ -219,7 +217,7 @@ const compileServiceNode = (queryName, descriptor, config, parentContextNode) =>
   const serviceMethod = typeof service === 'function' ? service : service[action]
   
   // Separate argument types
-  const { staticArgs, dependentArgs, functionArgs, reservedArgs } = separateArguments(rawArgs, config, serviceMethod)
+  const { staticArgs, dependentArgs, functionArgs, reservedArgs } = separateArguments(rawArgs, config, serviceMethod._argtypes)
   
   // Extract dependencies from dependent args
   const dependencies = extractDependencies(dependentArgs)
@@ -248,7 +246,8 @@ const compileServiceNode = (queryName, descriptor, config, parentContextNode) =>
     functionArgs,
     dependencies,
     parentContextNode,
-    value: null
+    value: null,
+    completed: false
   }
   
   // Top-level service nodes have no current context - context() should throw
@@ -306,7 +305,7 @@ const compileFunctionArgument = (value, config) => {
 /**
  * Separate arguments into different types for compile-time vs runtime resolution
  */
-const separateArguments = (args, config, serviceMethod) => {
+const separateArguments = (args, config, argtypes) => {
   const staticArgs = {}
   const dependentArgs = {}
   const functionArgs = {}
@@ -325,7 +324,7 @@ const separateArguments = (args, config, serviceMethod) => {
     
     // Check if this is a function argument (reserved or service-declared)
     if (ARG_CATEGORIES.function.includes(key)
-      || serviceMethod?._argtypes?.[key]?.type === 'function') {
+      || argtypes?.[key]?.type === 'function') {
       functionArgs[key] = compileFunctionArgument(value, config)
     }
     // Check if this looks like a service descriptor
@@ -346,40 +345,6 @@ const separateArguments = (args, config, serviceMethod) => {
 }
 
 
-/**
- * Recursively resolve @ symbols in a template object/array (LEGACY - for AST nodes)
- */
-const resolveTemplate = async (template, contextNode) => {
-  if (typeof template === 'string') {
-    // Handle @ references
-    const atMatch = template.match(AT_REGEX)
-    if (atMatch) {
-      const atCount = countAtSymbols(template)
-      const level = atCount - 1  // Convert to 0-based index
-      const path = template.substring(atMatch[0].length)
-      
-      if (path) {
-        // Handle field access like @.field or @@.field
-        const jsonPath = path.startsWith('.') ? '$' + path : '$.' + path
-        return getContext(contextNode, level, jsonPath)
-      } else {
-        // Handle pure @ symbols
-        return getContext(contextNode, level)
-      }
-    }
-    return template
-  }
-  
-  if (Array.isArray(template)) {
-    return Promise.all(template.map(item => resolveTemplate(item, contextNode)))
-  }
-  
-  if (template && typeof template === 'object') {
-    return await transformObjectAsync(template, (value) => resolveTemplate(value, contextNode), contextNode)
-  }
-  
-  return template
-}
 
 /**
  * Compile service descriptor to function with context capture
@@ -492,23 +457,30 @@ const createWrappedFunction = (
   const retryCount = reservedArgs.retry ?? config.settings?.retry?.default ?? 0
   
   // Build wrapper array in canonical order
-  const wrappers = [
-    // 1. withArgs - resolves @ and $ references
-    fn => withArgs(fn, staticArgs, dependentArgs, functionArgs),
-    
-    // 2. withGuard - debug logging
-    config.settings?.debug ? fn => withGuard(fn, serviceName, action, config.settings) : null,
-    
-    // 3. withTimeout
-    (timeoutMs && timeoutMs > 0) ? fn => withTimeout(fn, timeoutMs, serviceName, action) : null,
-    
-    // 4. withRetry
-    retryCount > 0 ? fn => withRetry(fn, retryCount, serviceName, action) : null,
-    
-    // 5. withErrorHandling (outermost)
-    (reservedArgs.onError || reservedArgs.ignoreErrors) ? 
-      fn => withErrorHandling(fn, reservedArgs.onError, reservedArgs.ignoreErrors, serviceName, action, config, rawArgs) : null
-  ]
+  const wrappers = []
+  
+  // 1. withArgs - resolves @ and $ references
+  wrappers.push(fn => withArgs(fn, staticArgs, dependentArgs, functionArgs))
+  
+  // 2. withGuard - debug logging
+  if (config.settings?.debug) {
+    wrappers.push(fn => withGuard(fn, serviceName, action, config.settings))
+  }
+  
+  // 3. withTimeout
+  if (timeoutMs && timeoutMs > 0) {
+    wrappers.push(fn => withTimeout(fn, timeoutMs, serviceName, action))
+  }
+  
+  // 4. withRetry
+  if (retryCount > 0) {
+    wrappers.push(fn => withRetry(fn, retryCount, serviceName, action))
+  }
+  
+  // 5. withErrorHandling (outermost)
+  if (reservedArgs.onError || reservedArgs.ignoreErrors) {
+    wrappers.push(fn => withErrorHandling(fn, reservedArgs.onError, reservedArgs.ignoreErrors, serviceName, action, config, rawArgs))
+  }
   
   // Apply all wrappers using functional composition
   wrappedFunction = applyWrappers(wrappedFunction, wrappers)
