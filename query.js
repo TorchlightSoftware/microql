@@ -9,19 +9,6 @@ import { compileQuery } from './compileQuery.js'
 import { executeAST } from './execute.js'
 import utilService from './util.js'
 
-/**
- * Default error handler that prints errors and exits
- */
-const defaultErrorHandler = (error, context, settings) => {
-  const errorMessage = error.stack || error.message || error
-  console.error('\x1b[31m%s\x1b[0m', `Error during ${context}: ${errorMessage}`)
-  
-  if (!settings?.debug) {
-    console.error('\x1b[33m%s\x1b[0m', 'Tip: Run with debug: true for more details')
-  }
-  
-  process.exit(1)
-}
 
 /**
  * Prepare services by auto-wrapping and adding util
@@ -104,10 +91,6 @@ export default async function query(config) {
   // Track which services are actually used for tearDown
   const usedServices = new Set()
   
-  // Hook to track service usage
-  const originalServiceCall = (serviceName) => {
-    usedServices.add(serviceName)
-  }
   
   // Create configuration for compilation
   const compileConfig = {

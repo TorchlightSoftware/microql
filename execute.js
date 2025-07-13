@@ -100,7 +100,7 @@ export const executeAST = async (ast, given, select) => {
    * Execute a chain node
    */
   const executeChainNode = async (chainNode, context) => {
-    let result = context.inputData // Start with input data
+    let result = null // Start with null
     
     // Execute each step in sequence
     for (let i = 0; i < chainNode.steps.length; i++) {
@@ -115,9 +115,6 @@ export const executeAST = async (ast, given, select) => {
       step.value = await boundFunction()
       step.completed = true
       result = step.value
-      
-      // Store the step's result for its context
-      step.stepResult = result
     }
     
     return result

@@ -39,27 +39,6 @@ const transformObjectAsync = async (obj, transform, context) => {
 }
 
 /**
- * Categorize object properties based on classification rules
- * @param {Object} obj - Object to categorize
- * @param {Object} classifiers - Object mapping category names to classifier functions
- * @returns {Object} Object with categorized properties
- */
-const categorizeObject = (obj, classifiers) => {
-  const result = Object.fromEntries(Object.keys(classifiers).map(cat => [cat, {}]))
-  
-  for (const [key, value] of Object.entries(obj)) {
-    for (const [category, classifier] of Object.entries(classifiers)) {
-      if (classifier(key, value)) {
-        result[category][key] = value
-        break
-      }
-    }
-  }
-  
-  return result
-}
-
-/**
  * Argument classification configuration
  */
 const ARG_CATEGORIES = {
