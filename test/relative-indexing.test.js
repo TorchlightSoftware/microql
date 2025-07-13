@@ -146,7 +146,7 @@ describe('Relative Indexing Context Tests', () => {
       })
       assert.fail('Should have thrown error for invalid context level')
     } catch (error) {
-      assert(error.message.includes('@@@@ used but context not deep enough'))
+      assert(error.message.includes('@@@@ not available - context not deep enough'))
       assert(error.message.includes('levels available'))
     }
   })

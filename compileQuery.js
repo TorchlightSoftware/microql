@@ -336,7 +336,8 @@ const compileServiceFunction = (descriptor, config) => {
     // Create a temporary context node
     const tempContextNode = {
       value: Promise.resolve(contextValue),
-      context: () => contextValue
+      context: () => contextValue,
+      parentContextNode: parentContext
     }
     
     node.contextSource = tempContextNode
@@ -519,20 +520,22 @@ const withArgs = (fn, staticArgs, dependentArgs, functionArgs) => {
             
             let parentContextNode = null
             
-            // Try to create a parent context node from the service's context
+            // Try to create a parent context node from the current execution context
             try {
               let parentContextValue = null
-              if (node.context && typeof node.context === 'function') {
-                parentContextValue = node.context()
-              } else if (node.contextSource && node.contextSource.context) {
-                parentContextValue = node.contextSource.context()
+              
+              // Check if we're in an execution context with available context
+              if (this && this.context && typeof this.context === 'function') {
+                parentContextValue = this.context()
+              } else if (this && this.contextSource && this.contextSource.context) {
+                parentContextValue = this.contextSource.context()
               }
               
               if (parentContextValue !== null) {
                 parentContextNode = {
                   value: Promise.resolve(parentContextValue),
                   context: () => parentContextValue,
-                  parentContextNode: node.parentContextNode
+                  parentContextNode: this.parentContextNode || node.parentContextNode
                 }
               }
             } catch (e) {
