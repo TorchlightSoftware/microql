@@ -123,7 +123,16 @@ const compileServiceNode = (queryName, descriptor, config, parentContextNode) =>
   const transformed = transformMethodSyntax(descriptor)
   const [serviceName, action, rawArgs = {}] = transformed.descriptor
   
-  // Note: Service validation moved to execution time to match original behavior
+  // Validate service exists at compile time - fail fast
+  const service = config.services[serviceName]
+  if (!service) {
+    throw new Error(`Service '${serviceName}' not found`)
+  }
+  
+  // Validate method exists at compile time
+  if (typeof service !== 'function' && !service[action]) {
+    throw new Error(`Service method '${action}' not found`)
+  }
   
   // Separate argument types
   const { staticArgs, dependentArgs, functionArgs, specialArgs } = separateArguments(rawArgs, config)
@@ -340,20 +349,12 @@ const createWrappedFunction = (
 ) => {
   const service = config.services[serviceName]
   
-  // Create base function that calls the service
+  // Create base function that calls the service (validation already done at compile time)
   let wrappedFunction = async (resolvedArgs) => {
-    // Runtime service validation
-    if (!service) {
-      throw new Error(`Service '${serviceName}' not found`)
-    }
-    
-    // Call service method or function
     if (typeof service === 'function') {
       return await service(action, resolvedArgs)
-    } else if (typeof service[action] === 'function') {
-      return await service[action](resolvedArgs)
     } else {
-      throw new Error(`Method '${action}' not found on service '${serviceName}'`)
+      return await service[action](resolvedArgs)
     }
   }
   
