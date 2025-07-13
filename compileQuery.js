@@ -218,10 +218,19 @@ const separateArguments = (args, config) => {
   }
   
   for (const [key, value] of Object.entries(args)) {
-    // Reserved arguments
+    // Handle special wrapper arguments
     if (['timeout', 'retry', 'onError', 'ignoreErrors'].includes(key)) {
       specialArgs[key] = value
-      continue
+      
+      // timeout and retry should also be passed to the service
+      if (key === 'timeout' || key === 'retry') {
+        staticArgs[key] = value
+      }
+      
+      // onError and ignoreErrors are wrapper-only, don't pass to service
+      if (key === 'onError' || key === 'ignoreErrors') {
+        continue
+      }
     }
     
     // Check if this looks like a service descriptor first
@@ -243,7 +252,7 @@ const separateArguments = (args, config) => {
     } else if (containsReferences(value)) {
       // For template-like arguments (objects/arrays with @ symbols), 
       // create a function that resolves @ symbols at execution time
-      if (['template', 'predicate', 'condition'].includes(key) && typeof value === 'object') {
+      if (['template', 'predicate', 'condition', 'test'].includes(key) && typeof value === 'object') {
         functionArgs[key] = createTemplateFunction(value)
       } else {
         dependentArgs[key] = value
@@ -501,7 +510,7 @@ const withArgs = (fn, staticArgs, dependentArgs, functionArgs) => {
       if (typeof func === 'function') {
         // For services that expect function arguments (like util.map), 
         // wrap the function to maintain context chain
-        if (['fn', 'template', 'predicate', 'mapFunction', 'filterFunction'].includes(key)) {
+        if (['fn', 'template', 'predicate', 'mapFunction', 'filterFunction', 'test', 'condition'].includes(key)) {
           // Create a context-aware wrapper that captures the current execution context
           resolvedFunctions[key] = async (itemValue) => {
             // For template functions, we need to set up the context chain properly
@@ -546,6 +555,11 @@ const withArgs = (fn, staticArgs, dependentArgs, functionArgs) => {
       ...staticArgs,
       ...resolvedDependent,
       ...resolvedFunctions
+    }
+    
+    // Auto-inject settings for services that expect them (like util.print)
+    if (!resolvedArgs.settings && this.resolutionContext?.settings) {
+      resolvedArgs.settings = this.resolutionContext.settings
     }
     
     return await fn.call(this, resolvedArgs)

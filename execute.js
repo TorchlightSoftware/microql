@@ -26,7 +26,8 @@ export const executeAST = async (ast, given, select) => {
   const resolutionContext = {
     queryResults,
     inputData,
-    executing
+    executing,
+    settings: ast.settings
   }
   
   /**
