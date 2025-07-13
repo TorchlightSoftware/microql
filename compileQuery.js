@@ -63,9 +63,8 @@ const categorizeObject = (obj, classifiers) => {
  * Argument classification configuration
  */
 const ARG_CATEGORIES = {
-  special: ['timeout', 'retry', 'onError', 'ignoreErrors'],
-  passThrough: ['timeout', 'retry'],
-  function: ['fn', 'predicate', 'mapFunction', 'filterFunction', 'test', 'condition']
+  reserved: ['timeout', 'retry', 'onError', 'ignoreErrors'],
+  function: ['onError']
 }
 
 /**
@@ -216,8 +215,11 @@ const compileServiceNode = (queryName, descriptor, config, parentContextNode) =>
     throw new Error(`Service method '${action}' not found`)
   }
   
+  // Get service method for _argtypes
+  const serviceMethod = typeof service === 'function' ? service : service[action]
+  
   // Separate argument types
-  const { staticArgs, dependentArgs, functionArgs, specialArgs } = separateArguments(rawArgs, config)
+  const { staticArgs, dependentArgs, functionArgs, reservedArgs } = separateArguments(rawArgs, config, serviceMethod)
   
   // Extract dependencies from dependent args
   const dependencies = extractDependencies(dependentArgs)
@@ -230,7 +232,7 @@ const compileServiceNode = (queryName, descriptor, config, parentContextNode) =>
     staticArgs,
     dependentArgs,
     functionArgs,
-    specialArgs,
+    reservedArgs,
     config,
     parentContextNode
   )
@@ -285,75 +287,62 @@ const transformMethodSyntax = (descriptor) => {
 }
 
 /**
+ * Compile function argument value based on type
+ */
+const compileFunctionArgument = (value, config) => {
+  if (Array.isArray(value) && value.length >= 2 && typeof value[0] === 'string') {
+    // Service descriptor
+    return compileServiceFunction(value, config)
+  } else if (typeof value === 'object' && !Array.isArray(value) && value !== null) {
+    // Template syntax
+    const templateDescriptor = ['util', 'template', value]
+    return compileServiceFunction(templateDescriptor, config)
+  } else {
+    // Not a compilable function
+    return null
+  }
+}
+
+/**
  * Separate arguments into different types for compile-time vs runtime resolution
  */
-const separateArguments = (args, config) => {
+const separateArguments = (args, config, serviceMethod) => {
   const staticArgs = {}
   const dependentArgs = {}
   const functionArgs = {}
-  const specialArgs = {}
+  const reservedArgs = {}
   
   if (!args || typeof args !== 'object') {
-    return { staticArgs: args, dependentArgs, functionArgs, specialArgs }
+    return { staticArgs: args, dependentArgs, functionArgs, reservedArgs }
   }
   
   for (const [key, value] of Object.entries(args)) {
-    // Handle special wrapper arguments
-    if (ARG_CATEGORIES.special.includes(key)) {
-      specialArgs[key] = value
-      
-      // timeout and retry should also be passed to the service
-      if (ARG_CATEGORIES.passThrough.includes(key)) {
-        staticArgs[key] = value
-      }
-      
-      // onError and ignoreErrors are wrapper-only, don't pass to service
-      if (!ARG_CATEGORIES.passThrough.includes(key)) {
-        continue
-      }
+    // Handle reserved wrapper arguments
+    if (ARG_CATEGORIES.reserved.includes(key)) {
+      reservedArgs[key] = value
+      staticArgs[key] = value
     }
     
-    // Check if this looks like a service descriptor first
-    if (Array.isArray(value) && value.length >= 2 && typeof value[0] === 'string') {
-      // Try to compile as service descriptor
-      try {
-        const compiledFunction = compileServiceFunction(value, config)
-        functionArgs[key] = compiledFunction
-      } catch (e) {
-        // Not a valid service descriptor, check for references
-        if (containsReferences(value)) {
-          dependentArgs[key] = value
-        } else {
-          staticArgs[key] = value
-        }
-      }
-    } else if (ARG_CATEGORIES.function.includes(key) && 
-               typeof value === 'object' && 
-               !Array.isArray(value) && 
-               value !== null) {
-      // Template syntax transform: plain object -> ['util', 'template', object]
-      try {
-        const templateDescriptor = ['util', 'template', value]
-        const compiledFunction = compileServiceFunction(templateDescriptor, config)
-        functionArgs[key] = compiledFunction
-      } catch (e) {
-        // If template compilation fails, treat as dependent arg
-        if (containsReferences(value)) {
-          dependentArgs[key] = value
-        } else {
-          staticArgs[key] = value
-        }
-      }
-    } else if (typeof value === 'function') {
-      functionArgs[key] = value
-    } else if (containsReferences(value)) {
+    // Check if this is a function argument (reserved or service-declared)
+    if (ARG_CATEGORIES.function.includes(key)
+      || serviceMethod?._argtypes?.[key]?.type === 'function') {
+      functionArgs[key] = compileFunctionArgument(value, config)
+    }
+    // Check if this looks like a service descriptor
+    else if (Array.isArray(value) && value.length >= 2 && typeof value[0] === 'string') {
+      functionArgs[key] = compileServiceFunction(value, config)
+    } 
+    // Check for references
+    else if (containsReferences(value)) {
       dependentArgs[key] = value
-    } else {
+    } 
+    // Everything else is static
+    else {
       staticArgs[key] = value
     }
   }
   
-  return { staticArgs, dependentArgs, functionArgs, specialArgs }
+  return { staticArgs, dependentArgs, functionArgs, reservedArgs }
 }
 
 
@@ -481,7 +470,7 @@ const createWrappedFunction = (
   staticArgs,
   dependentArgs,
   functionArgs,
-  specialArgs,
+  reservedArgs,
   config,
   parentContextNode
 ) => {
@@ -497,10 +486,10 @@ const createWrappedFunction = (
   }
   
   // Extract configuration values
-  const timeoutMs = specialArgs.timeout ?? 
+  const timeoutMs = reservedArgs.timeout ?? 
     config.settings?.timeout?.[serviceName] ?? 
     config.settings?.timeout?.default
-  const retryCount = specialArgs.retry ?? config.settings?.retry?.default ?? 0
+  const retryCount = reservedArgs.retry ?? config.settings?.retry?.default ?? 0
   
   // Build wrapper array in canonical order
   const wrappers = [
@@ -517,8 +506,8 @@ const createWrappedFunction = (
     retryCount > 0 ? fn => withRetry(fn, retryCount, serviceName, action) : null,
     
     // 5. withErrorHandling (outermost)
-    (specialArgs.onError || specialArgs.ignoreErrors) ? 
-      fn => withErrorHandling(fn, specialArgs.onError, specialArgs.ignoreErrors, serviceName, action, config, rawArgs) : null
+    (reservedArgs.onError || reservedArgs.ignoreErrors) ? 
+      fn => withErrorHandling(fn, reservedArgs.onError, reservedArgs.ignoreErrors, serviceName, action, config, rawArgs) : null
   ]
   
   // Apply all wrappers using functional composition
@@ -550,7 +539,7 @@ const withArgs = (fn, staticArgs, dependentArgs, functionArgs) => {
       if (typeof func === 'function') {
         // For services that expect function arguments (like util.map), 
         // wrap the function to maintain context chain
-        if (ARG_CATEGORIES.function.includes(key)) {
+        if (ARG_CATEGORIES.function.includes(key) || func.__compiledNode) {
           // Create a context-aware wrapper that creates virtual nodes for iteration
           resolvedFunctions[key] = async (itemValue) => {
             // Get the base compiled node
