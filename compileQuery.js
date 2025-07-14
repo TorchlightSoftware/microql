@@ -567,13 +567,13 @@ const createWrappedFunction = (
   // Build wrapper array in canonical order
   const wrappers = []
   
-  // 1. withArgs - resolves @ and $ references
-  wrappers.push(fn => withArgs(fn, staticArgs, dependentArgs, functionArgs))
-  
-  // 2. withGuard - debug logging
+  // 1. withDebug - debug logging (innermost, sees final resolved args)
   if (config.settings?.debug) {
-    wrappers.push(fn => withGuard(fn, serviceName, action, config.settings))
+    wrappers.push(fn => withDebug(fn, serviceName, action, config.settings))
   }
+  
+  // 2. withArgs - resolves @ and $ references (outermost, called first)
+  wrappers.push(fn => withArgs(fn, staticArgs, dependentArgs, functionArgs))
   
   // 3. withTimeout
   if (timeoutMs && timeoutMs > 0) {
@@ -813,7 +813,7 @@ const resolveValue = async (value, node) => {
 /**
  * Wrapper: Debug logging
  */
-const withGuard = (fn, serviceName, action, settings) => {
+const withDebug = (fn, serviceName, action, settings) => {
   return async function(args) {
     const startTime = Date.now()
     

@@ -43,7 +43,9 @@ const result = await query({
 - **Method Syntax**: Use cleaner syntax like `['@.data', 'service:method', args]`
 - **Service Chains**: Chain operations using the `@` symbol for chain flow
 - **Context References**: Use `@`, `@@`, `@@@` for current, parent, or grandparent context
+- **Array Literal Support**: Pass arrays directly as static arguments (e.g., `numbers: [1, 2, 3]`)
 - **Built-in Reliability**: Timeout and retry mechanisms
+- **AST-Based Execution**: Compile-time optimization with centralized execution state
 
 For detailed examples and advanced usage, see [HOW_MICROQL_WORKS.md](HOW_MICROQL_WORKS.md).
 
@@ -72,6 +74,23 @@ For detailed examples and advanced usage, see [HOW_MICROQL_WORKS.md](HOW_MICROQL
 ### Service Types
 
 Services can be functions or objects (auto-wrapped). For complete service writing guidance including best practices, argument handling, and examples, see [SERVICE_WRITER_GUIDE.md](SERVICE_WRITER_GUIDE.md).
+
+### Array Literal Arguments
+
+Arrays can be passed directly as static arguments to services:
+
+```js
+query: {
+  processed: ['math', 'sum', { numbers: [1, 2, 3, 4, 5] }],
+  joined: ['text', 'concatenate', { strings: ['hello', 'world', 'test'] }],
+  mixed: ['calc', 'compute', { 
+    data: [10, 20, 30], 
+    multiplier: '$.given.factor' 
+  }]
+}
+```
+
+**Important**: Array literals are treated as static data. Service calls in arguments are only valid for `{type: 'function'}` arguments. Use `@` and `$` references for service dependencies.
 
 ### @ Symbol Usage
 
@@ -137,6 +156,31 @@ Args: { url: 'https://example.com', queries: { images: 'img.photo' } }
 ```
 
 For complete error handling details, see [HOW_MICROQL_WORKS.md#error-handling](HOW_MICROQL_WORKS.md#error-handling).
+
+## Architecture
+
+### AST-Based Execution
+
+MicroQL uses a sophisticated Abstract Syntax Tree (AST) approach for optimal performance:
+
+- **Compile-time optimization**: All transformations, dependency analysis, and wrapper application happen during compilation
+- **Centralized execution state**: Query results, execution promises, and service usage tracked in `ast.execution`
+- **AST navigation**: Context resolution uses parent/root references instead of runtime threading
+- **Clean dependency coordination**: Nodes access query results via `node.getQueryResult(queryName)`
+
+### Execution Flow
+
+1. **Compilation Phase**: Parse queries into AST with all context relationships established
+2. **Dependency Resolution**: Determine execution order based on `$` references
+3. **Parallel Execution**: Execute independent queries concurrently while respecting dependencies
+4. **Context Access**: Service chains access previous results through AST navigation
+5. **Service Tracking**: Track used services for proper tearDown execution
+
+This architecture provides:
+- **Better Performance**: No runtime context threading or global state
+- **Cleaner Code**: Elimination of complex detection rules and special cases
+- **Easier Debugging**: Centralized execution state and clear AST structure
+- **Maintainability**: Separation of compile-time vs runtime concerns
 
 ## Migration from v0.1
 

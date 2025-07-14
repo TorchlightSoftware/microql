@@ -9,13 +9,14 @@ digraph "MicroQL Call Graph" {
         label = "MicroQL Function Call Graph";
         Legend [shape=none, margin=0, label = <
             <table cellspacing="0" cellpadding="0" border="1">
-                <tr><td>MicroQL Call Graph</td></tr>
+                <tr><td>MicroQL Call Graph (Post-Refactor)</td></tr>
                 <tr><td>
                     <table cellspacing="0">
-                        <tr><td>Core Functions</td><td width="50px" bgcolor='#4A90E2'></td></tr>
+                        <tr><td>Entry Points</td><td width="50px" bgcolor='#D0021B'></td></tr>
+                        <tr><td>Core Functions</td><td bgcolor='#4A90E2'></td></tr>
+                        <tr><td>Compilation Functions</td><td bgcolor='#9013FE'></td></tr>
                         <tr><td>Wrapper Functions</td><td bgcolor='#7ED321'></td></tr>
                         <tr><td>Utility Functions</td><td bgcolor='#F5A623'></td></tr>
-                        <tr><td>Entry Points</td><td bgcolor='#D0021B'></td></tr>
                     </table>
                 </td></tr>
             </table>
@@ -24,169 +25,161 @@ digraph "MicroQL Call Graph" {
     
     // Entry Points
     query [label="query()" shape="rect" style="rounded,filled" fillcolor="#D0021B"];
-    executeQueryInner [label="executeQueryInner()" shape="rect" style="rounded,filled" fillcolor="#D0021B"];
     
     // Core Execution Functions
-    executeService [label="executeService()" shape="rect" style="rounded,filled" fillcolor="#4A90E2"];
-    executeServiceCore [label="executeServiceCore()" shape="rect" style="rounded,filled" fillcolor="#4A90E2"];
-    executeChain [label="executeChain()" shape="rect" style="rounded,filled" fillcolor="#4A90E2"];
-    guardServiceExecution [label="guardServiceExecution()" shape="rect" style="rounded,filled" fillcolor="#4A90E2"];
+    compileQuery [label="compileQuery()" shape="rect" style="rounded,filled" fillcolor="#4A90E2"];
+    executeAST [label="executeAST()" shape="rect" style="rounded,filled" fillcolor="#4A90E2"];
     
-    // Wrapper Functions
-    withErrorHandling [label="withErrorHandling()" shape="rect" style="rounded,filled" fillcolor="#7ED321"];
-    withRetryWrapper [label="withRetryWrapper()" shape="rect" style="rounded,filled" fillcolor="#7ED321"];
-    withTimeoutWrapper [label="withTimeoutWrapper()" shape="rect" style="rounded,filled" fillcolor="#7ED321"];
-    withGuard [label="withGuard()" shape="rect" style="rounded,filled" fillcolor="#7ED321"];
+    // Compilation Functions (from compileQuery.js)
+    compileQueryNode [label="compileQueryNode()" shape="rect" style="rounded,filled" fillcolor="#9013FE"];
+    compileChainNode [label="compileChainNode()" shape="rect" style="rounded,filled" fillcolor="#9013FE"];
+    compileServiceNode [label="compileServiceNode()" shape="rect" style="rounded,filled" fillcolor="#9013FE"];
+    compileServiceFunction [label="compileServiceFunction()" shape="rect" style="rounded,filled" fillcolor="#9013FE"];
+    transformMethodSyntax [label="transformMethodSyntax()" shape="rect" style="rounded,filled" fillcolor="#9013FE"];
+    separateArguments [label="separateArguments()" shape="rect" style="rounded,filled" fillcolor="#9013FE"];
+    compileFunctionArgument [label="compileFunctionArgument()" shape="rect" style="rounded,filled" fillcolor="#9013FE"];
+    createWrappedFunction [label="createWrappedFunction()" shape="rect" style="rounded,filled" fillcolor="#9013FE"];
+    resolveDependencies [label="resolveDependencies()" shape="rect" style="rounded,filled" fillcolor="#9013FE"];
+    
+    // Wrapper Functions  
+    withArgs [label="withArgs()" shape="rect" style="rounded,filled" fillcolor="#7ED321"];
+    withDebug [label="withDebug()" shape="rect" style="rounded,filled" fillcolor="#7ED321"];
     withTimeout [label="withTimeout()" shape="rect" style="rounded,filled" fillcolor="#7ED321"];
     withRetry [label="withRetry()" shape="rect" style="rounded,filled" fillcolor="#7ED321"];
-    
-    // Service Management
-    prepareServices [label="prepareServices()" shape="rect" style="rounded,filled" fillcolor="#F5A623"];
-    wrapServiceObject [label="wrapServiceObject()" shape="rect" style="rounded,filled" fillcolor="#F5A623"];
-    compileServiceFunction [label="compileServiceFunction()" shape="rect" style="rounded,filled" fillcolor="#F5A623"];
-    
-    // Method Syntax Processing
-    transformMethodSyntax [label="transformMethodSyntax()" shape="rect" style="rounded,filled" fillcolor="#F5A623"];
-    parseMethodCall [label="parseMethodCall()" shape="rect" style="rounded,filled" fillcolor="#F5A623"];
-    
-    // Context and Parameter Processing
-    processParameters [label="processParameters()" shape="rect" style="rounded,filled" fillcolor="#F5A623"];
-    withOnParameter [label="withOnParameter()" shape="rect" style="rounded,filled" fillcolor="#F5A623"];
-    validateContextIndex [label="validateContextIndex()" shape="rect" style="rounded,filled" fillcolor="#F5A623"];
+    withErrorHandling [label="withErrorHandling()" shape="rect" style="rounded,filled" fillcolor="#7ED321"];
+    applyWrappers [label="applyWrappers()" shape="rect" style="rounded,filled" fillcolor="#7ED321"];
     
     // Utility Functions
-    getDependencies [label="getDependencies()" shape="rect" style="rounded,filled" fillcolor="#F5A623"];
+    prepareServices [label="prepareServices()" shape="rect" style="rounded,filled" fillcolor="#F5A623"];
+    callTearDownOnUsedServices [label="callTearDownOnUsedServices()" shape="rect" style="rounded,filled" fillcolor="#F5A623"];
+    transformObjectAsync [label="transformObjectAsync()" shape="rect" style="rounded,filled" fillcolor="#F5A623"];
+    containsReferences [label="containsReferences()" shape="rect" style="rounded,filled" fillcolor="#F5A623"];
+    extractDependencies [label="extractDependencies()" shape="rect" style="rounded,filled" fillcolor="#F5A623"];
     countAtSymbols [label="countAtSymbols()" shape="rect" style="rounded,filled" fillcolor="#F5A623"];
-    createDebugPrinter [label="createDebugPrinter()" shape="rect" style="rounded,filled" fillcolor="#F5A623"];
-    formatError [label="formatError()" shape="rect" style="rounded,filled" fillcolor="#F5A623"];
-    defaultErrorHandler [label="defaultErrorHandler()" shape="rect" style="rounded,filled" fillcolor="#F5A623"];
-    deepMerge [label="deepMerge()" shape="rect" style="rounded,filled" fillcolor="#F5A623"];
-    getType [label="getType()" shape="rect" style="rounded,filled" fillcolor="#F5A623"];
-    getServiceColor [label="getServiceColor()" shape="rect" style="rounded,filled" fillcolor="#F5A623"];
+    getContext [label="getContext()" shape="rect" style="rounded,filled" fillcolor="#F5A623"];
+    resolveValue [label="resolveValue()" shape="rect" style="rounded,filled" fillcolor="#F5A623"];
+    validateType [label="validateType()" shape="rect" style="rounded,filled" fillcolor="#F5A623"];
     
     // External Dependencies
     retrieve [label="retrieve()" shape="rect" style="rounded,filled" fillcolor="#9013FE"];
-    ExecutionContext [label="ExecutionContext" shape="rect" style="rounded,filled" fillcolor="#9013FE"];
+    utilService [label="utilService" shape="rect" style="rounded,filled" fillcolor="#9013FE"];
     
-    // Main Flow
+    // Main Flow (Compile -> Execute)
     query -> prepareServices;
-    query -> ExecutionContext;
-    query -> executeQueryInner;
+    query -> compileQuery;
+    query -> executeAST;
+    query -> callTearDownOnUsedServices;
     
-    // executeQueryInner calls (multiple call sites)
-    executeQueryInner -> getDependencies;
-    executeQueryInner -> retrieve;
-    executeQueryInner -> executeService;  // traditional service calls
-    executeQueryInner -> executeService;  // method syntax calls
-    executeQueryInner -> executeChain;
-    executeQueryInner -> transformMethodSyntax;  // for query descriptors
-    executeQueryInner -> compileServiceFunction;  // for queryOnError
-    executeQueryInner -> withOnParameter;  // for method syntax
-    executeQueryInner -> defaultErrorHandler;  // error handling
+    // Compilation Phase
+    compileQuery -> compileQueryNode;  // for each query
+    compileQuery -> resolveDependencies;  // dependency ordering
     
-    // executeChain calls
-    executeChain -> transformMethodSyntax;  // for chain descriptors
-    executeChain -> executeService;
+    compileQueryNode -> compileChainNode;  // for chain queries
+    compileQueryNode -> compileServiceNode;  // for service queries
     
-    // executeService calls
-    executeService -> executeServiceCore;
-    executeService -> withErrorHandling;
-    executeService -> withRetryWrapper;
-    executeService -> withTimeoutWrapper;
-    executeService -> withGuard;
+    compileChainNode -> compileServiceNode;  // for each step
     
-    // executeServiceCore calls
-    executeServiceCore -> processParameters;
-    executeServiceCore -> guardServiceExecution;
+    compileServiceNode -> transformMethodSyntax;  // method syntax transformation
+    compileServiceNode -> separateArguments;  // argument classification
+    compileServiceNode -> extractDependencies;  // dependency extraction
+    compileServiceNode -> createWrappedFunction;  // wrapper application
     
-    // guardServiceExecution calls
-    guardServiceExecution -> executeServiceCore;  // direct call
+    createWrappedFunction -> withArgs;  // add argument resolution
+    createWrappedFunction -> withDebug;  // add debug logging
+    createWrappedFunction -> withTimeout;  // add timeout
+    createWrappedFunction -> withRetry;  // add retry logic
+    createWrappedFunction -> withErrorHandling;  // add error handling
+    createWrappedFunction -> applyWrappers;  // compose all wrappers
     
-    // withErrorHandling calls
-    withErrorHandling -> transformMethodSyntax;  // for error handlers
-    withErrorHandling -> processParameters;  // for onError args
-    withErrorHandling -> compileServiceFunction;  // for onError compilation
-    withErrorHandling -> executeService;  // recursive call
+    separateArguments -> compileFunctionArgument;  // for function-type args
+    separateArguments -> containsReferences;  // check for @ and $ refs
     
-    // transformMethodSyntax calls
-    transformMethodSyntax -> parseMethodCall;
+    compileFunctionArgument -> compileServiceFunction;  // for service descriptors
     
-    // parseMethodCall calls
-    parseMethodCall -> withOnParameter;
+    compileServiceFunction -> compileServiceNode;  // recursive compilation
     
-    // compileServiceFunction calls
-    compileServiceFunction -> transformMethodSyntax;  // for service descriptors
+    // Execution Phase
+    executeAST -> executeQuery;  // internal function (not in graph)
+    executeAST -> executeQueryNode;  // internal function (not in graph)
+    executeAST -> executeChainNode;  // internal function (not in graph)
+    executeAST -> executeServiceNode;  // internal function (not in graph)
     
-    // processParameters calls (from processParameters.js)
-    processParameters -> validateContextIndex;
-    processParameters -> countAtSymbols;
-    processParameters -> compileServiceFunction;  // from processParameters.js
-    processParameters -> deepMerge;  // from processParameters.js
+    // Runtime Resolution
+    withArgs -> resolveValue;  // resolve @ and $ references
+    withErrorHandling -> compileServiceFunction;  // compile error handlers
     
-    // prepareServices calls
-    prepareServices -> wrapServiceObject;
-    prepareServices -> compileServiceFunction;
+    resolveValue -> getContext;  // for @ references
+    resolveValue -> retrieve;  // for JSONPath access
+    resolveValue -> transformObjectAsync;  // for object resolution
     
-    // withOnParameter calls
-    withOnParameter -> validateContextIndex;  // context validation
-    withOnParameter -> countAtSymbols;  // for @ symbol processing
+    getContext -> retrieve;  // for field access
+    getContext -> countAtSymbols;  // count @ symbols
     
-    // Wrapper function calls
-    withRetryWrapper -> withRetry;
-    withTimeoutWrapper -> withTimeout;
-    withGuard -> createDebugPrinter;
-    
-    // Utility function calls
-    defaultErrorHandler -> formatError;
-    formatError -> getType;
-    createDebugPrinter -> getServiceColor;
-    deepMerge -> deepMerge;  // recursive
-    
-    // getDependencies calls (multiple call sites)
-    getDependencies -> getDependencies;  // recursive for nested structures
+    extractDependencies -> containsReferences;  // recursively check refs
+    transformObjectAsync -> resolveValue;  // recursive resolution
     
     // Group by file
     subgraph cluster_query {
-        label="File: query.js";
+        label="File: query.js (Main Entry)";
         style="filled";
         fillcolor="#f0f0f0";
         
         query;
-        executeQueryInner;
-        executeService;
-        executeServiceCore;
-        executeChain;
-        guardServiceExecution;
-        withErrorHandling;
-        withRetryWrapper;
-        withTimeoutWrapper;
-        withGuard;
-        withTimeout;
-        withRetry;
         prepareServices;
-        wrapServiceObject;
-        compileServiceFunction;
-        transformMethodSyntax;
-        parseMethodCall;
-        withOnParameter;
-        validateContextIndex;
-        getDependencies;
-        countAtSymbols;
-        createDebugPrinter;
-        formatError;
-        defaultErrorHandler;
-        deepMerge;
-        getType;
-        getServiceColor;
+        callTearDownOnUsedServices;
     }
     
-    subgraph cluster_external {
-        label="External Dependencies";
+    subgraph cluster_compile {
+        label="File: compileQuery.js (Compilation)";
         style="filled";
-        fillcolor="#e0e0e0";
+        fillcolor="#e6f3ff";
+        
+        compileQuery;
+        compileQueryNode;
+        compileChainNode;
+        compileServiceNode;
+        compileServiceFunction;
+        transformMethodSyntax;
+        separateArguments;
+        compileFunctionArgument;
+        createWrappedFunction;
+        resolveDependencies;
+        withArgs;
+        withDebug;
+        withTimeout;
+        withRetry;
+        withErrorHandling;
+        applyWrappers;
+        transformObjectAsync;
+        containsReferences;
+        extractDependencies;
+        countAtSymbols;
+        getContext;
+        resolveValue;
+    }
+    
+    subgraph cluster_execute {
+        label="File: execute.js (Execution)";
+        style="filled";
+        fillcolor="#fff2e6";
+        
+        executeAST;
+    }
+    
+    subgraph cluster_util {
+        label="File: util.js (Utility Service)";
+        style="filled";
+        fillcolor="#f0f8f0";
+        
+        utilService;
+        validateType;
+    }
+    
+    subgraph cluster_retrieve {
+        label="File: retrieve.js (JSONPath)";
+        style="filled";
+        fillcolor="#fff0ff";
         
         retrieve;
-        processParameters;
-        ExecutionContext;
     }
 }

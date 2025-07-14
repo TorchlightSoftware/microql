@@ -126,11 +126,53 @@ export const executeAST = async (ast, given, select) => {
     }
   }
   
+  // Auto-select main result if no explicit select is provided
+  const autoSelect = determineAutoSelect(ast)
+  if (autoSelect && queryResults.has(autoSelect)) {
+    return queryResults.get(autoSelect)
+  }
+  
   // Convert Map to object for return
   const results = {}
   for (const [key, value] of queryResults) {
     results[key] = value
   }
   return results
+}
+
+/**
+ * Determine if there's a clear "main" result to auto-select when no explicit select is provided
+ * @param {Object} ast - The compiled AST
+ * @returns {string|null} - The query name to auto-select, or null if no clear main result
+ */
+export const determineAutoSelect = (ast) => {
+  const queryNames = Object.keys(ast.queries).filter(name => name !== 'given')
+  
+  // Only apply auto-select for complex multi-query scenarios (3+ queries)
+  // Simpler cases should continue to return the full object for backward compatibility
+  if (queryNames.length < 3) {
+    return null
+  }
+  
+  // Find queries that are not dependencies of other queries (leaf nodes)
+  const allDependencies = new Set()
+  for (const queryName of queryNames) {
+    const query = ast.queries[queryName]
+    if (query.dependencies) {
+      query.dependencies.forEach(dep => allDependencies.add(dep))
+    }
+  }
+  
+  // Find leaf nodes (queries that no other queries depend on)
+  const leafNodes = queryNames.filter(name => !allDependencies.has(name))
+  
+  // Only auto-select if there's exactly one leaf node AND there are dependencies
+  // This ensures we only auto-select in clear pipeline scenarios like scraper.js
+  if (leafNodes.length === 1 && allDependencies.size > 0) {
+    return leafNodes[0]
+  }
+  
+  // No clear main result, return all results as object
+  return null
 }
 

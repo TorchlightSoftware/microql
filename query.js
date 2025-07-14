@@ -6,7 +6,7 @@
  */
 
 import { compileQuery } from './compileQuery.js'
-import { executeAST } from './execute.js'
+import { executeAST, determineAutoSelect } from './execute.js'
 import utilService from './util.js'
 
 
@@ -116,9 +116,26 @@ export default async function query(config) {
         if (await fs.default.pathExists(snapshotFile)) {
           const snapshotData = JSON.parse(await fs.default.readFile(snapshotFile, 'utf8'))
           if (snapshotData.results) {
-            results = snapshotData.results
-            if (resolvedSettings.debug) {
-              console.log(`📸 Loaded results from snapshot: ${snapshotFile}`)
+            // Check if snapshot is complete before using it
+            const autoSelect = !select ? determineAutoSelect(ast) : select
+            const expectedResult = autoSelect || Object.keys(ast.queries).filter(name => name !== 'given')
+            
+            // If auto-select is enabled and the expected result is missing, skip snapshot
+            if (autoSelect && snapshotData.results[autoSelect] === undefined) {
+              if (resolvedSettings.debug) {
+                console.log(`📸 Snapshot incomplete (missing ${autoSelect}), executing fresh`)
+              }
+              // Don't set results, let execution proceed normally
+            } else {
+              results = snapshotData.results
+              if (resolvedSettings.debug) {
+                console.log(`📸 Loaded results from snapshot: ${snapshotFile}`)
+              }
+              
+              // Apply auto-select to snapshot results if no explicit select
+              if (!select && autoSelect && results[autoSelect] !== undefined) {
+                results = results[autoSelect]
+              }
             }
           }
         }
