@@ -7,6 +7,40 @@
 
 import { inspect } from 'util'
 import retrieve from './retrieve.js'
+import { COLOR_NAMES } from './util.js'
+
+/**
+ * Service color assignment for debug logging
+ * Maintains consistent colors for each service across the session
+ */
+const serviceColors = new Map()
+let colorIndex = 0
+
+/**
+ * Get assigned color for a service, creating one if needed
+ * @param {string} serviceName - Name of the service
+ * @returns {string} Color name from COLOR_NAMES
+ */
+const getServiceColor = (serviceName) => {
+  if (!serviceColors.has(serviceName)) {
+    serviceColors.set(serviceName, COLOR_NAMES[colorIndex % COLOR_NAMES.length])
+    colorIndex++
+  }
+  return serviceColors.get(serviceName)
+}
+
+/**
+ * ANSI color codes for console output
+ */
+const ANSI_COLORS = {
+  green: '\x1b[32m',
+  yellow: '\x1b[33m', 
+  blue: '\x1b[34m',
+  magenta: '\x1b[35m',
+  cyan: '\x1b[36m',
+  white: '\x1b[37m',
+  reset: '\x1b[0m'
+}
 
 /**
  * Method syntax regex pattern
@@ -67,11 +101,7 @@ export const compileQuery = (config) => {
     executionOrder: [],
     services: config.services || {},
     settings: config.settings || {},
-    execution: {
-      queryResults: new Map(),
-      executing: new Map(),
-      usedServices: new Set()
-    }
+    usedServices: new Set() // Track used services at root level (not saved in snapshots)
   }
   
   // Phase 1: Add given as pre-resolved query if present
@@ -87,18 +117,20 @@ export const compileQuery = (config) => {
     
     // Add getQueryResult method
     givenNode.getQueryResult = async function(queryName) {
-      const execution = this.root.execution
+      const query = this.root.queries[queryName]
+      
+      if (!query) {
+        throw new Error(`Query '${queryName}' not found`)
+      }
       
       // Check if result is already available
-      if (execution.queryResults.has(queryName)) {
-        return execution.queryResults.get(queryName)
+      if (query.completed) {
+        return query.value
       }
       
       // Check if query is currently executing and wait for it
-      if (execution.executing.has(queryName)) {
-        const result = await execution.executing.get(queryName)
-        execution.queryResults.set(queryName, result)
-        return result
+      if (query.executing) {
+        return await query.executing
       }
       
       throw new Error(`Query '${queryName}' has not been executed yet`)
@@ -134,18 +166,20 @@ const compileQueryNode = (queryName, descriptor, config, parentContextNode, ast)
     
     // Add getQueryResult method
     aliasNode.getQueryResult = async function(queryName) {
-      const execution = this.root.execution
+      const query = this.root.queries[queryName]
+      
+      if (!query) {
+        throw new Error(`Query '${queryName}' not found`)
+      }
       
       // Check if result is already available
-      if (execution.queryResults.has(queryName)) {
-        return execution.queryResults.get(queryName)
+      if (query.completed) {
+        return query.value
       }
       
       // Check if query is currently executing and wait for it
-      if (execution.executing.has(queryName)) {
-        const result = await execution.executing.get(queryName)
-        execution.queryResults.set(queryName, result)
-        return result
+      if (query.executing) {
+        return await query.executing
       }
       
       throw new Error(`Query '${queryName}' has not been executed yet`)
@@ -250,18 +284,20 @@ const compileChainNode = (queryName, chainDescriptor, config, parentContextNode,
   
   // Add getQueryResult method for accessing query results with dependency coordination
   node.getQueryResult = async function(queryName) {
-    const execution = this.root.execution
+    const query = this.root.queries[queryName]
+    
+    if (!query) {
+      throw new Error(`Query '${queryName}' not found`)
+    }
     
     // Check if result is already available
-    if (execution.queryResults.has(queryName)) {
-      return execution.queryResults.get(queryName)
+    if (query.completed) {
+      return query.value
     }
     
     // Check if query is currently executing and wait for it
-    if (execution.executing.has(queryName)) {
-      const result = await execution.executing.get(queryName)
-      execution.queryResults.set(queryName, result)
-      return result
+    if (query.executing) {
+      return await query.executing
     }
     
     throw new Error(`Query '${queryName}' has not been executed yet`)
@@ -342,18 +378,20 @@ const compileServiceNode = (queryName, descriptor, config, parentContextNode, as
   
   // Add getQueryResult method for accessing query results with dependency coordination
   node.getQueryResult = async function(queryName) {
-    const execution = this.root.execution
+    const query = this.root.queries[queryName]
+    
+    if (!query) {
+      throw new Error(`Query '${queryName}' not found`)
+    }
     
     // Check if result is already available
-    if (execution.queryResults.has(queryName)) {
-      return execution.queryResults.get(queryName)
+    if (query.completed) {
+      return query.value
     }
     
     // Check if query is currently executing and wait for it
-    if (execution.executing.has(queryName)) {
-      const result = await execution.executing.get(queryName)
-      execution.queryResults.set(queryName, result)
-      return result
+    if (query.executing) {
+      return await query.executing
     }
     
     throw new Error(`Query '${queryName}' has not been executed yet`)
@@ -547,8 +585,8 @@ const createWrappedFunction = (
   // Create base function that calls the service (validation already done at compile time)
   let wrappedFunction = async function(resolvedArgs) {
     // Track service usage for tearDown
-    if (this.root && this.root.execution) {
-      this.root.execution.usedServices.add(serviceName)
+    if (this.root && this.root.usedServices) {
+      this.root.usedServices.add(serviceName)
     }
     
     if (typeof service === 'function') {
@@ -811,14 +849,18 @@ const resolveValue = async (value, node) => {
 }
 
 /**
- * Wrapper: Debug logging
+ * Wrapper: Debug logging with colored output
  */
 const withDebug = (fn, serviceName, action, settings) => {
   return async function(args) {
     const startTime = Date.now()
     
     if (settings.debug) {
-      console.log(`[${serviceName}.${action}] Called with:`, inspect(args, settings.inspect || {}))
+      const color = getServiceColor(serviceName)
+      const colorCode = ANSI_COLORS[color] || ''
+      const resetCode = colorCode ? ANSI_COLORS.reset : ''
+      
+      console.log(`${colorCode}[${serviceName}.${action}] Called with:${resetCode}`, inspect(args, settings.inspect || {}))
     }
     
     try {
@@ -826,14 +868,22 @@ const withDebug = (fn, serviceName, action, settings) => {
       
       if (settings.debug) {
         const duration = Date.now() - startTime
-        console.log(`[${serviceName}.${action}] Completed in ${duration}ms:`, inspect(result, settings.inspect || {}))
+        const color = getServiceColor(serviceName)
+        const colorCode = ANSI_COLORS[color] || ''
+        const resetCode = colorCode ? ANSI_COLORS.reset : ''
+        
+        console.log(`${colorCode}[${serviceName}.${action}] Completed in ${duration}ms:${resetCode}`, inspect(result, settings.inspect || {}))
       }
       
       return result
     } catch (error) {
       if (settings.debug) {
         const duration = Date.now() - startTime
-        console.log(`[${serviceName}.${action}] Failed after ${duration}ms:`, error.message)
+        const color = getServiceColor(serviceName)
+        const colorCode = ANSI_COLORS[color] || ''
+        const resetCode = colorCode ? ANSI_COLORS.reset : ''
+        
+        console.log(`${colorCode}[${serviceName}.${action}] Failed after ${duration}ms:${resetCode}`, error.message)
       }
       throw error
     }

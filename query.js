@@ -6,7 +6,7 @@
  */
 
 import { compileQuery } from './compileQuery.js'
-import { executeAST, determineAutoSelect } from './execute.js'
+import { executeAST } from './execute.js'
 import utilService from './util.js'
 
 
@@ -115,27 +115,48 @@ export default async function query(config) {
         const fs = await import('fs-extra')
         if (await fs.default.pathExists(snapshotFile)) {
           const snapshotData = JSON.parse(await fs.default.readFile(snapshotFile, 'utf8'))
-          if (snapshotData.results) {
-            // Check if snapshot is complete before using it
-            const autoSelect = !select ? determineAutoSelect(ast) : select
-            const expectedResult = autoSelect || Object.keys(ast.queries).filter(name => name !== 'given')
+          if (snapshotData.ast) {
+            // Restore AST state from snapshot (excluding usedServices)
+            const snapshotAst = snapshotData.ast
             
-            // If auto-select is enabled and the expected result is missing, skip snapshot
-            if (autoSelect && snapshotData.results[autoSelect] === undefined) {
-              if (resolvedSettings.debug) {
-                console.log(`📸 Snapshot incomplete (missing ${autoSelect}), executing fresh`)
+            // Restore query states
+            for (const [queryName, queryData] of Object.entries(snapshotAst.queries)) {
+              if (ast.queries[queryName]) {
+                ast.queries[queryName].value = queryData.value
+                ast.queries[queryName].completed = queryData.completed
+                
+                // For chains, restore step states by matching service/action
+                if (queryData.type === 'chain' && queryData.steps && ast.queries[queryName].steps) {
+                  let allStepsMatched = true
+                  let restoredSteps = 0
+                  
+                  for (const savedStep of queryData.steps) {
+                    // Find matching step in current chain by service/action
+                    const matchingStep = ast.queries[queryName].steps.find(step => 
+                      step.serviceName === savedStep.serviceName && 
+                      step.action === savedStep.action
+                    )
+                    
+                    if (matchingStep && savedStep.completed) {
+                      matchingStep.value = savedStep.value
+                      matchingStep.completed = savedStep.completed
+                      restoredSteps++
+                    } else if (!matchingStep) {
+                      allStepsMatched = false
+                    }
+                  }
+                  
+                  // If chain structure changed (new steps added), reset chain completion
+                  if (!allStepsMatched || ast.queries[queryName].steps.length > queryData.steps.length) {
+                    ast.queries[queryName].completed = false
+                    ast.queries[queryName].value = null
+                  }
+                }
               }
-              // Don't set results, let execution proceed normally
-            } else {
-              results = snapshotData.results
-              if (resolvedSettings.debug) {
-                console.log(`📸 Loaded results from snapshot: ${snapshotFile}`)
-              }
-              
-              // Apply auto-select to snapshot results if no explicit select
-              if (!select && autoSelect && results[autoSelect] !== undefined) {
-                results = results[autoSelect]
-              }
+            }
+            
+            if (resolvedSettings.debug) {
+              console.log(`📸 Loaded AST state from snapshot: ${snapshotFile}`)
             }
           }
         }
@@ -146,29 +167,59 @@ export default async function query(config) {
       }
     }
     
-    // Execute if no snapshot or snapshot failed
-    if (!results) {
-      results = await executeAST(ast, given, select)
-      
-      // Save snapshot if requested
-      if (snapshotFile) {
-        try {
-          const fs = await import('fs-extra')
-          await fs.default.outputJson(snapshotFile, {
-            timestamp: new Date().toISOString(),
-            results
-          }, { spaces: 2 })
-          if (resolvedSettings.debug) {
-            console.log(`📸 Saved snapshot to: ${snapshotFile}`)
-          }
-        } catch (error) {
-          console.error(`Warning: Failed to save snapshot to ${snapshotFile}:`, error.message)
+    // Execute AST (handles partial execution automatically)
+    results = await executeAST(ast, given, select)
+    
+    // Save snapshot if requested
+    if (snapshotFile) {
+      try {
+        const fs = await import('fs-extra')
+        
+        // Create a clean AST for saving (without circular references)
+        const astForSnapshot = {
+          queries: {},
+          executionOrder: ast.executionOrder,
+          services: undefined, // Don't save services - they contain functions
+          settings: ast.settings,
+          usedServices: undefined // Don't save usedServices - it's session-specific
         }
+        
+        // Copy query states without circular references
+        for (const [queryName, queryNode] of Object.entries(ast.queries)) {
+          astForSnapshot.queries[queryName] = {
+            type: queryNode.type,
+            reference: queryNode.reference,
+            value: queryNode.value,
+            completed: queryNode.completed,
+            dependencies: queryNode.dependencies
+          }
+          
+          // For chains, copy step states
+          if (queryNode.type === 'chain' && queryNode.steps) {
+            astForSnapshot.queries[queryName].steps = queryNode.steps.map(step => ({
+              type: step.type,
+              serviceName: step.serviceName,
+              action: step.action,
+              value: step.value,
+              completed: step.completed
+            }))
+          }
+        }
+        
+        await fs.default.outputJson(snapshotFile, {
+          timestamp: new Date().toISOString(),
+          ast: astForSnapshot
+        }, { spaces: 2 })
+        if (resolvedSettings.debug) {
+          console.log(`📸 Saved AST snapshot to: ${snapshotFile}`)
+        }
+      } catch (error) {
+        console.error(`Warning: Failed to save snapshot to ${snapshotFile}:`, error.message)
       }
     }
     
     // Call tearDown on all used services
-    await callTearDownOnUsedServices(ast.execution.usedServices, preparedServices, resolvedSettings)
+    await callTearDownOnUsedServices(ast.usedServices, preparedServices, resolvedSettings)
     
     return results
     
@@ -201,7 +252,7 @@ export default async function query(config) {
     }
     
     // Call tearDown even if query fails
-    await callTearDownOnUsedServices(ast.execution.usedServices, preparedServices, resolvedSettings)
+    await callTearDownOnUsedServices(ast.usedServices, preparedServices, resolvedSettings)
     
     // Re-throw the error
     throw error

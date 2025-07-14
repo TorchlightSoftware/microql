@@ -1,0 +1,28 @@
+{
+  "timestamp": "2025-07-14T14:17:48.314Z",
+  "ast": {
+    "queries": {
+      "result": {
+        "type": "service",
+        "reference": "result",
+        "value": "success",
+        "completed": true,
+        "dependencies": []
+      }
+    },
+    "executionOrder": [
+      "result"
+    ],
+    "settings": {
+      "timeout": {
+        "default": 5000
+      },
+      "inspect": {
+        "depth": 2,
+        "maxArrayLength": 3,
+        "maxStringLength": 140,
+        "colors": false
+      }
+    }
+  }
+}
