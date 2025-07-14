@@ -88,8 +88,7 @@ export default async function query(config) {
   // Prepare services
   const preparedServices = prepareServices(services)
   
-  // Track which services are actually used for tearDown
-  const usedServices = new Set()
+  // Service usage tracking is handled by AST execution state
   
   
   // Create configuration for compilation
@@ -104,21 +103,7 @@ export default async function query(config) {
   // Phase 1: Compile queries into AST (let compilation errors propagate)
   const ast = compileQuery(compileConfig)
   
-  // Hook service tracking into AST
-  for (const queryNode of Object.values(ast.queries)) {
-    const trackUsage = (node) => {
-      if (node.type === 'service' && node.serviceName) {
-        const originalFn = node.wrappedFunction
-        node.wrappedFunction = async function() {
-          usedServices.add(this.serviceName || node.serviceName)
-          return await originalFn.apply(this, arguments)
-        }
-      } else if (node.type === 'chain') {
-        node.steps.forEach(trackUsage)
-      }
-    }
-    trackUsage(queryNode)
-  }
+  // Service tracking will be done by the execution engine using ast.execution.usedServices
   
   try {
     // Phase 2: Execute the AST (only catch execution errors)
@@ -166,7 +151,7 @@ export default async function query(config) {
     }
     
     // Call tearDown on all used services
-    await callTearDownOnUsedServices(usedServices, preparedServices, resolvedSettings)
+    await callTearDownOnUsedServices(ast.execution.usedServices, preparedServices, resolvedSettings)
     
     return results
     
@@ -199,7 +184,7 @@ export default async function query(config) {
     }
     
     // Call tearDown even if query fails
-    await callTearDownOnUsedServices(usedServices, preparedServices, resolvedSettings)
+    await callTearDownOnUsedServices(ast.execution.usedServices, preparedServices, resolvedSettings)
     
     // Re-throw the error
     throw error

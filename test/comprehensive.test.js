@@ -273,4 +273,128 @@ describe('MicroQL Comprehensive Tests', () => {
       }
     })
   })
+  
+  describe('Array Literal Arguments', () => {
+    
+    it('should pass array literals as static arguments to services', async () => {
+      const result = await query({
+        services: {
+          arrayProcessor: {
+            async sum({ numbers }) {
+              return numbers.reduce((a, b) => a + b, 0)
+            },
+            async concatenate({ strings }) {
+              return strings.join(' ')
+            },
+            async count({ items }) {
+              return items.length
+            }
+          }
+        },
+        query: {
+          numberSum: ['arrayProcessor', 'sum', { numbers: [1, 2, 3, 4, 5] }],
+          textJoin: ['arrayProcessor', 'concatenate', { strings: ['hello', 'world', 'test'] }],
+          itemCount: ['arrayProcessor', 'count', { items: ['a', 'b', 'c', 'd'] }]
+        }
+      })
+      
+      assert.strictEqual(result.numberSum, 15)
+      assert.strictEqual(result.textJoin, 'hello world test')
+      assert.strictEqual(result.itemCount, 4)
+    })
+    
+    it('should handle mixed array and scalar arguments', async () => {
+      const result = await query({
+        given: { multiplier: 2 },
+        services: {
+          calculator: {
+            async multiplyAndSum({ numbers, factor }) {
+              return numbers.reduce((a, b) => a + b, 0) * factor
+            }
+          }
+        },
+        query: {
+          result: ['calculator', 'multiplyAndSum', { 
+            numbers: [10, 20, 30], 
+            factor: '$.given.multiplier' 
+          }]
+        }
+      })
+      
+      assert.strictEqual(result.result, 120) // (10+20+30) * 2 = 120
+    })
+    
+    it('should handle nested arrays and objects in arguments', async () => {
+      const result = await query({
+        services: {
+          dataProcessor: {
+            async processNestedData({ config }) {
+              const { items, settings } = config
+              return {
+                processedCount: items.length,
+                maxDepth: settings.depth,
+                categories: items.map(item => item.category)
+              }
+            }
+          }
+        },
+        query: {
+          processed: ['dataProcessor', 'processNestedData', {
+            config: {
+              items: [
+                { id: 1, category: 'A' },
+                { id: 2, category: 'B' },
+                { id: 3, category: 'A' }
+              ],
+              settings: {
+                depth: 2,
+                mode: 'strict'
+              }
+            }
+          }]
+        }
+      })
+      
+      assert.deepStrictEqual(result.processed, {
+        processedCount: 3,
+        maxDepth: 2,
+        categories: ['A', 'B', 'A']
+      })
+    })
+    
+    it('should work with method syntax and array literals', async () => {
+      const result = await query({
+        given: { baseNumbers: [1, 2, 3] },
+        services: {
+          arrayOps: {
+            async merge({ on, additional }) {
+              return [...on, ...additional]
+            },
+            async transform({ on, operations }) {
+              return on.map(num => {
+                let result = num
+                operations.forEach(op => {
+                  if (op === 'double') result *= 2
+                  if (op === 'add10') result += 10
+                })
+                return result
+              })
+            }
+          }
+        },
+        methods: ['arrayOps'],
+        query: {
+          merged: ['$.given.baseNumbers', 'arrayOps:merge', { 
+            additional: [4, 5, 6] 
+          }],
+          transformed: ['$.merged', 'arrayOps:transform', { 
+            operations: ['double', 'add10'] 
+          }]
+        }
+      })
+      
+      assert.deepStrictEqual(result.merged, [1, 2, 3, 4, 5, 6])
+      assert.deepStrictEqual(result.transformed, [12, 14, 16, 18, 20, 22]) // (n*2)+10 for each
+    })
+  })
 })

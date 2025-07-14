@@ -66,23 +66,50 @@ export const compileQuery = (config) => {
     queries: {},
     executionOrder: [],
     services: config.services || {},
-    settings: config.settings || {}
+    settings: config.settings || {},
+    execution: {
+      queryResults: new Map(),
+      executing: new Map(),
+      usedServices: new Set()
+    }
   }
   
   // Phase 1: Add given as pre-resolved query if present
   if (config.given) {
-    ast.queries.given = {
+    const givenNode = {
       type: 'resolved',
       reference: 'given',
       value: config.given,
       completed: true,
-      dependencies: []
+      dependencies: [],
+      root: ast
     }
+    
+    // Add getQueryResult method
+    givenNode.getQueryResult = async function(queryName) {
+      const execution = this.root.execution
+      
+      // Check if result is already available
+      if (execution.queryResults.has(queryName)) {
+        return execution.queryResults.get(queryName)
+      }
+      
+      // Check if query is currently executing and wait for it
+      if (execution.executing.has(queryName)) {
+        const result = await execution.executing.get(queryName)
+        execution.queryResults.set(queryName, result)
+        return result
+      }
+      
+      throw new Error(`Query '${queryName}' has not been executed yet`)
+    }
+    
+    ast.queries.given = givenNode
   }
   
   // Phase 2: Create base AST nodes for all queries
   for (const [queryName, queryDescriptor] of Object.entries(config.query || {})) {
-    ast.queries[queryName] = compileQueryNode(queryName, queryDescriptor, config, null)
+    ast.queries[queryName] = compileQueryNode(queryName, queryDescriptor, config, null, ast)
   }
   
   // Phase 3: Resolve dependencies and determine execution order
@@ -94,25 +121,47 @@ export const compileQuery = (config) => {
 /**
  * Compile individual query node
  */
-const compileQueryNode = (queryName, descriptor, config, parentContextNode) => {
+const compileQueryNode = (queryName, descriptor, config, parentContextNode, ast) => {
   // Handle alias queries (string references)
   if (typeof descriptor === 'string') {
-    return {
+    const aliasNode = {
       type: 'alias',
       reference: queryName,
       target: descriptor,
-      dependencies: [descriptor]
+      dependencies: [descriptor],
+      root: ast
     }
+    
+    // Add getQueryResult method
+    aliasNode.getQueryResult = async function(queryName) {
+      const execution = this.root.execution
+      
+      // Check if result is already available
+      if (execution.queryResults.has(queryName)) {
+        return execution.queryResults.get(queryName)
+      }
+      
+      // Check if query is currently executing and wait for it
+      if (execution.executing.has(queryName)) {
+        const result = await execution.executing.get(queryName)
+        execution.queryResults.set(queryName, result)
+        return result
+      }
+      
+      throw new Error(`Query '${queryName}' has not been executed yet`)
+    }
+    
+    return aliasNode
   }
   
   // Handle array descriptors
   if (Array.isArray(descriptor)) {
     // Check if this is a chain (array of arrays)
     if (descriptor.length > 0 && Array.isArray(descriptor[0])) {
-      return compileChainNode(queryName, descriptor, config, parentContextNode)
+      return compileChainNode(queryName, descriptor, config, parentContextNode, ast)
     } else {
       // Single service call
-      return compileServiceNode(queryName, descriptor, config, parentContextNode)
+      return compileServiceNode(queryName, descriptor, config, parentContextNode, ast)
     }
   }
   
@@ -122,7 +171,7 @@ const compileQueryNode = (queryName, descriptor, config, parentContextNode) => {
 /**
  * Compile chain node (array of service calls)
  */
-const compileChainNode = (queryName, chainDescriptor, config, parentContextNode) => {
+const compileChainNode = (queryName, chainDescriptor, config, parentContextNode, ast) => {
   const node = {
     type: 'chain',
     reference: queryName,
@@ -131,7 +180,8 @@ const compileChainNode = (queryName, chainDescriptor, config, parentContextNode)
     parentContextNode,
     parent: null, // Will be set by calling context
     value: null,
-    completed: false
+    completed: false,
+    root: ast
   }
   
   // Chain nodes have no current context - context getter should throw
@@ -148,7 +198,7 @@ const compileChainNode = (queryName, chainDescriptor, config, parentContextNode)
   // Compile each step in the chain
   let previousStep = null
   for (const stepDescriptor of chainDescriptor) {
-    const step = compileServiceNode(null, stepDescriptor, config, node)
+    const step = compileServiceNode(null, stepDescriptor, config, node, ast)
     
     // Set structural parent reference
     step.parent = node
@@ -197,13 +247,33 @@ const compileChainNode = (queryName, chainDescriptor, config, parentContextNode)
   }
   
   node.dependencies = Array.from(node.dependencies)
+  
+  // Add getQueryResult method for accessing query results with dependency coordination
+  node.getQueryResult = async function(queryName) {
+    const execution = this.root.execution
+    
+    // Check if result is already available
+    if (execution.queryResults.has(queryName)) {
+      return execution.queryResults.get(queryName)
+    }
+    
+    // Check if query is currently executing and wait for it
+    if (execution.executing.has(queryName)) {
+      const result = await execution.executing.get(queryName)
+      execution.queryResults.set(queryName, result)
+      return result
+    }
+    
+    throw new Error(`Query '${queryName}' has not been executed yet`)
+  }
+  
   return node
 }
 
 /**
  * Compile service node
  */
-const compileServiceNode = (queryName, descriptor, config, parentContextNode) => {
+const compileServiceNode = (queryName, descriptor, config, parentContextNode, ast) => {
   const transformed = transformMethodSyntax(descriptor)
   const [serviceName, action, rawArgs = {}] = transformed.descriptor
   
@@ -227,7 +297,7 @@ const compileServiceNode = (queryName, descriptor, config, parentContextNode) =>
   const serviceMethod = typeof service === 'function' ? service : service[action]
   
   // Separate argument types
-  const { staticArgs, dependentArgs, functionArgs, reservedArgs } = separateArguments(rawArgs, config, serviceMethod._argtypes)
+  const { staticArgs, dependentArgs, functionArgs, reservedArgs } = separateArguments(rawArgs, config, serviceMethod._argtypes, ast)
   
   // Extract dependencies from dependent args
   const dependencies = extractDependencies(dependentArgs)
@@ -258,7 +328,8 @@ const compileServiceNode = (queryName, descriptor, config, parentContextNode) =>
     parentContextNode,
     parent: null, // Will be set by calling context
     value: null,
-    completed: false
+    completed: false,
+    root: ast
   }
   
   // Default: context is not defined for any node
@@ -268,6 +339,25 @@ const compileServiceNode = (queryName, descriptor, config, parentContextNode) =>
     },
     configurable: true
   })
+  
+  // Add getQueryResult method for accessing query results with dependency coordination
+  node.getQueryResult = async function(queryName) {
+    const execution = this.root.execution
+    
+    // Check if result is already available
+    if (execution.queryResults.has(queryName)) {
+      return execution.queryResults.get(queryName)
+    }
+    
+    // Check if query is currently executing and wait for it
+    if (execution.executing.has(queryName)) {
+      const result = await execution.executing.get(queryName)
+      execution.queryResults.set(queryName, result)
+      return result
+    }
+    
+    throw new Error(`Query '${queryName}' has not been executed yet`)
+  }
   
   // Mark that service nodes don't have semantic context by default
   node.hasContext = false
@@ -302,14 +392,14 @@ const transformMethodSyntax = (descriptor) => {
 /**
  * Compile function argument value based on type
  */
-const compileFunctionArgument = (value, config) => {
+const compileFunctionArgument = (value, config, ast) => {
   if (Array.isArray(value) && value.length >= 2 && typeof value[0] === 'string') {
     // Service descriptor
-    return compileServiceFunction(value, config)
+    return compileServiceFunction(value, config, ast)
   } else if (typeof value === 'object' && !Array.isArray(value) && value !== null) {
     // Template syntax
     const templateDescriptor = ['util', 'template', value]
-    return compileServiceFunction(templateDescriptor, config)
+    return compileServiceFunction(templateDescriptor, config, ast)
   } else {
     // Not a compilable function
     return null
@@ -319,7 +409,7 @@ const compileFunctionArgument = (value, config) => {
 /**
  * Separate arguments into different types for compile-time vs runtime resolution
  */
-const separateArguments = (args, config, argtypes) => {
+const separateArguments = (args, config, argtypes, ast) => {
   const staticArgs = {}
   const dependentArgs = {}
   const functionArgs = {}
@@ -339,12 +429,8 @@ const separateArguments = (args, config, argtypes) => {
     // Check if this is a function argument (reserved or service-declared)
     if (ARG_CATEGORIES.function.includes(key)
       || argtypes?.[key]?.type === 'function') {
-      functionArgs[key] = compileFunctionArgument(value, config)
+      functionArgs[key] = compileFunctionArgument(value, config, ast)
     }
-    // Check if this looks like a service descriptor
-    else if (Array.isArray(value) && value.length >= 2 && typeof value[0] === 'string') {
-      functionArgs[key] = compileServiceFunction(value, config)
-    } 
     // Check for references
     else if (containsReferences(value)) {
       dependentArgs[key] = value
@@ -363,8 +449,8 @@ const separateArguments = (args, config, argtypes) => {
 /**
  * Compile service descriptor to function with context capture
  */
-const compileServiceFunction = (descriptor, config) => {
-  const node = compileServiceNode(null, descriptor, config, null)
+const compileServiceFunction = (descriptor, config, ast) => {
+  const node = compileServiceNode(null, descriptor, config, null, ast)
   
   // Function/template nodes: override context getter - they get values directly from withArgs
   Object.defineProperty(node, 'context', {
@@ -384,10 +470,7 @@ const compileServiceFunction = (descriptor, config) => {
     Object.defineProperty(executionNode, 'context', {
       get() { return contextValue }
     })
-    executionNode.resolutionContext = { 
-      queryResults: new Map(),
-      inputData: contextValue
-    }
+    // Execution node inherits root reference from base node
     
     // Bind the node with resolution context for execution
     const boundFunction = node.wrappedFunction.bind(executionNode)
@@ -462,7 +545,12 @@ const createWrappedFunction = (
   const service = config.services[serviceName]
   
   // Create base function that calls the service (validation already done at compile time)
-  let wrappedFunction = async (resolvedArgs) => {
+  let wrappedFunction = async function(resolvedArgs) {
+    // Track service usage for tearDown
+    if (this.root && this.root.execution) {
+      this.root.execution.usedServices.add(serviceName)
+    }
+    
     if (typeof service === 'function') {
       return await service(action, resolvedArgs)
     } else {
@@ -562,8 +650,8 @@ const withArgs = (fn, staticArgs, dependentArgs, functionArgs) => {
               virtualNode.isVirtual = true
               virtualNode.hasContext = true
               
-              // Set resolution context
-              virtualNode.resolutionContext = this.resolutionContext
+              // Set root reference (virtual node inherits from parent)
+              virtualNode.root = this.root
               
               // Add execute method for cleaner calling
               virtualNode.execute = () => virtualNode.wrappedFunction.call(virtualNode)
@@ -592,8 +680,8 @@ const withArgs = (fn, staticArgs, dependentArgs, functionArgs) => {
     }
     
     // Auto-inject settings for services that expect them (like util.print)
-    if (!resolvedArgs.settings && this.resolutionContext?.settings) {
-      resolvedArgs.settings = this.resolutionContext.settings
+    if (!resolvedArgs.settings && this.root?.settings) {
+      resolvedArgs.settings = this.root.settings
     }
     
     return await fn.call(this, resolvedArgs)
@@ -688,24 +776,13 @@ const resolveValue = async (value, node) => {
     const depMatch = value.match(DEP_REGEX)
     if (depMatch) {
       // Parse $.queryName.field notation
-      if (node && node.resolutionContext) {
+      if (node && node.getQueryResult) {
         const parts = value.substring(2).split('.')
         const queryName = parts[0]
-        const context = node.resolutionContext
         
-        // Check if query result is available
-        if (!context.queryResults.has(queryName)) {
-          // Check if query is currently executing and wait for it
-          if (context.executing && context.executing.has(queryName)) {
-            const result = await context.executing.get(queryName)
-            context.queryResults.set(queryName, result)
-          } else {
-            throw new Error(`Query '${queryName}' has not been executed yet (referenced as '${value}')`)
-          }
-        }
+        // Get the query result using the node's method
+        const queryResult = await node.getQueryResult(queryName)
         
-        // Get the query result and use retrieve for field navigation
-        const queryResult = context.queryResults.get(queryName)
         if (parts.length === 1) {
           // Just $.queryName
           return queryResult
@@ -715,7 +792,7 @@ const resolveValue = async (value, node) => {
           return retrieve(fieldPath, queryResult)
         }
       }
-      // Fallback - return as-is if no resolution context
+      // Fallback - return as-is if no getQueryResult method
       return value
     }
     
@@ -840,7 +917,7 @@ const withErrorHandling = (fn, onErrorDescriptor, ignoreErrors, serviceName, act
       if (onErrorDescriptor) {
         try {
           // Compile the error handler
-          const errorHandler = compileServiceFunction(onErrorDescriptor, config)
+          const errorHandler = compileServiceFunction(onErrorDescriptor, config, this.root)
           const handlerResult = await errorHandler(errorContext)
           
           // If ignoreErrors is true, run handler for side effects but return null

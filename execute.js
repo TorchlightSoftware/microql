@@ -18,24 +18,14 @@ export const executeAST = async (ast, given, select) => {
     ast.queries.given.value = given
   }
   
-  // Track query results for $ references
-  const queryResults = new Map()
-  
-  // Track executing promises to avoid duplicate execution
-  const executing = new Map()
+  // Use AST's execution state
+  const { queryResults, executing } = ast.execution
   
   // Pre-populate resolved queries (like given) in queryResults
   for (const [queryName, queryNode] of Object.entries(ast.queries)) {
     if (queryNode.type === 'resolved') {
       queryResults.set(queryName, queryNode.value)
     }
-  }
-  
-  // Create context for $ resolution
-  const resolutionContext = {
-    queryResults,
-    executing,
-    settings: ast.settings
   }
   
   /**
@@ -53,7 +43,7 @@ export const executeAST = async (ast, given, select) => {
     }
     
     // Create promise for this execution
-    const promise = executeQueryNode(queryNode, resolutionContext)
+    const promise = executeQueryNode(queryNode)
     
     // Track the promise
     executing.set(queryName, promise)
@@ -70,7 +60,7 @@ export const executeAST = async (ast, given, select) => {
   /**
    * Execute a query node (handles different node types)
    */
-  const executeQueryNode = async (node, context) => {
+  const executeQueryNode = async (node) => {
     switch (node.type) {
       case 'resolved':
         // Pre-resolved queries (like given) - return stored value
@@ -81,15 +71,11 @@ export const executeAST = async (ast, given, select) => {
         return await executeQuery(node.target)
         
       case 'service':
-        // Bind the resolution context and execute
-        const boundFunction = node.wrappedFunction.bind({
-          ...node,
-          resolutionContext: context
-        })
-        return await boundFunction()
+        // Execute the wrapped function (node has direct AST access)
+        return await node.wrappedFunction.call(node)
         
       case 'chain':
-        return await executeChainNode(node, context)
+        return await executeChainNode(node)
         
       default:
         throw new Error(`Unknown node type: ${node.type}`)
@@ -99,20 +85,15 @@ export const executeAST = async (ast, given, select) => {
   /**
    * Execute a chain node
    */
-  const executeChainNode = async (chainNode, context) => {
+  const executeChainNode = async (chainNode) => {
     let result = null // Start with null
     
     // Execute each step in sequence
     for (let i = 0; i < chainNode.steps.length; i++) {
       const step = chainNode.steps[i]
       
-      // Context is now set up at compile time as getter, no runtime override needed
-      
-      // Execute the step with updated context (preserve getters)
-      step.resolutionContext = context
-      const boundFunction = step.wrappedFunction.bind(step)
-      
-      step.value = await boundFunction()
+      // Execute the step (step has direct AST access)
+      step.value = await step.wrappedFunction.call(step)
       step.completed = true
       result = step.value
     }
