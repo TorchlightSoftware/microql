@@ -14,7 +14,7 @@ describe('Retry Tests', () => {
             throw new Error('Service temporarily unavailable')
           }
           return { success: true, attempts: callCount }
-        },
+        }
       }
 
       const result = await query({
@@ -26,11 +26,11 @@ describe('Retry Tests', () => {
             'process',
             {
               input: '$.given.value',
-              retry: 3, // Will try up to 4 times total (1 initial + 3 retries)
-            },
-          ],
+              retry: 3 // Will try up to 4 times total (1 initial + 3 retries)
+            }
+          ]
         },
-        select: 'result',
+        select: 'result'
       })
 
       assert.strictEqual(result.success, true)
@@ -44,7 +44,7 @@ describe('Retry Tests', () => {
         broken: async (_action, _args) => {
           callCount++
           throw new Error('Service permanently broken')
-        },
+        }
       }
 
       try {
@@ -57,11 +57,11 @@ describe('Retry Tests', () => {
               'process',
               {
                 input: '$.given.value',
-                retry: 2, // Will try 3 times total
-              },
-            ],
+                retry: 2 // Will try 3 times total
+              }
+            ]
           },
-          select: 'result',
+          select: 'result'
         })
         assert.fail('Should have thrown error')
       } catch (error) {
@@ -77,7 +77,7 @@ describe('Retry Tests', () => {
         stable: async (_action, _args) => {
           callCount++
           return { success: true }
-        },
+        }
       }
 
       const result = await query({
@@ -88,12 +88,12 @@ describe('Retry Tests', () => {
             'stable',
             'process',
             {
-              input: '$.given.value',
+              input: '$.given.value'
               // No retry specified
-            },
-          ],
+            }
+          ]
         },
-        select: 'result',
+        select: 'result'
       })
 
       assert.strictEqual(result.success, true)
@@ -105,9 +105,9 @@ describe('Retry Tests', () => {
         aware: async (_action, args) => {
           return {
             retryReceived: args.retry,
-            timeoutReceived: args.timeout,
+            timeoutReceived: args.timeout
           }
-        },
+        }
       }
 
       const result = await query({
@@ -120,11 +120,11 @@ describe('Retry Tests', () => {
             {
               input: '$.given.value',
               retry: 3,
-              timeout: 5000,
-            },
-          ],
+              timeout: 5000
+            }
+          ]
         },
-        select: 'result',
+        select: 'result'
       })
 
       assert.strictEqual(result.retryReceived, 3)
@@ -148,7 +148,7 @@ describe('Retry Tests', () => {
             }
             return { step: 2, data: args.input, previous: args.previous }
           }
-        },
+        }
       }
 
       const result = await query({
@@ -163,12 +163,12 @@ describe('Retry Tests', () => {
               {
                 input: '$.given.value',
                 previous: '@',
-                retry: 2,
-              },
-            ],
-          ],
+                retry: 2
+              }
+            ]
+          ]
         },
-        select: 'result',
+        select: 'result'
       })
 
       assert.strictEqual(result.step, 2)
@@ -189,21 +189,21 @@ describe('Retry Tests', () => {
               throw new Error('Transform failed')
             }
             return on.map((item) => ({ ...item, processed: true }))
-          },
-        },
+          }
+        }
       }
 
       const result = await query({
         given: {
-          items: [{ id: 1 }, { id: 2 }],
+          items: [{ id: 1 }, { id: 2 }]
         },
         services,
         methods: ['processor'],
         query: {
           // Method syntax with retry
-          result: ['$.given.items', 'processor:transform', { retry: 2 }],
+          result: ['$.given.items', 'processor:transform', { retry: 2 }]
         },
-        select: 'result',
+        select: 'result'
       })
 
       assert.strictEqual(result.length, 2)

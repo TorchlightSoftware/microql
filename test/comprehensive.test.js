@@ -14,18 +14,18 @@ describe('MicroQL Comprehensive Tests', () => {
           },
           audit: async (action, { user }) => {
             if (action === 'log') return { logged: true, user: user.name }
-          },
+          }
         },
         query: {
           profile: ['users', 'getProfile', { id: '$.given.userId' }],
-          auditLog: ['audit', 'log', { user: '$.profile' }],
-        },
+          auditLog: ['audit', 'log', { user: '$.profile' }]
+        }
       })
 
       assert.deepStrictEqual(result.profile, {
         id: 'user123',
         name: 'John',
-        email: 'john@example.com',
+        email: 'john@example.com'
       })
       assert.deepStrictEqual(result.auditLog, { logged: true, user: 'John' })
     })
@@ -43,14 +43,14 @@ describe('MicroQL Comprehensive Tests', () => {
             },
             async max({ values }) {
               return Math.max(...values)
-            },
-          },
+            }
+          }
         },
         query: {
           total: ['math', 'sum', { values: '$.given.numbers' }],
           avg: ['math', 'average', { values: '$.given.numbers' }],
-          maximum: ['math', 'max', { values: '$.given.numbers' }],
-        },
+          maximum: ['math', 'max', { values: '$.given.numbers' }]
+        }
       })
 
       assert.strictEqual(result.total, 15)
@@ -71,15 +71,15 @@ describe('MicroQL Comprehensive Tests', () => {
             },
             async count({ on }) {
               return on.length
-            },
-          },
+            }
+          }
         },
         methods: ['transform'],
         query: {
           filtered: ['$.given.items', 'transform:filter', { predicate: 'a' }],
           uppercased: ['$.filtered', 'transform:upper', {}],
-          count: ['$.uppercased', 'transform:count', {}],
-        },
+          count: ['$.uppercased', 'transform:count', {}]
+        }
       })
 
       assert.deepStrictEqual(result.filtered, ['apple', 'banana'])
@@ -97,15 +97,15 @@ describe('MicroQL Comprehensive Tests', () => {
             },
             async sum({ numbers }) {
               return numbers.map(Number).reduce((a, b) => a + b, 0)
-            },
-          },
+            }
+          }
         },
         query: {
           result: [
             ['text', 'extractNumbers', { input: '$.given.text' }],
-            ['text', 'sum', { numbers: '@' }],
-          ],
-        },
+            ['text', 'sum', { numbers: '@' }]
+          ]
+        }
       })
 
       assert.strictEqual(result.result, 123)
@@ -127,8 +127,8 @@ describe('MicroQL Comprehensive Tests', () => {
             },
             async formatGreeting({ name, city }) {
               return `Hello ${name} from ${city}!`
-            },
-          },
+            }
+          }
         },
         query: {
           parsed: ['parser', 'parseKeyValue', { data: '$.given.userData' }],
@@ -137,16 +137,16 @@ describe('MicroQL Comprehensive Tests', () => {
             'formatGreeting',
             {
               name: '$.parsed.name',
-              city: '$.parsed.city',
-            },
-          ],
-        },
+              city: '$.parsed.city'
+            }
+          ]
+        }
       })
 
       assert.deepStrictEqual(result.parsed, {
         name: 'John',
         age: '30',
-        city: 'NYC',
+        city: 'NYC'
       })
       assert.strictEqual(result.greeting, 'Hello John from NYC!')
     })
@@ -160,14 +160,14 @@ describe('MicroQL Comprehensive Tests', () => {
             async delay({ ms, value }) {
               await new Promise((resolve) => setTimeout(resolve, ms))
               return value
-            },
-          },
+            }
+          }
         },
         query: {
           query1: ['async', 'delay', { ms: '$.given.delay', value: 'A' }],
           query2: ['async', 'delay', { ms: '$.given.delay', value: 'B' }],
-          query3: ['async', 'delay', { ms: '$.given.delay', value: 'C' }],
-        },
+          query3: ['async', 'delay', { ms: '$.given.delay', value: 'C' }]
+        }
       })
 
       const duration = Date.now() - start
@@ -187,15 +187,15 @@ describe('MicroQL Comprehensive Tests', () => {
             },
             async multiply({ a, b }) {
               return a * b
-            },
-          },
+            }
+          }
         },
         query: {
           sum: ['calc', 'add', { a: '$.given.x', b: '$.given.y' }],
           product: ['calc', 'multiply', { a: '$.given.x', b: '$.given.y' }],
-          unused: ['calc', 'add', { a: 1, b: 2 }],
+          unused: ['calc', 'add', { a: 1, b: 2 }]
         },
-        select: ['sum', 'product'],
+        select: ['sum', 'product']
       })
 
       assert.deepStrictEqual(result, { sum: 15, product: 50 })
@@ -209,8 +209,8 @@ describe('MicroQL Comprehensive Tests', () => {
           given: { x: 1 },
           services: {},
           query: {
-            result: ['nonexistent', 'action', { value: '$.given.x' }],
-          },
+            result: ['nonexistent', 'action', { value: '$.given.x' }]
+          }
         }),
         /Service 'nonexistent' not found/
       )
@@ -224,12 +224,12 @@ describe('MicroQL Comprehensive Tests', () => {
             test: {
               validMethod() {
                 return 'ok'
-              },
-            },
+              }
+            }
           },
           query: {
-            result: ['test', 'invalidMethod', { value: '$.given.x' }],
-          },
+            result: ['test', 'invalidMethod', { value: '$.given.x' }]
+          }
         }),
         /Service method 'invalidMethod' not found/
       )
@@ -240,11 +240,11 @@ describe('MicroQL Comprehensive Tests', () => {
         query({
           given: { start: 1 },
           services: {
-            test: async (_action, { value }) => value + 1,
+            test: async (_action, { value }) => value + 1
           },
           query: {
-            result: ['test', 'increment', { value: '$.nonexistent' }],
-          },
+            result: ['test', 'increment', { value: '$.nonexistent' }]
+          }
         }),
         /Query 'nonexistent' not found/
       )
@@ -255,11 +255,11 @@ describe('MicroQL Comprehensive Tests', () => {
         query({
           given: { data: [1, 2, 3] },
           services: {
-            invalid: 'not a function or object',
+            invalid: 'not a function or object'
           },
           query: {
-            result: ['invalid', 'action', { value: '$.given.data' }],
-          },
+            result: ['invalid', 'action', { value: '$.given.data' }]
+          }
         }),
         /Invalid service 'invalid'/
       )
@@ -275,18 +275,17 @@ describe('MicroQL Comprehensive Tests', () => {
           worker: {
             async process({ id }) {
               await new Promise((resolve) =>
-                setTimeout(resolve, Math.random() * 5)
-              )
+                setTimeout(resolve, Math.random() * 5))
               return `processed-${id}`
-            },
-          },
+            }
+          }
         },
         query: Object.fromEntries(
           Array.from({ length: 50 }, (_, i) => [
             `query${i}`,
-            ['worker', 'process', { id: i }],
+            ['worker', 'process', { id: i }]
           ])
-        ),
+        )
       })
 
       const duration = Date.now() - start
@@ -312,22 +311,22 @@ describe('MicroQL Comprehensive Tests', () => {
             },
             async count({ items }) {
               return items.length
-            },
-          },
+            }
+          }
         },
         query: {
           numberSum: ['arrayProcessor', 'sum', { numbers: [1, 2, 3, 4, 5] }],
           textJoin: [
             'arrayProcessor',
             'concatenate',
-            { strings: ['hello', 'world', 'test'] },
+            { strings: ['hello', 'world', 'test'] }
           ],
           itemCount: [
             'arrayProcessor',
             'count',
-            { items: ['a', 'b', 'c', 'd'] },
-          ],
-        },
+            { items: ['a', 'b', 'c', 'd'] }
+          ]
+        }
       })
 
       assert.strictEqual(result.numberSum, 15)
@@ -342,8 +341,8 @@ describe('MicroQL Comprehensive Tests', () => {
           calculator: {
             async multiplyAndSum({ numbers, factor }) {
               return numbers.reduce((a, b) => a + b, 0) * factor
-            },
-          },
+            }
+          }
         },
         query: {
           result: [
@@ -351,10 +350,10 @@ describe('MicroQL Comprehensive Tests', () => {
             'multiplyAndSum',
             {
               numbers: [10, 20, 30],
-              factor: '$.given.multiplier',
-            },
-          ],
-        },
+              factor: '$.given.multiplier'
+            }
+          ]
+        }
       })
 
       assert.strictEqual(result.result, 120) // (10+20+30) * 2 = 120
@@ -369,10 +368,10 @@ describe('MicroQL Comprehensive Tests', () => {
               return {
                 processedCount: items.length,
                 maxDepth: settings.depth,
-                categories: items.map((item) => item.category),
+                categories: items.map((item) => item.category)
               }
-            },
-          },
+            }
+          }
         },
         query: {
           processed: [
@@ -383,22 +382,22 @@ describe('MicroQL Comprehensive Tests', () => {
                 items: [
                   { id: 1, category: 'A' },
                   { id: 2, category: 'B' },
-                  { id: 3, category: 'A' },
+                  { id: 3, category: 'A' }
                 ],
                 settings: {
                   depth: 2,
-                  mode: 'strict',
-                },
-              },
-            },
-          ],
-        },
+                  mode: 'strict'
+                }
+              }
+            }
+          ]
+        }
       })
 
       assert.deepStrictEqual(result.processed, {
         processedCount: 3,
         maxDepth: 2,
-        categories: ['A', 'B', 'A'],
+        categories: ['A', 'B', 'A']
       })
     })
 
@@ -419,8 +418,8 @@ describe('MicroQL Comprehensive Tests', () => {
                 })
                 return result
               })
-            },
-          },
+            }
+          }
         },
         methods: ['arrayOps'],
         query: {
@@ -428,17 +427,17 @@ describe('MicroQL Comprehensive Tests', () => {
             '$.given.baseNumbers',
             'arrayOps:merge',
             {
-              additional: [4, 5, 6],
-            },
+              additional: [4, 5, 6]
+            }
           ],
           transformed: [
             '$.merged',
             'arrayOps:transform',
             {
-              operations: ['double', 'add10'],
-            },
-          ],
-        },
+              operations: ['double', 'add10']
+            }
+          ]
+        }
       })
 
       assert.deepStrictEqual(result.merged, [1, 2, 3, 4, 5, 6])

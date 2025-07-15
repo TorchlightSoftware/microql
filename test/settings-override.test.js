@@ -32,8 +32,8 @@ describe('Settings Override Tests', () => {
         inspect: {
           maxArrayLength: 2,
           depth: 1,
-          colors: false,
-        },
+          colors: false
+        }
       },
       query: {
         result: [
@@ -45,12 +45,12 @@ describe('Settings Override Tests', () => {
             ts: false,
             settings: {
               inspect: {
-                maxArrayLength: 10, // Override just this setting
-              },
-            },
-          },
-        ],
-      },
+                maxArrayLength: 10 // Override just this setting
+              }
+            }
+          }
+        ]
+      }
     })
 
     // Should have captured output
@@ -58,8 +58,7 @@ describe('Settings Override Tests', () => {
 
     // Find the blue colored output
     const blueOutput = capturedOutput.find((output) =>
-      output.includes('\x1b[34m')
-    )
+      output.includes('\x1b[34m'))
     assert(blueOutput, 'Should find blue colored output')
 
     // Should show all items, not truncated (because maxArrayLength was overridden to 10)
@@ -73,10 +72,10 @@ describe('Settings Override Tests', () => {
       level1: {
         level2: {
           level3: {
-            deep: 'value',
-          },
-        },
-      },
+            deep: 'value'
+          }
+        }
+      }
     }
 
     await query({
@@ -86,8 +85,8 @@ describe('Settings Override Tests', () => {
         inspect: {
           depth: 1, // This should be preserved
           maxArrayLength: 5, // This should be overridden
-          colors: false,
-        },
+          colors: false
+        }
       },
       query: {
         result: [
@@ -98,12 +97,12 @@ describe('Settings Override Tests', () => {
             ts: false,
             settings: {
               inspect: {
-                maxArrayLength: 20, // Override only this
-              },
-            },
-          },
-        ],
-      },
+                maxArrayLength: 20 // Override only this
+              }
+            }
+          }
+        ]
+      }
     })
 
     // Should have output showing depth limitation (depth: 1 preserved)
@@ -126,9 +125,9 @@ describe('Settings Override Tests', () => {
         inspect: {
           depth: 2,
           maxStringLength: 10,
-          colors: false,
+          colors: false
         },
-        debug: false,
+        debug: false
       },
       query: {
         result: [
@@ -139,13 +138,13 @@ describe('Settings Override Tests', () => {
             ts: false,
             settings: {
               inspect: {
-                maxStringLength: 100, // Override nested setting
-              },
+                maxStringLength: 100 // Override nested setting
+              }
               // debug: false should be preserved from query settings
-            },
-          },
-        ],
-      },
+            }
+          }
+        ]
+      }
     })
 
     assert(capturedOutput.length > 0, 'Should have captured output')
@@ -159,8 +158,8 @@ describe('Settings Override Tests', () => {
       services: { util },
       settings: {
         inspect: {
-          depth: 1,
-        },
+          depth: 1
+        }
       },
       query: {
         result: [
@@ -172,16 +171,16 @@ describe('Settings Override Tests', () => {
             settings: {
               inspect: {
                 depth: 1, // Keep existing
-                compact: true, // Add new setting
+                compact: true // Add new setting
               },
               newBranch: {
                 // Completely new settings branch
-                customSetting: 'value',
-              },
-            },
-          },
-        ],
-      },
+                customSetting: 'value'
+              }
+            }
+          }
+        ]
+      }
     })
 
     // Should work without errors

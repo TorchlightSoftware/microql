@@ -13,15 +13,15 @@ describe('Bare $ Resolution Tests', () => {
         step2: [
           'util',
           'when',
-          { test: true, then: 'completed', or: 'failed' },
+          { test: true, then: 'completed', or: 'failed' }
         ],
         // Create dependency on step1 and step2, then capture state
         captureState: [
           ['util', 'template', { step1: '$.step1', step2: '$.step2' }],
-          ['util', 'template', { allQueries: '$', context: '@' }],
-        ],
+          ['util', 'template', { allQueries: '$', context: '@' }]
+        ]
       },
-      select: 'captureState',
+      select: 'captureState'
     })
 
     // Should capture all completed queries at execution time
@@ -40,9 +40,9 @@ describe('Bare $ Resolution Tests', () => {
       services: { util },
       query: {
         immediate: ['util', 'template', '$'], // Should execute immediately, capture empty state
-        delayed: ['util', 'when', { test: true, then: 'done', or: 'failed' }],
+        delayed: ['util', 'when', { test: true, then: 'done', or: 'failed' }]
       },
-      select: ['immediate', 'delayed'],
+      select: ['immediate', 'delayed']
     })
 
     // immediate should have captured state before delayed completed
@@ -60,9 +60,9 @@ describe('Bare $ Resolution Tests', () => {
       query: {
         processed: ['$.given.data', 'util:map', { fn: { doubled: '@' } }],
         // Use method syntax to capture current state after processed completes
-        result: ['$.processed', 'util:template', { allState: '$' }],
+        result: ['$.processed', 'util:template', { allState: '$' }]
       },
-      select: 'result',
+      select: 'result'
     })
 
     // Should capture both given and processed

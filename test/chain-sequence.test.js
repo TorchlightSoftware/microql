@@ -23,8 +23,8 @@ describe('Chain Sequential Execution Tests', () => {
             async step3({ value }) {
               executionOrder.push('step3')
               return value + 100
-            },
-          },
+            }
+          }
         },
         query: {
           result: [
@@ -33,9 +33,9 @@ describe('Chain Sequential Execution Tests', () => {
             // Step 2: uses static value (NO @ or $ dependency)
             ['tracker', 'step2', { value: 5 }],
             // Step 3: uses @ dependency from previous step
-            ['tracker', 'step3', { value: '@' }],
-          ],
-        },
+            ['tracker', 'step3', { value: '@' }]
+          ]
+        }
       })
 
       // Verify execution order
@@ -63,8 +63,8 @@ describe('Chain Sequential Execution Tests', () => {
             async constant({ value }) {
               executionOrder.push(`constant-${value}`)
               return value
-            },
-          },
+            }
+          }
         },
         query: {
           result: [
@@ -77,9 +77,9 @@ describe('Chain Sequential Execution Tests', () => {
             // Step 4: uses constant (no dependencies)
             ['calc', 'constant', { value: 100 }], // 100
             // Step 5: uses previous result
-            ['calc', 'add', { a: '@', b: 0 }], // 100 + 0 = 100
-          ],
-        },
+            ['calc', 'add', { a: '@', b: 0 }] // 100 + 0 = 100
+          ]
+        }
       })
 
       // Verify execution order
@@ -88,7 +88,7 @@ describe('Chain Sequential Execution Tests', () => {
         'multiply-2-3', // Step 2: 6
         'add-6-1', // Step 3: 7
         'constant-100', // Step 4: 100
-        'add-100-0', // Step 5: 100
+        'add-100-0' // Step 5: 100
       ])
 
       // Verify final result
@@ -109,8 +109,8 @@ describe('Chain Sequential Execution Tests', () => {
             async process({ data }) {
               executionOrder.push(`process-${data}`)
               return data + 1
-            },
-          },
+            }
+          }
         },
         query: {
           result: [
@@ -118,9 +118,9 @@ describe('Chain Sequential Execution Tests', () => {
             ['math', 'getValue', { n: 5 }], // 10
             ['math', 'getValue', { n: 3 }], // 6 (ignores previous @)
             ['math', 'process', { data: 100 }], // 101 (ignores previous @)
-            ['math', 'getValue', { n: 1 }], // 2 (ignores previous @)
-          ],
-        },
+            ['math', 'getValue', { n: 1 }] // 2 (ignores previous @)
+          ]
+        }
       })
 
       // Verify execution order (all steps should execute)
@@ -128,7 +128,7 @@ describe('Chain Sequential Execution Tests', () => {
         'getValue-5', // Step 1: 10
         'getValue-3', // Step 2: 6
         'process-100', // Step 3: 101
-        'getValue-1', // Step 4: 2
+        'getValue-1' // Step 4: 2
       ])
 
       // Final result should be from last step
@@ -144,9 +144,9 @@ describe('Chain Sequential Execution Tests', () => {
           math: {
             async double({ value }) {
               return value * 2
-            },
+            }
           },
-          util,
+          util
         },
         query: {
           result: [
@@ -156,13 +156,13 @@ describe('Chain Sequential Execution Tests', () => {
               'map',
               {
                 on: '$.given.numbers',
-                fn: ['math', 'double', { value: '@' }],
-              },
+                fn: ['math', 'double', { value: '@' }]
+              }
             ],
             // Step 2: use result in static operation
-            ['util', 'length', { value: '@' }],
-          ],
-        },
+            ['util', 'length', { value: '@' }]
+          ]
+        }
       })
 
       // Should execute map then length
@@ -174,8 +174,8 @@ describe('Chain Sequential Execution Tests', () => {
         given: {
           items: [
             { id: 1, name: 'A' },
-            { id: 2, name: 'B' },
-          ],
+            { id: 2, name: 'B' }
+          ]
         },
         services: { util },
         query: {
@@ -186,13 +186,13 @@ describe('Chain Sequential Execution Tests', () => {
               'map',
               {
                 on: '$.given.items',
-                fn: { itemId: '@.id', itemName: '@.name' },
-              },
+                fn: { itemId: '@.id', itemName: '@.name' }
+              }
             ],
             // Step 2: use result in static operation
-            ['util', 'length', { value: '@' }],
-          ],
-        },
+            ['util', 'length', { value: '@' }]
+          ]
+        }
       })
 
       // Should execute template map then length
@@ -220,16 +220,16 @@ describe('Chain Sequential Execution Tests', () => {
               async step3({ value }) {
                 executionOrder.push('step3')
                 return value + 100
-              },
-            },
+              }
+            }
           },
           query: {
             result: [
               ['test', 'step1', { value: '$.given.start' }],
               ['test', 'step2', { value: 5 }], // This will fail
-              ['test', 'step3', { value: '@' }], // This should never execute
-            ],
-          },
+              ['test', 'step3', { value: '@' }] // This should never execute
+            ]
+          }
         }),
         /Step 2 failed/
       )

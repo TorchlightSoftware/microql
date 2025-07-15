@@ -9,7 +9,7 @@ describe('Error Handling Tests', () => {
     },
     succeed: async () => {
       return { success: true }
-    },
+    }
   }
 
   const logService = {
@@ -18,7 +18,7 @@ describe('Error Handling Tests', () => {
       return {
         logged: true,
         error: errorContext.error,
-        service: `${errorContext.serviceName}.${errorContext.action}`,
+        service: `${errorContext.serviceName}.${errorContext.action}`
       }
     },
     logQueryError: async ({ on }) => {
@@ -26,9 +26,9 @@ describe('Error Handling Tests', () => {
       return {
         queryLogged: true,
         error: errorContext.error,
-        queryName: errorContext.queryName,
+        queryName: errorContext.queryName
       }
-    },
+    }
   }
 
   describe('Service-Level Error Handling', () => {
@@ -40,17 +40,17 @@ describe('Error Handling Tests', () => {
             'error',
             'fail',
             {
-              onError: ['log', 'logError', { on: '@' }],
-            },
-          ],
-        },
+              onError: ['log', 'logError', { on: '@' }]
+            }
+          ]
+        }
       }
 
       const result = await query(config)
       assert.deepStrictEqual(result.result, {
         logged: true,
         error: 'Service failed',
-        service: 'error.fail',
+        service: 'error.fail'
       })
     })
 
@@ -59,9 +59,9 @@ describe('Error Handling Tests', () => {
         services: { error: errorService },
         query: {
           failedQuery: ['error', 'fail', { ignoreErrors: true }],
-          successQuery: ['error', 'succeed', {}],
+          successQuery: ['error', 'succeed', {}]
         },
-        select: ['failedQuery', 'successQuery'],
+        select: ['failedQuery', 'successQuery']
       }
 
       const result = await query(config)
@@ -76,7 +76,7 @@ describe('Error Handling Tests', () => {
         track: async ({ on }) => {
           errorLogged = true
           return { tracked: true }
-        },
+        }
       }
 
       const config = {
@@ -87,10 +87,10 @@ describe('Error Handling Tests', () => {
             'fail',
             {
               onError: ['customLog', 'track', { on: '@' }],
-              ignoreErrors: true,
-            },
-          ],
-        },
+              ignoreErrors: true
+            }
+          ]
+        }
       }
 
       const result = await query(config)
@@ -104,9 +104,9 @@ describe('Error Handling Tests', () => {
       const config = {
         services: { error: errorService, log: logService },
         query: {
-          willFail: ['error', 'fail', {}],
+          willFail: ['error', 'fail', {}]
         },
-        onError: ['log', 'logQueryError', { on: '@' }],
+        onError: ['log', 'logQueryError', { on: '@' }]
       }
 
       await assert.rejects(() => query(config), /Service failed/)
@@ -117,7 +117,7 @@ describe('Error Handling Tests', () => {
         step1: async () => ({ value: 1 }),
         step2: async () => {
           throw new Error('Chain step failed')
-        },
+        }
       }
 
       const config = {
@@ -125,9 +125,9 @@ describe('Error Handling Tests', () => {
         query: {
           chained: [
             ['chain', 'step1', {}],
-            ['chain', 'step2', { ignoreErrors: true }],
-          ],
-        },
+            ['chain', 'step2', { ignoreErrors: true }]
+          ]
+        }
       }
 
       const result = await query(config)
@@ -143,7 +143,7 @@ describe('Error Handling Tests', () => {
         capture: async ({ on }) => {
           capturedContext = on
           return { captured: true }
-        },
+        }
       }
 
       const config = {
@@ -155,10 +155,10 @@ describe('Error Handling Tests', () => {
             {
               someArg: 'value',
               onError: ['capture', 'capture', { on: '@' }],
-              ignoreErrors: true,
-            },
-          ],
-        },
+              ignoreErrors: true
+            }
+          ]
+        }
       }
 
       await query(config)
@@ -171,7 +171,7 @@ describe('Error Handling Tests', () => {
         someArg: 'value',
         timeout: 5000,
         onError: ['capture', 'capture', { on: '@' }],
-        ignoreErrors: true,
+        ignoreErrors: true
       })
       assert.strictEqual(capturedContext.queryName, 'testQuery')
     })
