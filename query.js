@@ -73,7 +73,7 @@ async function loadSnapshot(snapshotFile, ast, debug) {
       root: ast,
       getQueryResult: function (queryName) {
         return this.root.queries[queryName]?.value
-      },
+      }
     }
 
     // Hydrate AST nodes with completed query values
@@ -105,7 +105,7 @@ export default async function query(config) {
     select,
     onError: queryOnError,
     settings = {},
-    snapshot: snapshotFile,
+    snapshot: snapshotFile
   } = config
 
   // Setup default settings
@@ -115,15 +115,15 @@ export default async function query(config) {
       depth: 2,
       maxArrayLength: 3,
       maxStringLength: 140,
-      colors: false,
-    },
+      colors: false
+    }
   }
 
   const resolvedSettings = {
     timeout: { ...defaultSettings.timeout, ...settings.timeout },
     inspect: { ...defaultSettings.inspect, ...settings.inspect },
     debug: settings.debug,
-    retry: settings.retry,
+    retry: settings.retry
   }
 
   // Prepare services
@@ -137,7 +137,7 @@ export default async function query(config) {
     query: queries,
     given,
     settings: resolvedSettings,
-    methods,
+    methods
   }
 
   // Phase 1: Compile queries into AST (let compilation errors propagate)
@@ -173,7 +173,7 @@ export default async function query(config) {
           error: error.message,
           originalError: error,
           queryName: error.queryName,
-          query: queries,
+          query: queries
         }
 
         // Compile and execute error handler
@@ -181,7 +181,7 @@ export default async function query(config) {
           services: preparedServices,
           query: { errorHandler: queryOnError },
           given: errorContext,
-          settings: resolvedSettings,
+          settings: resolvedSettings
         }
 
         const errorAst = compileQuery(errorHandlerConfig)

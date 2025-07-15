@@ -27,24 +27,24 @@ describe('Debug Color Tests', () => {
         serviceA: {
           async test() {
             return 'resultA'
-          },
+          }
         },
         serviceB: {
           async test() {
             return 'resultB'
-          },
+          }
         },
         serviceC: {
           async test() {
             return 'resultC'
-          },
-        },
+          }
+        }
       },
       query: {
         testA: ['serviceA', 'test', {}],
         testB: ['serviceB', 'test', {}],
-        testC: ['serviceC', 'test', {}],
-      },
+        testC: ['serviceC', 'test', {}]
+      }
     })
 
     // Extract service calls from debug logs
@@ -71,7 +71,7 @@ describe('Debug Color Tests', () => {
       '\x1b[34m', // blue
       '\x1b[35m', // magenta
       '\x1b[36m', // cyan
-      '\x1b[37m', // white
+      '\x1b[37m' // white
     ]
 
     let foundColorCodes = 0
@@ -99,12 +99,12 @@ describe('Debug Color Tests', () => {
         testService: {
           async method() {
             return 'result1'
-          },
-        },
+          }
+        }
       },
       query: {
-        test1: ['testService', 'method', {}],
-      },
+        test1: ['testService', 'method', {}]
+      }
     })
 
     const firstCallLogs = [...logCalls]
@@ -117,12 +117,12 @@ describe('Debug Color Tests', () => {
         testService: {
           async method() {
             return 'result2'
-          },
-        },
+          }
+        }
       },
       query: {
-        test2: ['testService', 'method', {}],
-      },
+        test2: ['testService', 'method', {}]
+      }
     })
 
     const secondCallLogs = [...logCalls]
@@ -130,8 +130,7 @@ describe('Debug Color Tests', () => {
     // Extract color from service logs
     const extractColor = (logs) => {
       const serviceLog = logs.find((log) =>
-        log.includes('[testService.method]')
-      )
+        log.includes('[testService.method]'))
       if (!serviceLog) return null
 
       const colorCodes = [
@@ -140,7 +139,7 @@ describe('Debug Color Tests', () => {
         '\x1b[34m', // blue
         '\x1b[35m', // magenta
         '\x1b[36m', // cyan
-        '\x1b[37m', // white
+        '\x1b[37m' // white
       ]
 
       for (const colorCode of colorCodes) {
@@ -170,12 +169,12 @@ describe('Debug Color Tests', () => {
         testService: {
           async method() {
             return 'result'
-          },
-        },
+          }
+        }
       },
       query: {
-        test: ['testService', 'method', {}],
-      },
+        test: ['testService', 'method', {}]
+      }
     })
 
     // Check that no debug logs use red color

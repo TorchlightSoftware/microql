@@ -14,12 +14,12 @@ describe('Relative Indexing Context Tests', () => {
             name: 'Engineering',
             teams: [
               { name: 'Frontend', members: ['Alice', 'Bob'] },
-              { name: 'Backend', members: ['Charlie'] },
-            ],
-          },
-        ],
-      },
-    ],
+              { name: 'Backend', members: ['Charlie'] }
+            ]
+          }
+        ]
+      }
+    ]
   }
 
   // Mock service to test context levels
@@ -28,15 +28,15 @@ describe('Relative Indexing Context Tests', () => {
       return {
         level1: level1?.name || level1,
         level2: level2?.name || level2,
-        level3: level3?.name || level3,
+        level3: level3?.name || level3
       }
-    },
+    }
   }
 
   testService.checkContext._argtypes = {
     level1: {},
     level2: {},
-    level3: {},
+    level3: {}
   }
 
   const services = { util, test: testService }
@@ -56,12 +56,12 @@ describe('Relative Indexing Context Tests', () => {
               'test',
               'checkContext',
               {
-                level1: '@', // Should be the current item (1 or 2)
-              },
-            ],
-          },
-        ],
-      },
+                level1: '@' // Should be the current item (1 or 2)
+              }
+            ]
+          }
+        ]
+      }
     })
 
     // Verify simple case works
@@ -72,7 +72,7 @@ describe('Relative Indexing Context Tests', () => {
     // Test with two levels
     const result2 = await query({
       given: {
-        outer: [{ inner: [1, 2] }, { inner: [3, 4] }],
+        outer: [{ inner: [1, 2] }, { inner: [3, 4] }]
       },
       services,
       methods: ['util'],
@@ -91,14 +91,14 @@ describe('Relative Indexing Context Tests', () => {
                   'checkContext',
                   {
                     level1: '@', // Should be inner item (current context)
-                    level2: '@@', // Should be outer item (parent context)
-                  },
-                ],
-              },
-            ],
-          },
-        ],
-      },
+                    level2: '@@' // Should be outer item (parent context)
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
     })
 
     // Verify relative indexing with nested iteration
@@ -117,8 +117,8 @@ describe('Relative Indexing Context Tests', () => {
       step2: ({ input }) => ({ step2Result: `${input}-step2` }),
       final: ({ chain1, chain2 }) => ({
         chain1,
-        chain2,
-      }),
+        chain2
+      })
     }
 
     chainService.step1._argtypes = {}
@@ -141,12 +141,12 @@ describe('Relative Indexing Context Tests', () => {
               'final',
               {
                 chain1: '@', // Should be current iteration item
-                chain2: '@', // Same - we're not in a chain context here
-              },
-            ],
-          },
-        ],
-      },
+                chain2: '@' // Same - we're not in a chain context here
+              }
+            ]
+          }
+        ]
+      }
     })
 
     assert.strictEqual(result.result.length, 2)
@@ -169,12 +169,12 @@ describe('Relative Indexing Context Tests', () => {
                 'test',
                 'checkContext',
                 {
-                  level1: '@@@@', // Too many levels
-                },
-              ],
-            },
-          ],
-        },
+                  level1: '@@@@' // Too many levels
+                }
+              ]
+            }
+          ]
+        }
       })
       assert.fail('Should have thrown error for invalid context level')
     } catch (error) {
@@ -192,14 +192,14 @@ describe('Relative Indexing Context Tests', () => {
         input.map((dataset) => ({
           dataset,
           step: 'chainA',
-          processed: dataset.batches,
+          processed: dataset.batches
         })),
       step2: async ({ input }) =>
         input.map((batch) => ({
           batch,
           step: 'chainC',
-          items: batch.items,
-        })),
+          items: batch.items
+        }))
     }
 
     chainService.step1._argtypes = {}
@@ -211,8 +211,8 @@ describe('Relative Indexing Context Tests', () => {
       given: {
         datasets: [
           { batches: [{ items: [1, 2] }] },
-          { batches: [{ items: [3, 4] }] },
-        ],
+          { batches: [{ items: [3, 4] }] }
+        ]
       },
       services,
       methods: ['util'],
@@ -226,8 +226,8 @@ describe('Relative Indexing Context Tests', () => {
             'flatMap',
             {
               on: '@',
-              fn: ['chain', 'step2', { input: '@.processed' }],
-            },
+              fn: ['chain', 'step2', { input: '@.processed' }]
+            }
           ],
           // MapC: Iterate over the flattened batches
           [
@@ -241,13 +241,13 @@ describe('Relative Indexing Context Tests', () => {
                 {
                   level1: '@.items', // Current batch items
                   level2: '@@', // Current batch (from previous map)
-                  level3: '@@@', // Current dataset (from mapB)
-                },
-              ],
-            },
-          ],
-        ],
-      },
+                  level3: '@@@' // Current dataset (from mapB)
+                }
+              ]
+            }
+          ]
+        ]
+      }
     })
 
     // Verify the deep nesting works correctly

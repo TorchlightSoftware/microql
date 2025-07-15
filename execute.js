@@ -112,8 +112,7 @@ export const executeAST = async (ast, given, select) => {
     (queryName) => !ast.queries[queryName].completed
   )
   const allPromises = uncompletedQueries.map((queryName) =>
-    executeQuery(queryName)
-  )
+    executeQuery(queryName))
   await Promise.all(allPromises)
 
   // Return selected query or all results

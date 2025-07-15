@@ -17,11 +17,11 @@ describe('Timeout Tests', () => {
       const result = await query({
         given: { value: 'test' },
         services: {
-          fast: createDelayService(50, 'fast'),
+          fast: createDelayService(50, 'fast')
         },
         query: {
-          result: ['fast', 'delay', { input: '$.given.value' }],
-        },
+          result: ['fast', 'delay', { input: '$.given.value' }]
+        }
       })
 
       assert.strictEqual(result.result, 'fast completed after 50ms')
@@ -32,16 +32,16 @@ describe('Timeout Tests', () => {
         query({
           given: { value: 'test' },
           services: {
-            slow: createDelayService(200, 'slow'),
+            slow: createDelayService(200, 'slow')
           },
           settings: {
             timeout: {
-              default: 100,
-            },
+              default: 100
+            }
           },
           query: {
-            result: ['slow', 'delay', { input: '$.given.value' }],
-          },
+            result: ['slow', 'delay', { input: '$.given.value' }]
+          }
         }),
         /slow\.delay.*timed out after 100ms/
       )
@@ -51,16 +51,16 @@ describe('Timeout Tests', () => {
       const result = await query({
         given: { value: 'test' },
         services: {
-          fast: createDelayService(50, 'fast'),
+          fast: createDelayService(50, 'fast')
         },
         settings: {
           timeout: {
-            default: 100,
-          },
+            default: 100
+          }
         },
         query: {
-          result: ['fast', 'delay', { input: '$.given.value' }],
-        },
+          result: ['fast', 'delay', { input: '$.given.value' }]
+        }
       })
 
       assert.strictEqual(result.result, 'fast completed after 50ms')
@@ -72,17 +72,17 @@ describe('Timeout Tests', () => {
       const result = await query({
         given: { value: 'test' },
         services: {
-          medium: createDelayService(150, 'medium'),
+          medium: createDelayService(150, 'medium')
         },
         settings: {
           timeout: {
             default: 100,
-            medium: 200,
-          },
+            medium: 200
+          }
         },
         query: {
-          result: ['medium', 'delay', { input: '$.given.value' }],
-        },
+          result: ['medium', 'delay', { input: '$.given.value' }]
+        }
       })
 
       assert.strictEqual(result.result, 'medium completed after 150ms')
@@ -92,13 +92,13 @@ describe('Timeout Tests', () => {
       const result = await query({
         given: { value: 'test' },
         services: {
-          slow: createDelayService(150, 'slow'),
+          slow: createDelayService(150, 'slow')
         },
         settings: {
           timeout: {
             default: 100,
-            slow: 120,
-          },
+            slow: 120
+          }
         },
         query: {
           result: [
@@ -106,10 +106,10 @@ describe('Timeout Tests', () => {
             'delay',
             {
               input: '$.given.value',
-              timeout: 200,
-            },
-          ],
-        },
+              timeout: 200
+            }
+          ]
+        }
       })
 
       assert.strictEqual(result.result, 'slow completed after 150ms')
@@ -120,12 +120,12 @@ describe('Timeout Tests', () => {
         query({
           given: { value: 'test' },
           services: {
-            slow: createDelayService(150, 'slow'),
+            slow: createDelayService(150, 'slow')
           },
           settings: {
             timeout: {
-              default: 1000,
-            },
+              default: 1000
+            }
           },
           query: {
             result: [
@@ -133,10 +133,10 @@ describe('Timeout Tests', () => {
               'delay',
               {
                 input: '$.given.value',
-                timeout: 100,
-              },
-            ],
-          },
+                timeout: 100
+              }
+            ]
+          }
         }),
         /slow\.delay.*timed out after 100ms/
       )
@@ -150,19 +150,19 @@ describe('Timeout Tests', () => {
         services: {
           fast: createDelayService(30, 'fast'),
           medium: createDelayService(80, 'medium'),
-          slow: createDelayService(150, 'slow'),
+          slow: createDelayService(150, 'slow')
         },
         settings: {
           timeout: {
             default: 100,
-            slow: 200,
-          },
+            slow: 200
+          }
         },
         query: {
           fastResult: ['fast', 'delay', { input: '$.given.value' }],
           mediumResult: ['medium', 'delay', { input: '$.given.value' }],
-          slowResult: ['slow', 'delay', { input: '$.given.value' }],
-        },
+          slowResult: ['slow', 'delay', { input: '$.given.value' }]
+        }
       })
 
       assert.strictEqual(result.fastResult, 'fast completed after 30ms')
@@ -175,19 +175,19 @@ describe('Timeout Tests', () => {
         given: { value: 'test' },
         services: {
           step1: createDelayService(50, 'step1'),
-          step2: createDelayService(60, 'step2'),
+          step2: createDelayService(60, 'step2')
         },
         settings: {
           timeout: {
-            default: 200,
-          },
+            default: 200
+          }
         },
         query: {
           chained: [
             ['step1', 'delay', { input: '$.given.value' }],
-            ['step2', 'delay', { input: '@' }],
-          ],
-        },
+            ['step2', 'delay', { input: '@' }]
+          ]
+        }
       })
 
       assert.strictEqual(result.chained, 'step2 completed after 60ms')
@@ -199,19 +199,19 @@ describe('Timeout Tests', () => {
           given: { value: 'test' },
           services: {
             step1: createDelayService(50, 'step1'),
-            step2: createDelayService(150, 'step2'),
+            step2: createDelayService(150, 'step2')
           },
           settings: {
             timeout: {
-              default: 100,
-            },
+              default: 100
+            }
           },
           query: {
             chained: [
               ['step1', 'delay', { input: '$.given.value' }],
-              ['step2', 'delay', { input: '@' }],
-            ],
-          },
+              ['step2', 'delay', { input: '@' }]
+            ]
+          }
         }),
         /step2\.delay.*timed out after 100ms/
       )
@@ -226,18 +226,18 @@ describe('Timeout Tests', () => {
           test: async (_action, args) => {
             receivedTimeout = args.timeout
             return 'completed'
-          },
+          }
         },
         settings: {
           timeout: {
             default: 200,
-            test: 300,
-          },
+            test: 300
+          }
         },
         query: {
           withServiceTimeout: ['test', 'action', { data: 'x' }],
-          withArgTimeout: ['test', 'action', { data: 'y', timeout: 400 }],
-        },
+          withArgTimeout: ['test', 'action', { data: 'y', timeout: 400 }]
+        }
       })
 
       // Last call should have received timeout: 400
@@ -248,17 +248,17 @@ describe('Timeout Tests', () => {
       const result = await query({
         given: { value: 'test' },
         services: {
-          slow: createDelayService(150, 'slow'),
+          slow: createDelayService(150, 'slow')
         },
         settings: {
           timeout: {
             default: 100,
-            slow: 200,
-          },
+            slow: 200
+          }
         },
         query: {
-          result: ['slow', 'delay', { input: '$.given.value' }],
-        },
+          result: ['slow', 'delay', { input: '$.given.value' }]
+        }
       })
 
       assert.strictEqual(result.result, 'slow completed after 150ms')

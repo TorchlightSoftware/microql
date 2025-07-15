@@ -17,7 +17,7 @@ const COLORS = {
   magenta: '\x1b[35m',
   cyan: '\x1b[36m',
   white: '\x1b[37m',
-  reset: '\x1b[0m',
+  reset: '\x1b[0m'
 }
 
 /**
@@ -49,7 +49,7 @@ async function shouldSkipSnapshot(timestamp, out) {
   if (timestamp && (await fs.pathExists(out))) {
     try {
       const existingSnapshot = JSON.parse(await fs.readFile(out, 'utf8'))
-      if (existingSnapshot.timestamp === snapshotRestoreTimestamp) {
+      if (existingSnapshot.timestamp === timestamp) {
         // Skip - this snapshot was already taken
         return true
       }
@@ -253,7 +253,7 @@ const util = {
 
     const snapshotData = {
       timestamp: new Date().toISOString(),
-      results: capture,
+      results: capture
     }
 
     // Ensure directory exists
@@ -298,7 +298,7 @@ const util = {
       queryName: on.queryName,
       args: on.args,
       // Include stack trace if available
-      stack: on.originalError?.stack,
+      stack: on.originalError?.stack
     }
 
     // Generate filename with timestamp
@@ -324,28 +324,28 @@ const util = {
     // Remove any non-template arguments (like auto-injected settings)
     const { settings, ...template } = templateArgs
     return template
-  },
+  }
 }
 
 // Argument type metadata for MicroQL function compilation
 util.map._argtypes = {
-  fn: { type: 'function' },
+  fn: { type: 'function' }
 }
 
 util.filter._argtypes = {
-  predicate: { type: 'function' },
+  predicate: { type: 'function' }
 }
 
 util.flatMap._argtypes = {
-  fn: { type: 'function' },
+  fn: { type: 'function' }
 }
 
 util.when._argtypes = {
-  test: { type: 'function' }, // Test can be a service call
+  test: { type: 'function' } // Test can be a service call
 }
 
 util.print._argtypes = {
-  settings: { type: 'settings' },
+  settings: { type: 'settings' }
 }
 
 util.snapshot._argtypes = {

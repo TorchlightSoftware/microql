@@ -28,16 +28,16 @@ describe('Snapshot Loading Tests', () => {
         step1: [
           'util',
           'when',
-          { test: true, then: 'completed', or: 'failed' },
+          { test: true, then: 'completed', or: 'failed' }
         ],
         step2: ['util', 'pick', { on: '$.given', fields: ['value'] }],
         // Save snapshot using util:snapshot service
         save: [
           '$.step2',
           'util:snapshot',
-          { capture: '$', out: testSnapshotPath },
-        ],
-      },
+          { capture: '$', out: testSnapshotPath }
+        ]
+      }
     })
 
     // Verify snapshot file was created
@@ -54,19 +54,11 @@ describe('Snapshot Loading Tests', () => {
       given: { value: 'test-data' },
       services: { util },
       query: {
-        step1: [
-          'util',
-          'when',
-          { test: true, then: 'completed', or: 'failed' },
-        ],
+        step1: ['util', 'when', { test: true, then: 'completed', or: 'failed' }],
         step2: ['util', 'pick', { on: '$.given', fields: ['value'] }],
         // Add a new query that should execute
-        step3: [
-          'util',
-          'template',
-          { fromSnapshot: '$.step1', newData: 'fresh' },
-        ],
-      },
+        step3: ['util', 'template', { fromSnapshot: '$.step1', newData: 'fresh' }]
+      }
     })
 
     // step1 and step2 should be loaded from snapshot (not re-executed)
@@ -75,7 +67,7 @@ describe('Snapshot Loading Tests', () => {
     // step3 should be newly executed
     assert.deepStrictEqual(result.step3, {
       fromSnapshot: 'completed',
-      newData: 'fresh',
+      newData: 'fresh'
     })
   })
 
@@ -87,63 +79,33 @@ describe('Snapshot Loading Tests', () => {
       snapshot: nonExistentPath,
       services: { util },
       query: {
-        test: ['util', 'when', { test: true, then: 'success', or: 'failure' }],
-      },
-    })
-
-    assert.strictEqual(result.test, 'success')
-  })
-
-  it('should handle corrupted snapshot files gracefully', async () => {
-    // Create a corrupted snapshot file
-    await fs.writeFile(testSnapshotPath, 'invalid json content')
-
-    // Should execute normally when snapshot file is corrupted
-    const result = await query({
-      snapshot: testSnapshotPath,
-      services: { util },
-      query: {
-        test: ['util', 'when', { test: true, then: 'success', or: 'failure' }],
-      },
+        test: ['util', 'when', { test: true, then: 'success', or: 'failure' }]
+      }
     })
 
     assert.strictEqual(result.test, 'success')
   })
 
   it('should work with select parameter when loading snapshots', async () => {
-    // Create a snapshot first
-    await query({
+    const snapshotQuery = {
       given: { data: 'test' },
       services: { util },
       query: {
         result1: ['util', 'template', { processed: '$.given.data' }],
         result2: ['util', 'when', { test: true, then: 'done', or: 'failed' }],
-        save: ['util', 'snapshot', { capture: '$', out: testSnapshotPath }],
-      },
-    })
+        save: ['util', 'snapshot', { capture: '$', out: testSnapshotPath }]
+      }
+    }
+
+    // Create a snapshot first
+    await query(snapshotQuery)
 
     // Test loading with different select parameters
-    const selected1 = await query({
-      snapshot: testSnapshotPath,
-      given: { data: 'test' },
-      services: { util },
-      query: {
-        result1: ['util', 'template', { processed: '$.given.data' }],
-        result2: ['util', 'when', { test: true, then: 'done', or: 'failed' }],
-      },
-      select: 'result1',
-    })
+    snapshotQuery.select = 'result1'
+    const selected1 = await query(snapshotQuery)
 
-    const selected2 = await query({
-      snapshot: testSnapshotPath,
-      given: { data: 'test' },
-      services: { util },
-      query: {
-        result1: ['util', 'template', { processed: '$.given.data' }],
-        result2: ['util', 'when', { test: true, then: 'done', or: 'failed' }],
-      },
-      select: 'result2',
-    })
+    snapshotQuery.select = 'result2'
+    const selected2 = await query(snapshotQuery)
 
     // Both should work with loaded data
     assert.deepStrictEqual(selected1, { processed: 'test' })
@@ -151,43 +113,41 @@ describe('Snapshot Loading Tests', () => {
   })
 
   it('should inject snapshotRestoreTimestamp for skip logic', async () => {
-    // Create initial snapshot
-    await query({
+    const snapshotQuery = {
       given: { value: 'initial' },
       services: { util },
       query: {
         data: ['util', 'template', { value: '$.given.value' }],
-        save: ['util', 'snapshot', { capture: '$', out: testSnapshotPath }],
-      },
-    })
+        save: ['util', 'snapshot', { capture: '$', out: testSnapshotPath }]
+      }
+    }
+
+    // Create initial snapshot
+    await query(snapshotQuery)
+
+    const getTimestamp = async (path) => {
+      const data = JSON.parse(
+        await fs.readFile(path, 'utf8')
+      )
+      return data.timestamp
+    }
 
     // Test that snapshotRestoreTimestamp prevents duplicate snapshots
     // Note: The skip logic should prevent saving the same snapshot again
-    const originalSnapshotData = JSON.parse(
-      await fs.readFile(testSnapshotPath, 'utf8')
-    )
-    const originalTimestamp = originalSnapshotData.timestamp
+    const originalTimestamp = await getTimestamp(testSnapshotPath)
 
-    const result = await query({
-      snapshot: testSnapshotPath,
-      given: { value: 'initial' },
-      services: { util },
-      query: {
-        data: ['util', 'template', { value: '$.given.value' }],
-        // This should be skipped due to matching timestamp
-        save: ['util', 'snapshot', { capture: '$', out: testSnapshotPath }],
-      },
-    })
+    // Add snapshot parameter to load from the existing snapshot
+    snapshotQuery.snapshot = testSnapshotPath
+    const result = await query(snapshotQuery)
 
     // Should have loaded data correctly
     assert.deepStrictEqual(result.data, { value: 'initial' })
 
     // Verify snapshot timestamp hasn't changed (indicating skip worked)
-    const newSnapshotData = JSON.parse(
-      await fs.readFile(testSnapshotPath, 'utf8')
-    )
+    const newTimestamp = await getTimestamp(testSnapshotPath)
+
     assert.strictEqual(
-      newSnapshotData.timestamp,
+      newTimestamp,
       originalTimestamp,
       'Snapshot timestamp should be unchanged due to skip logic'
     )

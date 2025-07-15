@@ -10,7 +10,7 @@ describe('Util Service Tests', () => {
       { name: 'Alice', age: 30, department: 'Engineering' },
       { name: 'Bob', age: 25, department: 'Marketing' },
       { name: 'Charlie', age: 35, department: 'Engineering' },
-      { name: 'Diana', age: 28, department: 'Sales' },
+      { name: 'Diana', age: 28, department: 'Sales' }
     ],
     products: [
       { id: 1, name: 'Widget', price: 10.99, categories: ['tools', 'gadgets'] },
@@ -18,15 +18,15 @@ describe('Util Service Tests', () => {
         id: 2,
         name: 'Gadget',
         price: 25.5,
-        categories: ['electronics', 'gadgets'],
+        categories: ['electronics', 'gadgets']
       },
-      { id: 3, name: 'Tool', price: 15.0, categories: ['tools', 'hardware'] },
+      { id: 3, name: 'Tool', price: 15.0, categories: ['tools', 'hardware'] }
     ],
     orders: [
       { orderId: 'A123', items: [1, 2] },
       { orderId: 'B456', items: [2, 3] },
-      { orderId: 'C789', items: [1, 3] },
-    ],
+      { orderId: 'C789', items: [1, 3] }
+    ]
   }
 
   // Mock services
@@ -50,7 +50,7 @@ describe('Util Service Tests', () => {
           throw new Error(`Unknown action: ${action}`)
       }
     },
-    util,
+    util
   }
 
   describe('Direct Service Usage', () => {
@@ -60,8 +60,8 @@ describe('Util Service Tests', () => {
         fn: async (person) => ({
           fullName: person.name,
           yearsOld: person.age,
-          team: person.department,
-        }),
+          team: person.department
+        })
       })
 
       assert.strictEqual(result.length, 4)
@@ -72,7 +72,7 @@ describe('Util Service Tests', () => {
 
     it('should concat arrays', async () => {
       const result = await util.concat({
-        args: [['a', 'b'], ['c', 'd'], ['e']],
+        args: [['a', 'b'], ['c', 'd'], ['e']]
       })
 
       assert.deepStrictEqual(result, ['a', 'b', 'c', 'd', 'e'])
@@ -82,13 +82,13 @@ describe('Util Service Tests', () => {
       const resultTrue = await util.when({
         test: true,
         then: 'success',
-        or: 'failure',
+        or: 'failure'
       })
 
       const resultFalse = await util.when({
         test: false,
         then: 'success',
-        or: 'failure',
+        or: 'failure'
       })
 
       assert.strictEqual(resultTrue, 'success')
@@ -115,14 +115,14 @@ describe('Util Service Tests', () => {
           name: 'Alice',
           age: 30,
           email: 'alice@example.com',
-          secret: 'hidden',
+          secret: 'hidden'
         },
-        fields: ['name', 'email'],
+        fields: ['name', 'email']
       })
 
       assert.deepStrictEqual(result, {
         name: 'Alice',
-        email: 'alice@example.com',
+        email: 'alice@example.com'
       })
     })
   })
@@ -140,19 +140,19 @@ describe('Util Service Tests', () => {
               on: '$.given.people',
               fn: {
                 name: '@.name',
-                info: '@.department',
-              },
-            },
-          ],
+                info: '@.department'
+              }
+            }
+          ]
         },
-        select: 'summary',
+        select: 'summary'
       })
 
       assert.deepStrictEqual(result, [
         { name: 'Alice', info: 'Engineering' },
         { name: 'Bob', info: 'Marketing' },
         { name: 'Charlie', info: 'Engineering' },
-        { name: 'Diana', info: 'Sales' },
+        { name: 'Diana', info: 'Sales' }
       ])
     })
 
@@ -166,11 +166,11 @@ describe('Util Service Tests', () => {
             'map',
             {
               on: '$.given.people',
-              fn: ['data', 'formatName', { person: '@' }],
-            },
-          ],
+              fn: ['data', 'formatName', { person: '@' }]
+            }
+          ]
         },
-        select: 'formatted',
+        select: 'formatted'
       })
 
       assert.deepStrictEqual(result, ['ALICE', 'BOB', 'CHARLIE', 'DIANA'])
@@ -186,11 +186,11 @@ describe('Util Service Tests', () => {
             'filter',
             {
               on: '$.given.people',
-              predicate: ['data', 'isEngineer', { person: '@' }],
-            },
-          ],
+              predicate: ['data', 'isEngineer', { person: '@' }]
+            }
+          ]
         },
-        select: 'engineers',
+        select: 'engineers'
       })
 
       assert.deepStrictEqual(
@@ -209,11 +209,11 @@ describe('Util Service Tests', () => {
             'flatMap',
             {
               on: '$.given.products',
-              fn: ['data', 'getCategories', { product: '@' }],
-            },
-          ],
+              fn: ['data', 'getCategories', { product: '@' }]
+            }
+          ]
         },
-        select: 'allCategories',
+        select: 'allCategories'
       })
 
       assert.deepStrictEqual(result, [
@@ -222,7 +222,7 @@ describe('Util Service Tests', () => {
         'electronics',
         'gadgets',
         'tools',
-        'hardware',
+        'hardware'
       ])
     })
 
@@ -234,7 +234,7 @@ describe('Util Service Tests', () => {
           age: async (action, { person }) => {
             if (action === 'isAdult') return person.age >= 18
             throw new Error(`Unknown action: ${action}`)
-          },
+          }
         },
         query: {
           status: [
@@ -243,11 +243,11 @@ describe('Util Service Tests', () => {
             {
               test: ['age', 'isAdult', { person: '$.given.person' }],
               then: 'Adult',
-              or: 'Minor',
-            },
-          ],
+              or: 'Minor'
+            }
+          ]
         },
-        select: 'status',
+        select: 'status'
       })
 
       assert.strictEqual(result, 'Adult')
@@ -263,17 +263,17 @@ describe('Util Service Tests', () => {
             '$.given.items',
             'util:map',
             {
-              fn: { original: '@.id', processed: true },
-            },
-          ],
+              fn: { original: '@.id', processed: true }
+            }
+          ]
         },
-        select: 'processed',
+        select: 'processed'
       })
 
       assert.deepStrictEqual(result, [
         { original: 1, processed: true },
         { original: 2, processed: true },
-        { original: 3, processed: true },
+        { original: 3, processed: true }
       ])
     })
 
@@ -281,7 +281,7 @@ describe('Util Service Tests', () => {
       const result = await query({
         given: {
           orders: testData.orders,
-          products: testData.products,
+          products: testData.products
         },
         services: mockServices,
         query: {
@@ -296,10 +296,10 @@ describe('Util Service Tests', () => {
                 'calculateTotal',
                 {
                   items: '@.items',
-                  products: testData.products,
-                },
-              ],
-            },
+                  products: testData.products
+                }
+              ]
+            }
           ],
 
           // Filter to orders over $30
@@ -308,14 +308,14 @@ describe('Util Service Tests', () => {
             'filter',
             {
               on: '$.orderTotals',
-              predicate: ['util', 'gt', { l: '@', r: 30 }],
-            },
+              predicate: ['util', 'gt', { l: '@', r: 30 }]
+            }
           ],
 
           // Count big orders
-          bigOrderCount: ['util', 'length', { value: '$.bigOrders' }],
+          bigOrderCount: ['util', 'length', { value: '$.bigOrders' }]
         },
-        select: 'bigOrderCount',
+        select: 'bigOrderCount'
       })
 
       assert.strictEqual(result, 2) // Orders B456 and C789 are over $30
@@ -351,11 +351,11 @@ describe('Util Service Tests', () => {
             {
               on: 'Hello World',
               color: 'blue',
-              ts: false,
-            },
-          ],
+              ts: false
+            }
+          ]
         },
-        select: 'printed',
+        select: 'printed'
       })
 
       // Should return the printed value for chaining
@@ -366,8 +366,7 @@ describe('Util Service Tests', () => {
 
       // Find the output that contains the blue color
       const blueOutput = capturedOutput.find((output) =>
-        output.includes('\x1b[34m')
-      )
+        output.includes('\x1b[34m'))
       assert(blueOutput, 'Should find output with blue color')
 
       // Should contain the message
@@ -382,18 +381,18 @@ describe('Util Service Tests', () => {
             name: 'Alice',
             profile: {
               email: 'alice@example.com',
-              preferences: { theme: 'dark', notifications: true },
-            },
+              preferences: { theme: 'dark', notifications: true }
+            }
           },
           {
             id: 2,
             name: 'Bob',
             profile: {
               email: 'bob@example.com',
-              preferences: { theme: 'light', notifications: false },
-            },
-          },
-        ],
+              preferences: { theme: 'light', notifications: false }
+            }
+          }
+        ]
       }
 
       const result = await query({
@@ -403,8 +402,8 @@ describe('Util Service Tests', () => {
           inspect: {
             depth: 1,
             maxArrayLength: 1,
-            maxStringLength: 20,
-          },
+            maxStringLength: 20
+          }
         },
         query: {
           printed: [
@@ -413,11 +412,11 @@ describe('Util Service Tests', () => {
             {
               on: '$.given.users',
               color: 'blue',
-              ts: false,
-            },
-          ],
+              ts: false
+            }
+          ]
         },
-        select: 'printed',
+        select: 'printed'
       })
 
       // Should return the printed value for chaining
@@ -428,8 +427,7 @@ describe('Util Service Tests', () => {
 
       // Find the output that contains the blue color (from our print call)
       const blueOutput = capturedOutput.find((output) =>
-        output.includes('\x1b[34m')
-      )
+        output.includes('\x1b[34m'))
       assert(blueOutput, 'Should find output with blue color')
 
       // Should contain ANSI blue color codes
@@ -445,7 +443,7 @@ describe('Util Service Tests', () => {
     it('should work with method syntax and custom inspect settings', async () => {
       const testData = {
         message:
-          'This is a very long string that should be truncated based on settings',
+          'This is a very long string that should be truncated based on settings'
       }
 
       await query({
@@ -459,10 +457,10 @@ describe('Util Service Tests', () => {
             {
               settings: { inspect: { maxStringLength: 30 } },
               color: 'green',
-              ts: false,
-            },
-          ],
-        },
+              ts: false
+            }
+          ]
+        }
       })
 
       // Check output
@@ -502,9 +500,9 @@ describe('Util Service Tests', () => {
           snapshot: [
             '$.doubled',
             'util:snapshot',
-            { capture: '$', out: testSnapshotPath },
-          ],
-        },
+            { capture: '$', out: testSnapshotPath }
+          ]
+        }
       }
 
       const _results = await query(testQuery)
@@ -534,9 +532,9 @@ describe('Util Service Tests', () => {
           snapshot: [
             '$.step1',
             'util:snapshot',
-            { capture: '$', out: testSnapshotPath },
-          ],
-        },
+            { capture: '$', out: testSnapshotPath }
+          ]
+        }
       }
 
       await query(testQuery)
@@ -563,9 +561,9 @@ describe('Util Service Tests', () => {
           result: [
             ['util', 'map', { on: '$.given.data', fn: { doubled: '@' } }],
             ['@', 'util:snapshot', { capture: '@', out: testSnapshotPath }],
-            ['@', 'util:map', { fn: { tripled: '@.doubled' } }],
-          ],
-        },
+            ['@', 'util:map', { fn: { tripled: '@.doubled' } }]
+          ]
+        }
       }
 
       await query(testQuery)

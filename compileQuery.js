@@ -39,7 +39,7 @@ const ANSI_COLORS = {
   magenta: '\x1b[35m',
   cyan: '\x1b[36m',
   white: '\x1b[37m',
-  reset: '\x1b[0m',
+  reset: '\x1b[0m'
 }
 
 /**
@@ -77,7 +77,7 @@ const transformObjectAsync = async (obj, transform, context) => {
  */
 const ARG_CATEGORIES = {
   reserved: ['timeout', 'retry', 'onError', 'ignoreErrors'],
-  function: ['onError'],
+  function: ['onError']
 }
 
 /**
@@ -101,7 +101,7 @@ export const compileQuery = (config) => {
     executionOrder: [],
     services: config.services || {},
     settings: config.settings || {},
-    usedServices: new Set(),
+    usedServices: new Set()
   }
 
   // Phase 1: Add given as pre-resolved query if present
@@ -112,7 +112,7 @@ export const compileQuery = (config) => {
       value: config.given,
       completed: true,
       dependencies: [],
-      root: ast,
+      root: ast
     }
 
     // Add getQueryResult method
@@ -175,7 +175,7 @@ const compileQueryNode = (
       reference: queryName,
       target: descriptor,
       dependencies: [descriptor],
-      root: ast,
+      root: ast
     }
 
     // Add getQueryResult method
@@ -246,7 +246,7 @@ const compileChainNode = (
     parentContextNode,
     parent: null, // Will be set by calling context
     value: null,
-    root: ast,
+    root: ast
   }
 
   // Define completed as getter that checks all steps
@@ -257,15 +257,15 @@ const compileChainNode = (
     set(_value) {
       // Allow setting for compatibility but ignore it since getter handles the logic
     },
-    configurable: true,
+    configurable: true
   })
 
   // Chain nodes have no current context - context getter should throw
   Object.defineProperty(node, 'context', {
     get() {
-      throw new Error(`@ is not available at the chain level`)
+      throw new Error('@ is not available at the chain level')
     },
-    configurable: true,
+    configurable: true
   })
 
   // Mark that chain nodes don't have semantic context
@@ -286,7 +286,7 @@ const compileChainNode = (
         get() {
           const myIndex = this.parent.steps.indexOf(this)
           if (myIndex === 0) {
-            throw new Error(`@ is not available for the first step in a chain`)
+            throw new Error('@ is not available for the first step in a chain')
           }
           const previousStep = this.parent.steps[myIndex - 1]
           if (!previousStep.completed) {
@@ -296,7 +296,7 @@ const compileChainNode = (
           }
           return previousStep.value
         },
-        configurable: true,
+        configurable: true
       })
       // Set parentContextNode to previous step (which has context), not the chain
       step.parentContextNode = previousStep
@@ -304,9 +304,9 @@ const compileChainNode = (
       // First step in chain: context getter should throw (no previous step)
       Object.defineProperty(step, 'context', {
         get() {
-          throw new Error(`@ is not available for the first step in a chain`)
+          throw new Error('@ is not available for the first step in a chain')
         },
-        configurable: true,
+        configurable: true
       })
       // First step's parent should be the chain's parent (skipping chain node)
       step.parentContextNode = parentContextNode
@@ -422,15 +422,15 @@ const compileServiceNode = (
     parent: null, // Will be set by calling context
     value: null,
     completed: false,
-    root: ast,
+    root: ast
   }
 
   // Default: context is not defined for any node
   Object.defineProperty(node, 'context', {
     get() {
-      throw new Error(`Context is not defined`)
+      throw new Error('Context is not defined')
     },
-    configurable: true,
+    configurable: true
   })
 
   // Add getQueryResult method for accessing query results with dependency coordination
@@ -481,7 +481,7 @@ const transformMethodSyntax = (descriptor) => {
 
   return {
     descriptor: [serviceName, method, newArgs],
-    hasOn: true,
+    hasOn: true
   }
 }
 
@@ -528,10 +528,7 @@ const separateArguments = (args, config, argtypes, ast) => {
     if (ARG_CATEGORIES.reserved.includes(key)) {
       reservedArgs[key] = value
       staticArgs[key] = value
-    }
-
-    // Check if this is a function argument (reserved or service-declared)
-    else if (
+    } else if (
       ARG_CATEGORIES.function.includes(key) ||
       argtypes?.[key]?.type === 'function'
     ) {
@@ -542,13 +539,9 @@ const separateArguments = (args, config, argtypes, ast) => {
         // Static value for function argument - treat as static
         staticArgs[key] = value
       }
-    }
-    // Check for references
-    else if (containsReferences(value)) {
+    } else if (containsReferences(value)) {
       dependentArgs[key] = value
-    }
-    // Everything else is static
-    else {
+    } else {
       staticArgs[key] = value
     }
   }
@@ -565,9 +558,9 @@ const compileServiceFunction = (descriptor, config, ast) => {
   // Function/template nodes: override context getter - they get values directly from withArgs
   Object.defineProperty(node, 'context', {
     get() {
-      throw new Error(`AST node context is not available in compiled function`)
+      throw new Error('AST node context is not available in compiled function')
     },
-    configurable: true,
+    configurable: true
   })
 
   // Return a function that executes the compiled node
@@ -577,7 +570,7 @@ const compileServiceFunction = (descriptor, config, ast) => {
     Object.defineProperty(executionNode, 'context', {
       get() {
         return contextValue
-      },
+      }
     })
     // Execution node inherits root reference from base node
 
@@ -702,8 +695,7 @@ const createWrappedFunction = (
         action,
         config,
         rawArgs
-      )
-    )
+      ))
   }
 
   // Apply all wrappers using functional composition
@@ -754,7 +746,7 @@ const withArgs = (fn, staticArgs, dependentArgs, functionArgs) => {
                 get() {
                   return itemValue
                 },
-                configurable: true,
+                configurable: true
               })
 
               // Set up parent context getter to point to current executing node
@@ -767,7 +759,7 @@ const withArgs = (fn, staticArgs, dependentArgs, functionArgs) => {
               Object.defineProperty(virtualNode, 'parentContextNode', {
                 get() {
                   return currentNode
-                },
+                }
               })
 
               // Add debugging flag and context marker
@@ -801,7 +793,7 @@ const withArgs = (fn, staticArgs, dependentArgs, functionArgs) => {
     const resolvedArgs = {
       ...staticArgs,
       ...resolvedDependent,
-      ...resolvedFunctions,
+      ...resolvedFunctions
     }
 
     // Auto-inject settings for services that expect them (like util.print)
@@ -1113,7 +1105,7 @@ const withErrorHandling = (
         serviceName,
         action,
         args: completeArgs,
-        queryName: this?.reference || 'unknown',
+        queryName: this?.reference || 'unknown'
       }
 
       // Handle with onError if provided

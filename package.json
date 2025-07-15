@@ -1,6 +1,6 @@
 {
   "name": "microql",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "description": "A query language for composing microservices.",
   "main": "index.js",
   "type": "module",
@@ -8,8 +8,8 @@
     "test": "mocha",
     "callgraph": "./generate-callgraph.sh",
     "prepare": "husky",
-    "lint": "npx @biomejs/biome check .",
-    "lint:fix": "npx @biomejs/biome check --write ."
+    "lint": "npx eslint .",
+    "lint:fix": "npx eslint --fix ."
   },
   "repository": {
     "type": "git",
@@ -39,7 +39,8 @@
     "jsonpath": "^1.1.1"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.1.1",
+    "@stylistic/eslint-plugin": "^5.1.0",
+    "eslint": "^9.31.0",
     "husky": "^9.1.7",
     "mocha": "^11.7.0"
   }

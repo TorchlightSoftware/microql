@@ -19,24 +19,24 @@ describe('Service This Binding Tests', () => {
         return {
           input,
           fromInternal: this.internalState,
-          fromMethod: this.internalMethod(),
+          fromMethod: this.internalMethod()
         }
-      },
+      }
     }
 
     const result = await query({
       given: { value: 'test-input' },
       services: { testService },
       query: {
-        result: ['testService', 'testMethod', { input: '$.given.value' }],
+        result: ['testService', 'testMethod', { input: '$.given.value' }]
       },
-      select: 'result',
+      select: 'result'
     })
 
     assert.deepStrictEqual(result, {
       input: 'test-input',
       fromInternal: 'service-internal-data',
-      fromMethod: 'internal-method-result',
+      fromMethod: 'internal-method-result'
     })
   })
 
@@ -52,7 +52,7 @@ describe('Service This Binding Tests', () => {
 
       async getCount() {
         return this.count
-      },
+      }
     }
 
     const result = await query({
@@ -60,15 +60,15 @@ describe('Service This Binding Tests', () => {
       query: {
         first: ['counterService', 'increment', { by: 5 }],
         second: ['counterService', 'increment', { by: 3 }],
-        final: ['counterService', 'getCount', {}],
+        final: ['counterService', 'getCount', {}]
       },
-      select: ['first', 'second', 'final'],
+      select: ['first', 'second', 'final']
     })
 
     assert.deepStrictEqual(result, {
       first: 5,
       second: 8,
-      final: 8,
+      final: 8
     })
   })
 })

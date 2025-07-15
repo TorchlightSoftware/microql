@@ -14,14 +14,14 @@ describe('TearDown Tests', () => {
 
       async tearDown() {
         tearDownCalled = true
-      },
+      }
     }
 
     await query({
       services: { mockService },
       query: {
-        test: ['mockService', 'testAction', {}],
-      },
+        test: ['mockService', 'testAction', {}]
+      }
     })
 
     assert.strictEqual(tearDownCalled, true, 'tearDown should have been called')
@@ -32,15 +32,15 @@ describe('TearDown Tests', () => {
     const serviceWithoutTearDown = {
       async testAction() {
         return 'test result'
-      },
+      }
     }
 
     // This should not throw an error
     const result = await query({
       services: { serviceWithoutTearDown },
       query: {
-        test: ['serviceWithoutTearDown', 'testAction', {}],
-      },
+        test: ['serviceWithoutTearDown', 'testAction', {}]
+      }
     })
 
     assert.deepStrictEqual(result, { test: 'test result' })
@@ -55,7 +55,7 @@ describe('TearDown Tests', () => {
       },
       async tearDown() {
         tearDownCalls.push('service1')
-      },
+      }
     }
 
     const service2 = {
@@ -64,15 +64,15 @@ describe('TearDown Tests', () => {
       },
       async tearDown() {
         tearDownCalls.push('service2')
-      },
+      }
     }
 
     await query({
       services: { service1, service2 },
       query: {
         test1: ['service1', 'action', {}],
-        test2: ['service2', 'action', {}],
-      },
+        test2: ['service2', 'action', {}]
+      }
     })
 
     assert.strictEqual(
@@ -100,15 +100,15 @@ describe('TearDown Tests', () => {
 
       async tearDown() {
         tearDownCalled = true
-      },
+      }
     }
 
     try {
       await query({
         services: { serviceWithError },
         query: {
-          test: ['serviceWithError', 'failingAction', {}],
-        },
+          test: ['serviceWithError', 'failingAction', {}]
+        }
       })
       assert.fail('Query should have thrown an error')
     } catch (error) {
@@ -129,7 +129,7 @@ describe('TearDown Tests', () => {
     const usedService = {
       async action() {
         return 'result'
-      },
+      }
     }
 
     const unusedService = {
@@ -138,14 +138,14 @@ describe('TearDown Tests', () => {
       },
       async tearDown() {
         tearDownCalled = true
-      },
+      }
     }
 
     await query({
       services: { usedService, unusedService },
       query: {
-        test: ['usedService', 'action', {}],
-      },
+        test: ['usedService', 'action', {}]
+      }
     })
 
     assert.strictEqual(
@@ -164,15 +164,15 @@ describe('TearDown Tests', () => {
       },
       async tearDown() {
         throw new Error('TearDown failed')
-      },
+      }
     }
 
     // Should not throw despite tearDown error
     const result = await query({
       services: { serviceWithBadTearDown },
       query: {
-        test: ['serviceWithBadTearDown', 'action', {}],
-      },
+        test: ['serviceWithBadTearDown', 'action', {}]
+      }
     })
 
     assert.deepStrictEqual(result, { test: 'result' })
