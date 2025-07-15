@@ -206,46 +206,63 @@ const util = {
 
   /**
    * Save data to a JSON snapshot file
+   * 
+   * Design: This service supports two distinct arguments to separate timing control from data capture:
+   * - `on`: Controls when the snapshot executes (dependency timing) - what to wait for
+   * - `capture`: Controls what data to save - what to capture
+   * 
+   * Common patterns:
+   * - `capture: '$'` - Captures all completed queries at execution time (no waiting)
+   * - `on: '$.someQuery'` - Waits for someQuery to complete before executing
+   * - Default behavior: If no `capture` specified, captures the `on` value
+   * 
+   * The `$` reference is special - it resolves to "what we have right now" without creating
+   * dependencies or waiting. This allows capturing current execution state at any point.
+   * 
    * @param {Object} args - Arguments  
-   * @param {*} args.on - Data being passed through the chain
+   * @param {*} args.on - Data being passed through the chain (controls timing/dependencies)
    * @param {*} args.capture - Data to capture in snapshot (resolved from MicroQL context)
    * @param {string} args.out - Output file path
+   * @param {string} [args.snapshotRestoreTimestamp] - Auto-injected timestamp for skip logic
    * @returns {*} Returns the on argument for chaining
    */
-  async snapshot({ on, capture, out }) {
+  async snapshot({ on, capture, out, snapshotRestoreTimestamp }) {
     if (!out) {
       throw new Error('snapshot requires "out" argument specifying file path')
     }
 
-    // Clean functions and _ properties from snapshot data
-    const cleanForSnapshot = (obj) => {
-      if (obj === null || obj === undefined) return obj
-      if (typeof obj === 'function') return undefined
-      if (Array.isArray(obj)) {
-        return obj.map(cleanForSnapshot).filter(item => item !== undefined)
-      }
-      if (typeof obj === 'object') {
-        const cleaned = {}
-        for (const [key, value] of Object.entries(obj)) {
-          if (!key.startsWith('_')) {
-            const cleanedValue = cleanForSnapshot(value)
-            if (cleanedValue !== undefined) {
-              cleaned[key] = cleanedValue
-            }
-          }
+    // Determine what to capture
+    let dataToCapture
+    
+    if (capture !== undefined) {
+      // Use the resolved capture value ($ will be resolved to all queries by argument resolution)
+      dataToCapture = capture
+    } else {
+      // Default: capture current context (on)
+      dataToCapture = on
+    }
+
+    // Check if we should skip based on timestamp
+    const fs = await import('fs-extra')
+    const path = await import('path')
+    
+    // Skip logic: if we have a restore timestamp and file exists with same timestamp
+    if (snapshotRestoreTimestamp && await fs.default.pathExists(out)) {
+      try {
+        const existingSnapshot = JSON.parse(await fs.default.readFile(out, 'utf8'))
+        if (existingSnapshot.timestamp === snapshotRestoreTimestamp) {
+          // Skip - this snapshot was already taken
+          return on
         }
-        return cleaned
+      } catch (error) {
+        // If we can't read existing snapshot, proceed with saving
       }
-      return obj
     }
 
     const snapshotData = {
       timestamp: new Date().toISOString(),
-      results: cleanForSnapshot(capture)
+      results: dataToCapture
     }
-
-    const fs = await import('fs-extra')
-    const path = await import('path')
     
     // Ensure directory exists
     await fs.default.ensureDir(path.default.dirname(out))
@@ -253,7 +270,7 @@ const util = {
     // Write snapshot file
     await fs.default.writeFile(out, JSON.stringify(snapshotData, null, 2))
 
-    // Return the on argument for chaining (not the captured data)
+    // Return the on argument for chaining
     return on
   },
 

@@ -214,9 +214,19 @@ const compileChainNode = (queryName, chainDescriptor, config, parentContextNode,
     parentContextNode,
     parent: null, // Will be set by calling context
     value: null,
-    completed: false,
     root: ast
   }
+  
+  // Define completed as getter that checks all steps
+  Object.defineProperty(node, 'completed', {
+    get() {
+      return this.steps.every(step => step.completed)
+    },
+    set(value) {
+      // Allow setting for compatibility but ignore it since getter handles the logic
+    },
+    configurable: true
+  })
   
   // Chain nodes have no current context - context getter should throw
   Object.defineProperty(node, 'context', {
@@ -465,9 +475,15 @@ const separateArguments = (args, config, argtypes, ast) => {
     }
     
     // Check if this is a function argument (reserved or service-declared)
-    if (ARG_CATEGORIES.function.includes(key)
+    else if (ARG_CATEGORIES.function.includes(key)
       || argtypes?.[key]?.type === 'function') {
-      functionArgs[key] = compileFunctionArgument(value, config, ast)
+      const compiledFunction = compileFunctionArgument(value, config, ast)
+      if (compiledFunction !== null) {
+        functionArgs[key] = compiledFunction
+      } else {
+        // Static value for function argument - treat as static
+        staticArgs[key] = value
+      }
     }
     // Check for references
     else if (containsReferences(value)) {
@@ -528,7 +544,7 @@ const compileServiceFunction = (descriptor, config, ast) => {
  */
 const containsReferences = (value) => {
   if (typeof value === 'string') {
-    return AT_REGEX.test(value) || DEP_REGEX.test(value)
+    return AT_REGEX.test(value) || DEP_REGEX.test(value) || value === '$'
   }
   
   if (Array.isArray(value)) {
@@ -648,7 +664,13 @@ const withArgs = (fn, staticArgs, dependentArgs, functionArgs) => {
     // Resolve dependent arguments
     const resolvedDependent = {}
     for (const [key, value] of Object.entries(dependentArgs)) {
-      resolvedDependent[key] = await resolveValue(value, node)
+      // Special case: bare $ should resolve at service execution time, not argument resolution time
+      if (value === '$') {
+        // Defer $ resolution until service execution by storing a special marker
+        resolvedDependent[key] = { __deferredDollar: true }
+      } else {
+        resolvedDependent[key] = await resolveValue(value, node)
+      }
     }
     
     // Resolve function arguments
@@ -720,6 +742,30 @@ const withArgs = (fn, staticArgs, dependentArgs, functionArgs) => {
     // Auto-inject settings for services that expect them (like util.print)
     if (!resolvedArgs.settings && this.root?.settings) {
       resolvedArgs.settings = this.root.settings
+    }
+    
+    // Resolve deferred $ arguments at service execution time
+    for (const [key, value] of Object.entries(resolvedArgs)) {
+      if (value && typeof value === 'object' && value.__deferredDollar) {
+        // Resolve $ at execution time to capture current state
+        const results = {}
+        if (node.root && node.root.queries) {
+          for (const [queryName, queryNode] of Object.entries(node.root.queries)) {
+            if (queryNode.completed) {
+              results[queryName] = queryNode.value
+            }
+          }
+        }
+        resolvedArgs[key] = results
+      }
+    }
+    
+    // Auto-inject snapshotRestoreTimestamp for util.snapshot
+    if (node.serviceName === 'util' && node.action === 'snapshot') {
+      const snapshotRestoreTimestamp = node.root?.queries?.snapshotRestoreTimestamp?.value
+      if (snapshotRestoreTimestamp) {
+        resolvedArgs.snapshotRestoreTimestamp = snapshotRestoreTimestamp
+      }
     }
     
     return await fn.call(this, resolvedArgs)
@@ -808,6 +854,20 @@ const resolveValue = async (value, node) => {
         // Handle pure @ symbols
         return getContext(node, level)
       }
+    }
+    
+    // Handle bare $ (all completed queries)
+    if (value === '$') {
+      if (node && node.root && node.root.queries) {
+        const results = {}
+        for (const [queryName, queryNode] of Object.entries(node.root.queries)) {
+          if (queryNode.completed) {
+            results[queryName] = queryNode.value
+          }
+        }
+        return results
+      }
+      return {}
     }
     
     // Handle $ references

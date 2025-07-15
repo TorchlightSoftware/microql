@@ -386,4 +386,96 @@ describe('Util Service Tests', () => {
       assert(output.includes('\x1b[32m'), 'Should contain green color code')
     })
   })
+
+  describe('Snapshot Function Tests', () => {
+    const testSnapshotPath = './test-snapshot.json'
+    
+    afterEach(async () => {
+      // Clean up test snapshot
+      const fs = await import('fs-extra')
+      try {
+        await fs.default.remove(testSnapshotPath)
+      } catch (error) {
+        // Ignore cleanup errors
+      }
+    })
+
+    it('should create snapshot with results format', async () => {
+      const testQuery = {
+        given: { value: 42 },
+        services: { util },
+        methods: ['util'],
+        settings: { debug: false },
+        query: {
+          doubled: ['util', 'when', { test: true, then: 84, or: 0 }],
+          snapshot: ['$.doubled', 'util:snapshot', { capture: '$', out: testSnapshotPath }]
+        }
+      }
+      
+      const results = await query(testQuery)
+      
+      // Verify snapshot file was created
+      const fs = await import('fs-extra')
+      assert(await fs.default.pathExists(testSnapshotPath))
+      
+      // Verify snapshot content has results format
+      const snapshot = JSON.parse(await fs.default.readFile(testSnapshotPath, 'utf8'))
+      assert(snapshot.timestamp)
+      assert(snapshot.results)
+      assert.strictEqual(snapshot.results.given.value, 42)
+      assert.strictEqual(snapshot.results.doubled, 84)
+    })
+
+    it('should save execution state correctly in snapshot', async () => {
+      const testQuery = {
+        given: { start: 1 },
+        services: { util },
+        methods: ['util'],
+        settings: { debug: false },
+        query: {
+          step1: ['util', 'pick', { on: '$.given', fields: ['start'] }],
+          snapshot: ['$.step1', 'util:snapshot', { capture: '$', out: testSnapshotPath }]
+        }
+      }
+      
+      await query(testQuery)
+      
+      const fs = await import('fs-extra')
+      const snapshot = JSON.parse(await fs.default.readFile(testSnapshotPath, 'utf8'))
+      
+      // Verify that completed queries are saved in results
+      assert(snapshot.results.step1)
+      assert.strictEqual(snapshot.results.step1.start, 1)
+      assert(snapshot.results.given)
+      assert.strictEqual(snapshot.results.given.start, 1)
+    })
+
+    it('should work with different capture options', async () => {
+      const testQuery = {
+        given: { data: [1, 2, 3] },
+        services: { util },
+        methods: ['util'],
+        settings: { debug: false },
+        query: {
+          result: [
+            ['util', 'map', { on: '$.given.data', fn: { doubled: '@' } }],
+            ['@', 'util:snapshot', { capture: '@', out: testSnapshotPath }],
+            ['@', 'util:map', { fn: { tripled: '@.doubled' } }]
+          ]
+        }
+      }
+      
+      await query(testQuery)
+      
+      const fs = await import('fs-extra')
+      const snapshot = JSON.parse(await fs.default.readFile(testSnapshotPath, 'utf8'))
+      
+      // Verify current context is captured (not full $ state)
+      assert(snapshot.results)
+      assert(Array.isArray(snapshot.results))
+      assert.strictEqual(snapshot.results[0].doubled, 1)
+      assert.strictEqual(snapshot.results[1].doubled, 2)
+      assert.strictEqual(snapshot.results[2].doubled, 3)
+    })
+  })
 })
