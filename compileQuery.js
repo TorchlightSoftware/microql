@@ -1,11 +1,11 @@
 /**
  * @fileoverview MicroQL Query Compilation
- * 
+ *
  * Compiles query configurations into an executable AST with all transformations,
  * wrapper applications, and dependency analysis done at compile time.
  */
 
-import { inspect } from 'util'
+import { inspect } from 'node:util'
 import retrieve from './retrieve.js'
 import { COLOR_NAMES } from './util.js'
 
@@ -34,12 +34,12 @@ const getServiceColor = (serviceName) => {
  */
 const ANSI_COLORS = {
   green: '\x1b[32m',
-  yellow: '\x1b[33m', 
+  yellow: '\x1b[33m',
   blue: '\x1b[34m',
   magenta: '\x1b[35m',
   cyan: '\x1b[36m',
   white: '\x1b[37m',
-  reset: '\x1b[0m'
+  reset: '\x1b[0m',
 }
 
 /**
@@ -77,7 +77,7 @@ const transformObjectAsync = async (obj, transform, context) => {
  */
 const ARG_CATEGORIES = {
   reserved: ['timeout', 'retry', 'onError', 'ignoreErrors'],
-  function: ['onError']
+  function: ['onError'],
 }
 
 /**
@@ -101,9 +101,9 @@ export const compileQuery = (config) => {
     executionOrder: [],
     services: config.services || {},
     settings: config.settings || {},
-    usedServices: new Set() // Track used services at root level (not saved in snapshots)
+    usedServices: new Set(),
   }
-  
+
   // Phase 1: Add given as pre-resolved query if present
   if (config.given) {
     const givenNode = {
@@ -112,48 +112,62 @@ export const compileQuery = (config) => {
       value: config.given,
       completed: true,
       dependencies: [],
-      root: ast
+      root: ast,
     }
-    
+
     // Add getQueryResult method
-    givenNode.getQueryResult = async function(queryName) {
+    givenNode.getQueryResult = async function (queryName) {
       const query = this.root.queries[queryName]
-      
+
       if (!query) {
         throw new Error(`Query '${queryName}' not found`)
       }
-      
+
       // Check if result is already available
       if (query.completed) {
         return query.value
       }
-      
+
       // Check if query is currently executing and wait for it
       if (query.executing) {
         return await query.executing
       }
-      
+
       throw new Error(`Query '${queryName}' has not been executed yet`)
     }
-    
+
     ast.queries.given = givenNode
   }
-  
+
   // Phase 2: Create base AST nodes for all queries
-  for (const [queryName, queryDescriptor] of Object.entries(config.query || {})) {
-    ast.queries[queryName] = compileQueryNode(queryName, queryDescriptor, config, null, ast)
+  for (const [queryName, queryDescriptor] of Object.entries(
+    config.query || {}
+  )) {
+    ast.queries[queryName] = compileQueryNode(
+      queryName,
+      queryDescriptor,
+      config,
+      null,
+      ast
+    )
   }
-  
+
   // Phase 3: Resolve dependencies and determine execution order
   ast.executionOrder = resolveDependencies(ast.queries)
-  
+
   return ast
 }
 
 /**
  * Compile individual query node
  */
-const compileQueryNode = (queryName, descriptor, config, parentContextNode, ast) => {
+const compileQueryNode = (
+  queryName,
+  descriptor,
+  config,
+  parentContextNode,
+  ast
+) => {
   // Handle alias queries (string references)
   if (typeof descriptor === 'string') {
     const aliasNode = {
@@ -161,51 +175,69 @@ const compileQueryNode = (queryName, descriptor, config, parentContextNode, ast)
       reference: queryName,
       target: descriptor,
       dependencies: [descriptor],
-      root: ast
+      root: ast,
     }
-    
+
     // Add getQueryResult method
-    aliasNode.getQueryResult = async function(queryName) {
+    aliasNode.getQueryResult = async function (queryName) {
       const query = this.root.queries[queryName]
-      
+
       if (!query) {
         throw new Error(`Query '${queryName}' not found`)
       }
-      
+
       // Check if result is already available
       if (query.completed) {
         return query.value
       }
-      
+
       // Check if query is currently executing and wait for it
       if (query.executing) {
         return await query.executing
       }
-      
+
       throw new Error(`Query '${queryName}' has not been executed yet`)
     }
-    
+
     return aliasNode
   }
-  
+
   // Handle array descriptors
   if (Array.isArray(descriptor)) {
     // Check if this is a chain (array of arrays)
     if (descriptor.length > 0 && Array.isArray(descriptor[0])) {
-      return compileChainNode(queryName, descriptor, config, parentContextNode, ast)
+      return compileChainNode(
+        queryName,
+        descriptor,
+        config,
+        parentContextNode,
+        ast
+      )
     } else {
       // Single service call
-      return compileServiceNode(queryName, descriptor, config, parentContextNode, ast)
+      return compileServiceNode(
+        queryName,
+        descriptor,
+        config,
+        parentContextNode,
+        ast
+      )
     }
   }
-  
+
   throw new Error(`Invalid query descriptor for ${queryName}`)
 }
 
 /**
  * Compile chain node (array of service calls)
  */
-const compileChainNode = (queryName, chainDescriptor, config, parentContextNode, ast) => {
+const compileChainNode = (
+  queryName,
+  chainDescriptor,
+  config,
+  parentContextNode,
+  ast
+) => {
   const node = {
     type: 'chain',
     reference: queryName,
@@ -214,39 +246,39 @@ const compileChainNode = (queryName, chainDescriptor, config, parentContextNode,
     parentContextNode,
     parent: null, // Will be set by calling context
     value: null,
-    root: ast
+    root: ast,
   }
-  
+
   // Define completed as getter that checks all steps
   Object.defineProperty(node, 'completed', {
     get() {
-      return this.steps.every(step => step.completed)
+      return this.steps.every((step) => step.completed)
     },
-    set(value) {
+    set(_value) {
       // Allow setting for compatibility but ignore it since getter handles the logic
     },
-    configurable: true
+    configurable: true,
   })
-  
+
   // Chain nodes have no current context - context getter should throw
   Object.defineProperty(node, 'context', {
     get() {
       throw new Error(`@ is not available at the chain level`)
     },
-    configurable: true
+    configurable: true,
   })
-  
+
   // Mark that chain nodes don't have semantic context
   node.hasContext = false
-  
+
   // Compile each step in the chain
   let previousStep = null
   for (const stepDescriptor of chainDescriptor) {
     const step = compileServiceNode(null, stepDescriptor, config, node, ast)
-    
+
     // Set structural parent reference
     step.parent = node
-    
+
     // Wire context for service nodes in chains
     if (previousStep) {
       // Service node in chain: context getter accesses previous step via AST
@@ -258,11 +290,13 @@ const compileChainNode = (queryName, chainDescriptor, config, parentContextNode,
           }
           const previousStep = this.parent.steps[myIndex - 1]
           if (!previousStep.completed) {
-            throw new Error(`Previous step has not been executed yet - step ${myIndex} waiting for step ${myIndex - 1}`)
+            throw new Error(
+              `Previous step has not been executed yet - step ${myIndex} waiting for step ${myIndex - 1}`
+            )
           }
           return previousStep.value
         },
-        configurable: true
+        configurable: true,
       })
       // Set parentContextNode to previous step (which has context), not the chain
       step.parentContextNode = previousStep
@@ -272,82 +306,95 @@ const compileChainNode = (queryName, chainDescriptor, config, parentContextNode,
         get() {
           throw new Error(`@ is not available for the first step in a chain`)
         },
-        configurable: true
+        configurable: true,
       })
       // First step's parent should be the chain's parent (skipping chain node)
       step.parentContextNode = parentContextNode
     }
-    
+
     // Mark that this node has semantic context
     step.hasContext = true
-    
+
     // Collect dependencies from step
     if (step.dependencies) {
-      step.dependencies.forEach(dep => node.dependencies.add(dep))
+      step.dependencies.forEach((dep) => node.dependencies.add(dep))
     }
-    
+
     node.steps.push(step)
     previousStep = step
   }
-  
+
   node.dependencies = Array.from(node.dependencies)
-  
+
   // Add getQueryResult method for accessing query results with dependency coordination
-  node.getQueryResult = async function(queryName) {
+  node.getQueryResult = async function (queryName) {
     const query = this.root.queries[queryName]
-    
+
     if (!query) {
       throw new Error(`Query '${queryName}' not found`)
     }
-    
+
     // Check if result is already available
     if (query.completed) {
       return query.value
     }
-    
+
     // Check if query is currently executing and wait for it
     if (query.executing) {
       return await query.executing
     }
-    
+
     throw new Error(`Query '${queryName}' has not been executed yet`)
   }
-  
+
   return node
 }
 
 /**
  * Compile service node
  */
-const compileServiceNode = (queryName, descriptor, config, parentContextNode, ast) => {
+const compileServiceNode = (
+  queryName,
+  descriptor,
+  config,
+  parentContextNode,
+  ast
+) => {
   const transformed = transformMethodSyntax(descriptor)
   const [serviceName, action, rawArgs = {}] = transformed.descriptor
-  
+
   // Validate service exists at compile time - fail fast
   const service = config.services[serviceName]
   if (!service) {
     throw new Error(`Service '${serviceName}' not found`)
   }
-  
+
   // Validate service type at compile time
-  if (typeof service !== 'function' && (typeof service !== 'object' || service === null || Array.isArray(service))) {
-    throw new Error(`Invalid service '${serviceName}': must be a function or object`)
+  if (
+    typeof service !== 'function' &&
+    (typeof service !== 'object' || service === null || Array.isArray(service))
+  ) {
+    throw new Error(
+      `Invalid service '${serviceName}': must be a function or object`
+    )
   }
-  
+
   // Validate method exists at compile time
   if (typeof service !== 'function' && !service[action]) {
     throw new Error(`Service method '${action}' not found`)
   }
-  
+
   // Get service method for _argtypes
-  const serviceMethod = typeof service === 'function' ? service : service[action]
-  
+  const serviceMethod =
+    typeof service === 'function' ? service : service[action]
+
   // Separate argument types
-  const { staticArgs, dependentArgs, functionArgs, reservedArgs } = separateArguments(rawArgs, config, serviceMethod._argtypes, ast)
-  
+  const { staticArgs, dependentArgs, functionArgs, reservedArgs } =
+    separateArguments(rawArgs, config, serviceMethod._argtypes, ast)
+
   // Extract dependencies from dependent args
   const dependencies = extractDependencies(dependentArgs)
-  
+
   // Create the wrapped function with all wrappers applied
   const wrappedFunction = createWrappedFunction(
     serviceName,
@@ -360,7 +407,7 @@ const compileServiceNode = (queryName, descriptor, config, parentContextNode, as
     config,
     parentContextNode
   )
-  
+
   const node = {
     type: 'service',
     reference: queryName,
@@ -375,41 +422,41 @@ const compileServiceNode = (queryName, descriptor, config, parentContextNode, as
     parent: null, // Will be set by calling context
     value: null,
     completed: false,
-    root: ast
+    root: ast,
   }
-  
+
   // Default: context is not defined for any node
   Object.defineProperty(node, 'context', {
     get() {
       throw new Error(`Context is not defined`)
     },
-    configurable: true
+    configurable: true,
   })
-  
+
   // Add getQueryResult method for accessing query results with dependency coordination
-  node.getQueryResult = async function(queryName) {
+  node.getQueryResult = async function (queryName) {
     const query = this.root.queries[queryName]
-    
+
     if (!query) {
       throw new Error(`Query '${queryName}' not found`)
     }
-    
+
     // Check if result is already available
     if (query.completed) {
       return query.value
     }
-    
+
     // Check if query is currently executing and wait for it
     if (query.executing) {
       return await query.executing
     }
-    
+
     throw new Error(`Query '${queryName}' has not been executed yet`)
   }
-  
+
   // Mark that service nodes don't have semantic context by default
   node.hasContext = false
-  
+
   return node
 }
 
@@ -420,20 +467,21 @@ const transformMethodSyntax = (descriptor) => {
   if (!Array.isArray(descriptor) || descriptor.length < 2) {
     return { descriptor, hasOn: false }
   }
-  
+
   const [target, serviceMethod, args = {}] = descriptor
-  const match = typeof serviceMethod === 'string' && serviceMethod.match(METHOD_REGEX)
-  
+  const match =
+    typeof serviceMethod === 'string' && serviceMethod.match(METHOD_REGEX)
+
   if (!match) {
     return { descriptor, hasOn: false }
   }
-  
+
   const [, serviceName, method] = match
   const newArgs = { ...args, on: target }
-  
+
   return {
     descriptor: [serviceName, method, newArgs],
-    hasOn: true
+    hasOn: true,
   }
 }
 
@@ -441,10 +489,18 @@ const transformMethodSyntax = (descriptor) => {
  * Compile function argument value based on type
  */
 const compileFunctionArgument = (value, config, ast) => {
-  if (Array.isArray(value) && value.length >= 2 && typeof value[0] === 'string') {
+  if (
+    Array.isArray(value) &&
+    value.length >= 2 &&
+    typeof value[0] === 'string'
+  ) {
     // Service descriptor
     return compileServiceFunction(value, config, ast)
-  } else if (typeof value === 'object' && !Array.isArray(value) && value !== null) {
+  } else if (
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    value !== null
+  ) {
     // Template syntax
     const templateDescriptor = ['util', 'template', value]
     return compileServiceFunction(templateDescriptor, config, ast)
@@ -462,21 +518,23 @@ const separateArguments = (args, config, argtypes, ast) => {
   const dependentArgs = {}
   const functionArgs = {}
   const reservedArgs = {}
-  
+
   if (!args || typeof args !== 'object') {
     return { staticArgs: args, dependentArgs, functionArgs, reservedArgs }
   }
-  
+
   for (const [key, value] of Object.entries(args)) {
     // Handle reserved wrapper arguments
     if (ARG_CATEGORIES.reserved.includes(key)) {
       reservedArgs[key] = value
       staticArgs[key] = value
     }
-    
+
     // Check if this is a function argument (reserved or service-declared)
-    else if (ARG_CATEGORIES.function.includes(key)
-      || argtypes?.[key]?.type === 'function') {
+    else if (
+      ARG_CATEGORIES.function.includes(key) ||
+      argtypes?.[key]?.type === 'function'
+    ) {
       const compiledFunction = compileFunctionArgument(value, config, ast)
       if (compiledFunction !== null) {
         functionArgs[key] = compiledFunction
@@ -488,54 +546,48 @@ const separateArguments = (args, config, argtypes, ast) => {
     // Check for references
     else if (containsReferences(value)) {
       dependentArgs[key] = value
-    } 
+    }
     // Everything else is static
     else {
       staticArgs[key] = value
     }
   }
-  
+
   return { staticArgs, dependentArgs, functionArgs, reservedArgs }
 }
-
-
 
 /**
  * Compile service descriptor to function with context capture
  */
 const compileServiceFunction = (descriptor, config, ast) => {
   const node = compileServiceNode(null, descriptor, config, null, ast)
-  
+
   // Function/template nodes: override context getter - they get values directly from withArgs
   Object.defineProperty(node, 'context', {
     get() {
       throw new Error(`AST node context is not available in compiled function`)
     },
-    configurable: true
+    configurable: true,
   })
-  
+
   // Return a function that executes the compiled node
   const compiledFunction = async (contextValue) => {
-    // Create a temporary context function that returns the passed contextValue
-    const contextFunction = () => contextValue
-    
     // Create a new node with context getter for this execution
     const executionNode = Object.create(node)
     Object.defineProperty(executionNode, 'context', {
-      get() { return contextValue }
+      get() {
+        return contextValue
+      },
     })
     // Execution node inherits root reference from base node
-    
-    // Bind the node with resolution context for execution
-    const boundFunction = node.wrappedFunction.bind(executionNode)
-    
+
     // Execute the wrapped function
-    return await boundFunction()
+    return await executionNode.wrappedFunction()
   }
-  
+
   // Store reference to the compiled node for nested function calls
   compiledFunction.__compiledNode = node
-  
+
   return compiledFunction
 }
 
@@ -546,15 +598,15 @@ const containsReferences = (value) => {
   if (typeof value === 'string') {
     return AT_REGEX.test(value) || DEP_REGEX.test(value) || value === '$'
   }
-  
+
   if (Array.isArray(value)) {
     return value.some(containsReferences)
   }
-  
+
   if (value && typeof value === 'object') {
     return Object.values(value).some(containsReferences)
   }
-  
+
   return false
 }
 
@@ -563,7 +615,7 @@ const containsReferences = (value) => {
  */
 const extractDependencies = (dependentArgs) => {
   const deps = new Set()
-  
+
   const extract = (value) => {
     if (typeof value === 'string') {
       const match = value.match(DEP_REGEX)
@@ -576,11 +628,10 @@ const extractDependencies = (dependentArgs) => {
       Object.values(value).forEach(extract)
     }
   }
-  
+
   Object.values(dependentArgs).forEach(extract)
   return Array.from(deps)
 }
-
 
 /**
  * Create wrapped function with all wrappers applied at compile time
@@ -594,59 +645,70 @@ const createWrappedFunction = (
   functionArgs,
   reservedArgs,
   config,
-  parentContextNode
+  _parentContextNode
 ) => {
   const service = config.services[serviceName]
-  
+
   // Create base function that calls the service (validation already done at compile time)
-  let wrappedFunction = async function(resolvedArgs) {
+  let wrappedFunction = async function (resolvedArgs) {
     // Track service usage for tearDown
-    if (this.root && this.root.usedServices) {
+    if (this.root?.usedServices) {
       this.root.usedServices.add(serviceName)
     }
-    
+
     if (typeof service === 'function') {
       return await service(action, resolvedArgs)
     } else {
       return await service[action](resolvedArgs)
     }
   }
-  
+
   // Extract configuration values
-  const timeoutMs = reservedArgs.timeout ?? 
-    config.settings?.timeout?.[serviceName] ?? 
+  const timeoutMs =
+    reservedArgs.timeout ??
+    config.settings?.timeout?.[serviceName] ??
     config.settings?.timeout?.default
   const retryCount = reservedArgs.retry ?? config.settings?.retry?.default ?? 0
-  
+
   // Build wrapper array in canonical order
   const wrappers = []
-  
+
   // 1. withDebug - debug logging (innermost, sees final resolved args)
   if (config.settings?.debug) {
-    wrappers.push(fn => withDebug(fn, serviceName, action, config.settings))
+    wrappers.push((fn) => withDebug(fn, serviceName, action, config.settings))
   }
-  
+
   // 2. withArgs - resolves @ and $ references (outermost, called first)
-  wrappers.push(fn => withArgs(fn, staticArgs, dependentArgs, functionArgs))
-  
+  wrappers.push((fn) => withArgs(fn, staticArgs, dependentArgs, functionArgs))
+
   // 3. withTimeout
   if (timeoutMs && timeoutMs > 0) {
-    wrappers.push(fn => withTimeout(fn, timeoutMs, serviceName, action))
+    wrappers.push((fn) => withTimeout(fn, timeoutMs, serviceName, action))
   }
-  
+
   // 4. withRetry
   if (retryCount > 0) {
-    wrappers.push(fn => withRetry(fn, retryCount, serviceName, action))
+    wrappers.push((fn) => withRetry(fn, retryCount, serviceName, action))
   }
-  
+
   // 5. withErrorHandling (outermost)
   if (reservedArgs.onError || reservedArgs.ignoreErrors) {
-    wrappers.push(fn => withErrorHandling(fn, reservedArgs.onError, reservedArgs.ignoreErrors, serviceName, action, config, rawArgs))
+    wrappers.push((fn) =>
+      withErrorHandling(
+        fn,
+        reservedArgs.onError,
+        reservedArgs.ignoreErrors,
+        serviceName,
+        action,
+        config,
+        rawArgs
+      )
+    )
   }
-  
+
   // Apply all wrappers using functional composition
   wrappedFunction = applyWrappers(wrappedFunction, wrappers)
-  
+
   // Return a function that can be called during execution
   return async function executeWrappedFunction() {
     // The 'this' context will be bound by the execution engine
@@ -658,9 +720,7 @@ const createWrappedFunction = (
  * Wrapper: Resolve @ and $ references at execution time
  */
 const withArgs = (fn, staticArgs, dependentArgs, functionArgs) => {
-  return async function() {
-    const node = this
-    
+  return async function () {
     // Resolve dependent arguments
     const resolvedDependent = {}
     for (const [key, value] of Object.entries(dependentArgs)) {
@@ -669,53 +729,58 @@ const withArgs = (fn, staticArgs, dependentArgs, functionArgs) => {
         // Defer $ resolution until service execution by storing a special marker
         resolvedDependent[key] = { __deferredDollar: true }
       } else {
-        resolvedDependent[key] = await resolveValue(value, node)
+        resolvedDependent[key] = await resolveValue(value, this)
       }
     }
-    
+
     // Resolve function arguments
     const resolvedFunctions = {}
     for (const [key, func] of Object.entries(functionArgs)) {
       if (typeof func === 'function') {
-        // For services that expect function arguments (like util.map), 
+        // For services that expect function arguments (like util.map),
         // wrap the function to maintain context chain
         if (ARG_CATEGORIES.function.includes(key) || func.__compiledNode) {
           // Create a context-aware wrapper that creates virtual nodes for iteration
           resolvedFunctions[key] = async (itemValue) => {
             // Get the base compiled node
             const baseNode = func.__compiledNode
-            
+
             if (baseNode) {
               // Create virtual node for this iteration using prototype chain
               const virtualNode = Object.create(baseNode)
-              
+
               // Set up context getter to return iteration value
               Object.defineProperty(virtualNode, 'context', {
-                get() { return itemValue },
-                configurable: true
+                get() {
+                  return itemValue
+                },
+                configurable: true,
               })
-              
+
               // Set up parent context getter to point to current executing node
-              // CRITICAL: Use 'this' (the current executing node) as parent, 
+              // CRITICAL: Use 'this' (the current executing node) as parent,
               // which could be another virtual node from a parent iteration
               const currentNode = this
-              
+
               // If the current node is a virtual node, we're in a nested iteration
               // and should chain to it. Otherwise use the base node.
               Object.defineProperty(virtualNode, 'parentContextNode', {
-                get() { return currentNode }
+                get() {
+                  return currentNode
+                },
               })
-              
+
               // Add debugging flag and context marker
               virtualNode.isVirtual = true
               virtualNode.hasContext = true
-              
+
               // Set root reference (virtual node inherits from parent)
               virtualNode.root = this.root
-              
+
               // Add execute method for cleaner calling
-              virtualNode.execute = () => virtualNode.wrappedFunction.call(virtualNode)
-              
+              virtualNode.execute = () =>
+                virtualNode.wrappedFunction.call(virtualNode)
+
               // Execute using virtual node
               return await virtualNode.execute()
             } else {
@@ -725,32 +790,34 @@ const withArgs = (fn, staticArgs, dependentArgs, functionArgs) => {
           }
         } else {
           // Call function with current context for other cases
-          const contextValue = getContext(node, 0)  // @ = level 0
+          const contextValue = getContext(this, 0) // @ = level 0
           // Templates and functions now have identical runtime signatures
           resolvedFunctions[key] = await func(contextValue)
         }
       }
     }
-    
+
     // Combine all resolved arguments
     const resolvedArgs = {
       ...staticArgs,
       ...resolvedDependent,
-      ...resolvedFunctions
+      ...resolvedFunctions,
     }
-    
+
     // Auto-inject settings for services that expect them (like util.print)
     if (!resolvedArgs.settings && this.root?.settings) {
       resolvedArgs.settings = this.root.settings
     }
-    
+
     // Resolve deferred $ arguments at service execution time
     for (const [key, value] of Object.entries(resolvedArgs)) {
       if (value && typeof value === 'object' && value.__deferredDollar) {
         // Resolve $ at execution time to capture current state
         const results = {}
-        if (node.root && node.root.queries) {
-          for (const [queryName, queryNode] of Object.entries(node.root.queries)) {
+        if (this.root?.queries) {
+          for (const [queryName, queryNode] of Object.entries(
+            this.root.queries
+          )) {
             if (queryNode.completed) {
               results[queryName] = queryNode.value
             }
@@ -759,15 +826,7 @@ const withArgs = (fn, staticArgs, dependentArgs, functionArgs) => {
         resolvedArgs[key] = results
       }
     }
-    
-    // Auto-inject snapshotRestoreTimestamp for util.snapshot
-    if (node.serviceName === 'util' && node.action === 'snapshot') {
-      const snapshotRestoreTimestamp = node.root?.queries?.snapshotRestoreTimestamp?.value
-      if (snapshotRestoreTimestamp) {
-        resolvedArgs.snapshotRestoreTimestamp = snapshotRestoreTimestamp
-      }
-    }
-    
+
     return await fn.call(this, resolvedArgs)
   }
 }
@@ -789,7 +848,7 @@ const countAtSymbols = (str) => {
  */
 const getContext = (node, level, path) => {
   let current = node
-  
+
   // Walk up the context chain
   for (let i = 0; i <= level; i++) {
     if (i === 0 && level === 0) {
@@ -807,30 +866,34 @@ const getContext = (node, level, path) => {
       // @@, @@@, etc. = walk up parent chain
       current = current.parentContextNode
       if (!current) {
-        throw new Error(`${'@'.repeat(level + 1)} not available - context not deep enough (only ${i} levels available)`)
+        throw new Error(
+          `${'@'.repeat(level + 1)} not available - context not deep enough (only ${i} levels available)`
+        )
       }
     }
     // For i === 0 && level > 0, continue to next iteration to walk up
   }
-  
+
   // For higher levels (@@, @@@, etc.), get the value from the parent node
   let value
   try {
     value = current.context
-  } catch (e) {
+  } catch (_e) {
     // If context getter fails, try using stored value
     if (current.value !== undefined) {
       value = current.value
     } else {
-      throw new Error(`Context value not available for ${'@'.repeat(level + 1)}`)
+      throw new Error(
+        `Context value not available for ${'@'.repeat(level + 1)}`
+      )
     }
   }
-  
+
   // Apply JSONPath if provided
   if (path) {
     return retrieve(path, value)
   }
-  
+
   return value
 }
 
@@ -843,24 +906,26 @@ const resolveValue = async (value, node) => {
     const atMatch = value.match(AT_REGEX)
     if (atMatch) {
       const atCount = countAtSymbols(value)
-      const level = atCount - 1  // Convert to 0-based index
+      const level = atCount - 1 // Convert to 0-based index
       const path = value.substring(atMatch[0].length)
-      
+
       if (path) {
         // Handle field access like @.field or @@.field
-        const jsonPath = path.startsWith('.') ? '$' + path : '$.' + path
+        const jsonPath = path.startsWith('.') ? `$${path}` : `$.${path}`
         return getContext(node, level, jsonPath)
       } else {
         // Handle pure @ symbols
         return getContext(node, level)
       }
     }
-    
+
     // Handle bare $ (all completed queries)
     if (value === '$') {
-      if (node && node.root && node.root.queries) {
+      if (node?.root?.queries) {
         const results = {}
-        for (const [queryName, queryNode] of Object.entries(node.root.queries)) {
+        for (const [queryName, queryNode] of Object.entries(
+          node.root.queries
+        )) {
           if (queryNode.completed) {
             results[queryName] = queryNode.value
           }
@@ -869,42 +934,46 @@ const resolveValue = async (value, node) => {
       }
       return {}
     }
-    
+
     // Handle $ references
     const depMatch = value.match(DEP_REGEX)
     if (depMatch) {
       // Parse $.queryName.field notation
-      if (node && node.getQueryResult) {
+      if (node?.getQueryResult) {
         const parts = value.substring(2).split('.')
         const queryName = parts[0]
-        
+
         // Get the query result using the node's method
         const queryResult = await node.getQueryResult(queryName)
-        
+
         if (parts.length === 1) {
           // Just $.queryName
           return queryResult
         } else {
           // $.queryName.field.subfield - use retrieve for field access
-          const fieldPath = '$.' + parts.slice(1).join('.')
+          const fieldPath = `$.${parts.slice(1).join('.')}`
           return retrieve(fieldPath, queryResult)
         }
       }
       // Fallback - return as-is if no getQueryResult method
       return value
     }
-    
+
     return value
   }
-  
+
   if (Array.isArray(value)) {
-    return Promise.all(value.map(v => resolveValue(v, node)))
+    return Promise.all(value.map((v) => resolveValue(v, node)))
   }
-  
+
   if (value && typeof value === 'object') {
-    return await transformObjectAsync(value, (val) => resolveValue(val, node), node)
+    return await transformObjectAsync(
+      value,
+      (val) => resolveValue(val, node),
+      node
+    )
   }
-  
+
   return value
 }
 
@@ -912,29 +981,35 @@ const resolveValue = async (value, node) => {
  * Wrapper: Debug logging with colored output
  */
 const withDebug = (fn, serviceName, action, settings) => {
-  return async function(args) {
+  return async function (args) {
     const startTime = Date.now()
-    
+
     if (settings.debug) {
       const color = getServiceColor(serviceName)
       const colorCode = ANSI_COLORS[color] || ''
       const resetCode = colorCode ? ANSI_COLORS.reset : ''
-      
-      console.log(`${colorCode}[${serviceName}.${action}] Called with:${resetCode}`, inspect(args, settings.inspect || {}))
+
+      console.log(
+        `${colorCode}[${serviceName}.${action}] Called with:${resetCode}`,
+        inspect(args, settings.inspect || {})
+      )
     }
-    
+
     try {
       const result = await fn.call(this, args)
-      
+
       if (settings.debug) {
         const duration = Date.now() - startTime
         const color = getServiceColor(serviceName)
         const colorCode = ANSI_COLORS[color] || ''
         const resetCode = colorCode ? ANSI_COLORS.reset : ''
-        
-        console.log(`${colorCode}[${serviceName}.${action}] Completed in ${duration}ms:${resetCode}`, inspect(result, settings.inspect || {}))
+
+        console.log(
+          `${colorCode}[${serviceName}.${action}] Completed in ${duration}ms:${resetCode}`,
+          inspect(result, settings.inspect || {})
+        )
       }
-      
+
       return result
     } catch (error) {
       if (settings.debug) {
@@ -942,8 +1017,11 @@ const withDebug = (fn, serviceName, action, settings) => {
         const color = getServiceColor(serviceName)
         const colorCode = ANSI_COLORS[color] || ''
         const resetCode = colorCode ? ANSI_COLORS.reset : ''
-        
-        console.log(`${colorCode}[${serviceName}.${action}] Failed after ${duration}ms:${resetCode}`, error.message)
+
+        console.log(
+          `${colorCode}[${serviceName}.${action}] Failed after ${duration}ms:${resetCode}`,
+          error.message
+        )
       }
       throw error
     }
@@ -954,13 +1032,17 @@ const withDebug = (fn, serviceName, action, settings) => {
  * Wrapper: Timeout
  */
 const withTimeout = (fn, timeoutMs, serviceName, action) => {
-  return async function(args) {
+  return async function (args) {
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(() => {
-        reject(new Error(`Service '${serviceName}.${action}' timed out after ${timeoutMs}ms`))
+        reject(
+          new Error(
+            `Service '${serviceName}.${action}' timed out after ${timeoutMs}ms`
+          )
+        )
       }, timeoutMs)
     })
-    
+
     return Promise.race([fn.call(this, args), timeoutPromise])
   }
 }
@@ -969,21 +1051,23 @@ const withTimeout = (fn, timeoutMs, serviceName, action) => {
  * Wrapper: Retry logic
  */
 const withRetry = (fn, retryCount, serviceName, action) => {
-  return async function(args) {
+  return async function (args) {
     let lastError
-    
+
     for (let attempt = 1; attempt <= retryCount + 1; attempt++) {
       try {
         return await fn.call(this, args)
       } catch (error) {
         lastError = error
-        
+
         if (attempt <= retryCount) {
-          console.error(`Service '${serviceName}.${action}' failed (attempt ${attempt}/${retryCount + 1}), retrying...`)
+          console.error(
+            `Service '${serviceName}.${action}' failed (attempt ${attempt}/${retryCount + 1}), retrying...`
+          )
         }
       }
     }
-    
+
     throw lastError
   }
 }
@@ -991,28 +1075,37 @@ const withRetry = (fn, retryCount, serviceName, action) => {
 /**
  * Wrapper: Error handling
  */
-const withErrorHandling = (fn, onErrorDescriptor, ignoreErrors, serviceName, action, config, rawArgs) => {
-  return async function(resolvedArgs) {
+const withErrorHandling = (
+  fn,
+  onErrorDescriptor,
+  ignoreErrors,
+  serviceName,
+  action,
+  config,
+  rawArgs
+) => {
+  return async function (resolvedArgs) {
     try {
       return await fn.call(this, resolvedArgs)
     } catch (error) {
       // Prepare complete args including defaults for error context
       const completeArgs = { ...rawArgs }
-      
+
       // Add resolved timeout if applicable
-      const timeoutMs = rawArgs.timeout ?? 
-        config.settings?.timeout?.[serviceName] ?? 
+      const timeoutMs =
+        rawArgs.timeout ??
+        config.settings?.timeout?.[serviceName] ??
         config.settings?.timeout?.default
       if (timeoutMs && timeoutMs > 0) {
         completeArgs.timeout = timeoutMs
       }
-      
-      // Add retry if applicable  
+
+      // Add retry if applicable
       const retryCount = rawArgs.retry ?? config.settings?.retry?.default ?? 0
       if (retryCount > 0) {
         completeArgs.retry = retryCount
       }
-      
+
       // Prepare error context with complete args + query name
       const errorContext = {
         error: error.message,
@@ -1020,21 +1113,25 @@ const withErrorHandling = (fn, onErrorDescriptor, ignoreErrors, serviceName, act
         serviceName,
         action,
         args: completeArgs,
-        queryName: this?.reference || 'unknown'
+        queryName: this?.reference || 'unknown',
       }
-      
+
       // Handle with onError if provided
       if (onErrorDescriptor) {
         try {
           // Compile the error handler
-          const errorHandler = compileServiceFunction(onErrorDescriptor, config, this.root)
+          const errorHandler = compileServiceFunction(
+            onErrorDescriptor,
+            config,
+            this.root
+          )
           const handlerResult = await errorHandler(errorContext)
-          
+
           // If ignoreErrors is true, run handler for side effects but return null
           if (ignoreErrors) {
             return null
           }
-          
+
           // Otherwise return the handler result
           return handlerResult
         } catch (handlerError) {
@@ -1045,12 +1142,12 @@ const withErrorHandling = (fn, onErrorDescriptor, ignoreErrors, serviceName, act
           return null
         }
       }
-      
+
       // Ignore errors if requested
       if (ignoreErrors) {
         return null
       }
-      
+
       // Re-throw original error
       throw error
     }
@@ -1064,37 +1161,41 @@ const resolveDependencies = (queries) => {
   const order = []
   const visited = new Set()
   const visiting = new Set()
-  
+
   const visit = (queryName) => {
     if (visited.has(queryName)) return
-    
+
     if (visiting.has(queryName)) {
-      throw new Error(`Circular dependency detected involving query '${queryName}'`)
+      throw new Error(
+        `Circular dependency detected involving query '${queryName}'`
+      )
     }
-    
+
     visiting.add(queryName)
-    
+
     const query = queries[queryName]
     if (!query) {
-      throw new Error(`Query '${queryName}' not found (referenced as dependency)`)
+      throw new Error(
+        `Query '${queryName}' not found (referenced as dependency)`
+      )
     }
-    
+
     // Visit dependencies first
     if (query.dependencies) {
       for (const dep of query.dependencies) {
         visit(dep)
       }
     }
-    
+
     visiting.delete(queryName)
     visited.add(queryName)
     order.push(queryName)
   }
-  
+
   // Visit all queries
   for (const queryName of Object.keys(queries)) {
     visit(queryName)
   }
-  
+
   return order
 }

@@ -3,7 +3,8 @@
  * Provides map, filter, flatMap, concat and other operations
  */
 
-import retrieve from './retrieve.js'
+import path from 'node:path'
+import fs from 'fs-extra'
 
 /**
  * Available color names for util:print service
@@ -16,7 +17,7 @@ const COLORS = {
   magenta: '\x1b[35m',
   cyan: '\x1b[36m',
   white: '\x1b[37m',
-  reset: '\x1b[0m'
+  reset: '\x1b[0m',
 }
 
 /**
@@ -35,9 +36,28 @@ const validateType = (value, expectedType, name) => {
   if (expectedType === 'array' && !Array.isArray(value)) {
     throw new Error(`${name}: expected array, got ${typeof value}`)
   }
-  if (expectedType === 'object' && (!value || typeof value !== 'object' || Array.isArray(value))) {
+  if (
+    expectedType === 'object' &&
+    (!value || typeof value !== 'object' || Array.isArray(value))
+  ) {
     throw new Error(`${name}: expected object, got ${typeof value}`)
   }
+}
+
+// Check if we should skip based on timestamp
+async function shouldSkipSnapshot(timestamp, out) {
+  if (timestamp && (await fs.pathExists(out))) {
+    try {
+      const existingSnapshot = JSON.parse(await fs.readFile(out, 'utf8'))
+      if (existingSnapshot.timestamp === snapshotRestoreTimestamp) {
+        // Skip - this snapshot was already taken
+        return true
+      }
+    } catch (_error) {
+      return false
+    }
+  }
+  return false
 }
 
 /**
@@ -76,7 +96,7 @@ const util = {
    * Map and then flatten the results
    */
   async flatMap({ on, fn }) {
-    const results = await util.map({on, fn})
+    const results = await util.map({ on, fn })
     return results.flat()
   },
 
@@ -147,7 +167,7 @@ const util = {
 
     const result = {}
     for (const field of fields) {
-      if (on.hasOwnProperty(field)) {
+      if (Object.hasOwn(on, field)) {
         result[field] = on[field]
       }
     }
@@ -160,7 +180,8 @@ const util = {
    * Uses query-level inspect settings for consistent formatting
    */
   async print({ on, settings, color, ts = true }) {
-    if (settings && typeof settings !== 'object') throw new Error("`settings` if provided must be an object")
+    if (settings && typeof settings !== 'object')
+      throw new Error('`settings` if provided must be an object')
 
     // Format timestamp if enabled
     const timestamp = ts ? `[${new Date().toISOString()}] ` : ''
@@ -183,7 +204,7 @@ const util = {
     }
 
     // use util.inspect with provided settings
-    const util = await import('util')
+    const util = await import('node:util')
     let formatted
 
     if (typeof on === 'string') {
@@ -198,7 +219,7 @@ const util = {
     const resetCode = colorCode ? COLORS.reset : ''
 
     // Print with formatting and color
-    process.stdout.write(colorCode + timestamp + formatted + resetCode + '\n')
+    process.stdout.write(`${colorCode + timestamp + formatted + resetCode}\n`)
 
     // Return the original value for chaining
     return on
@@ -206,69 +227,40 @@ const util = {
 
   /**
    * Save data to a JSON snapshot file
-   * 
+   *
    * Design: This service supports two distinct arguments to separate timing control from data capture:
    * - `on`: Controls when the snapshot executes (dependency timing) - what to wait for
    * - `capture`: Controls what data to save - what to capture
-   * 
+   *
    * Common patterns:
-   * - `capture: '$'` - Captures all completed queries at execution time (no waiting)
+   * - `capture: '$'` - Captures all completed queries at service execution time
    * - `on: '$.someQuery'` - Waits for someQuery to complete before executing
+   * - `on: '@'` - Waits for a step in a chain (should be unnecessary, because chains run in fixed order anyway)
    * - Default behavior: If no `capture` specified, captures the `on` value
-   * 
-   * The `$` reference is special - it resolves to "what we have right now" without creating
-   * dependencies or waiting. This allows capturing current execution state at any point.
-   * 
-   * @param {Object} args - Arguments  
-   * @param {*} args.on - Data being passed through the chain (controls timing/dependencies)
-   * @param {*} args.capture - Data to capture in snapshot (resolved from MicroQL context)
-   * @param {string} args.out - Output file path
-   * @param {string} [args.snapshotRestoreTimestamp] - Auto-injected timestamp for skip logic
-   * @returns {*} Returns the on argument for chaining
+   *
+   * The `$` reference unlike most paths, does not imply waiting for any queries to finish.
+   * This allows capturing current execution state at any point.
    */
-  async snapshot({ on, capture, out, snapshotRestoreTimestamp }) {
+  async snapshot({ on, capture, out }) {
     if (!out) {
       throw new Error('snapshot requires "out" argument specifying file path')
     }
+    capture ??= on
 
-    // Determine what to capture
-    let dataToCapture
-    
-    if (capture !== undefined) {
-      // Use the resolved capture value ($ will be resolved to all queries by argument resolution)
-      dataToCapture = capture
-    } else {
-      // Default: capture current context (on)
-      dataToCapture = on
-    }
-
-    // Check if we should skip based on timestamp
-    const fs = await import('fs-extra')
-    const path = await import('path')
-    
     // Skip logic: if we have a restore timestamp and file exists with same timestamp
-    if (snapshotRestoreTimestamp && await fs.default.pathExists(out)) {
-      try {
-        const existingSnapshot = JSON.parse(await fs.default.readFile(out, 'utf8'))
-        if (existingSnapshot.timestamp === snapshotRestoreTimestamp) {
-          // Skip - this snapshot was already taken
-          return on
-        }
-      } catch (error) {
-        // If we can't read existing snapshot, proceed with saving
-      }
-    }
+    if (await shouldSkipSnapshot(capture.snapshotRestoreTimestamp, out))
+      return on
 
     const snapshotData = {
       timestamp: new Date().toISOString(),
-      results: dataToCapture
+      results: capture,
     }
-    
+
     // Ensure directory exists
-    await fs.default.ensureDir(path.default.dirname(out))
-    
+    await fs.ensureDir(path.dirname(out))
+
     // Write snapshot file
-    await fs.default.writeFile(out, JSON.stringify(snapshotData, null, 2))
+    await fs.writeFile(out, JSON.stringify(snapshotData, null, 2))
 
     // Return the on argument for chaining
     return on
@@ -283,18 +275,19 @@ const util = {
    */
   async recordFailure({ on, location }) {
     if (!location) {
-      throw new Error('recordFailure requires "location" argument specifying directory path')
+      throw new Error(
+        'recordFailure requires "location" argument specifying directory path'
+      )
     }
 
     if (!on || typeof on !== 'object') {
-      throw new Error('recordFailure expects error context from MicroQL onError')
+      throw new Error(
+        'recordFailure expects error context from MicroQL onError'
+      )
     }
 
-    const fs = await import('fs-extra')
-    const path = await import('path')
-    
     // Ensure directory exists
-    await fs.default.ensureDir(location)
+    await fs.ensureDir(location)
 
     // Create failure record
     const failureRecord = {
@@ -305,17 +298,19 @@ const util = {
       queryName: on.queryName,
       args: on.args,
       // Include stack trace if available
-      stack: on.originalError?.stack
+      stack: on.originalError?.stack,
     }
 
     // Generate filename with timestamp
     const filename = `failure-${Date.now()}.json`
-    const filePath = path.default.join(location, filename)
+    const filePath = path.join(location, filename)
 
     // Write failure record
-    await fs.default.writeFile(filePath, JSON.stringify(failureRecord, null, 2))
+    await fs.writeFile(filePath, JSON.stringify(failureRecord, null, 2))
 
-    console.error(`❌ Failure recorded: ${path.default.relative(process.cwd(), filePath)}`)
+    console.error(
+      `❌ Failure recorded: ${path.relative(process.cwd(), filePath)}`
+    )
 
     // Return the error context for potential chaining
     return on
@@ -329,28 +324,28 @@ const util = {
     // Remove any non-template arguments (like auto-injected settings)
     const { settings, ...template } = templateArgs
     return template
-  }
+  },
 }
 
 // Argument type metadata for MicroQL function compilation
 util.map._argtypes = {
-  fn: { type: 'function' }
+  fn: { type: 'function' },
 }
 
 util.filter._argtypes = {
-  predicate: { type: 'function' }
+  predicate: { type: 'function' },
 }
 
 util.flatMap._argtypes = {
-  fn: { type: 'function' }
+  fn: { type: 'function' },
 }
 
 util.when._argtypes = {
-  test: { type: 'function' }  // Test can be a service call
+  test: { type: 'function' }, // Test can be a service call
 }
 
 util.print._argtypes = {
-  settings: {type: 'settings'}
+  settings: { type: 'settings' },
 }
 
 util.snapshot._argtypes = {

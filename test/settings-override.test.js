@@ -1,5 +1,5 @@
-import { describe, it, beforeEach, afterEach } from 'mocha'
-import assert from 'assert'
+import assert from 'node:assert'
+import { afterEach, beforeEach, describe, it } from 'mocha'
 import query from '../query.js'
 import util from '../util.js'
 
@@ -11,7 +11,7 @@ describe('Settings Override Tests', () => {
     // Capture stdout.write calls
     capturedOutput = []
     originalWrite = process.stdout.write
-    process.stdout.write = function(data) {
+    process.stdout.write = (data) => {
       capturedOutput.push(data)
       return true
     }
@@ -32,30 +32,36 @@ describe('Settings Override Tests', () => {
         inspect: {
           maxArrayLength: 2,
           depth: 1,
-          colors: false
-        }
+          colors: false,
+        },
       },
       query: {
-        result: ['util', 'print', {
-          on: '$.given',
-          color: 'blue',
-          ts: false,
-          settings: {
-            inspect: {
-              maxArrayLength: 10  // Override just this setting
-            }
-          }
-        }]
-      }
+        result: [
+          'util',
+          'print',
+          {
+            on: '$.given',
+            color: 'blue',
+            ts: false,
+            settings: {
+              inspect: {
+                maxArrayLength: 10, // Override just this setting
+              },
+            },
+          },
+        ],
+      },
     })
 
     // Should have captured output
     assert(capturedOutput.length > 0, 'Should have captured output')
-    
+
     // Find the blue colored output
-    const blueOutput = capturedOutput.find(output => output.includes('\x1b[34m'))
+    const blueOutput = capturedOutput.find((output) =>
+      output.includes('\x1b[34m')
+    )
     assert(blueOutput, 'Should find blue colored output')
-    
+
     // Should show all items, not truncated (because maxArrayLength was overridden to 10)
     assert(blueOutput.includes('item1'), 'Should contain item1')
     assert(blueOutput.includes('item5'), 'Should contain item5')
@@ -67,10 +73,10 @@ describe('Settings Override Tests', () => {
       level1: {
         level2: {
           level3: {
-            deep: 'value'
-          }
-        }
-      }
+            deep: 'value',
+          },
+        },
+      },
     }
 
     await query({
@@ -78,32 +84,38 @@ describe('Settings Override Tests', () => {
       services: { util },
       settings: {
         inspect: {
-          depth: 1,  // This should be preserved
-          maxArrayLength: 5,  // This should be overridden
-          colors: false
-        }
+          depth: 1, // This should be preserved
+          maxArrayLength: 5, // This should be overridden
+          colors: false,
+        },
       },
       query: {
-        result: ['util', 'print', {
-          on: '$.given',
-          ts: false,
-          settings: {
-            inspect: {
-              maxArrayLength: 20  // Override only this
-            }
-          }
-        }]
-      }
+        result: [
+          'util',
+          'print',
+          {
+            on: '$.given',
+            ts: false,
+            settings: {
+              inspect: {
+                maxArrayLength: 20, // Override only this
+              },
+            },
+          },
+        ],
+      },
     })
 
     // Should have output showing depth limitation (depth: 1 preserved)
     // but not array length limitation (maxArrayLength overridden)
     assert(capturedOutput.length > 0, 'Should have captured output')
     const output = capturedOutput.join('')
-    
+
     // Should show truncation due to depth: 1 setting being preserved
-    assert(output.includes('[Object]') || output.includes('level2:'), 
-           'Should show depth limitation from preserved setting')
+    assert(
+      output.includes('[Object]') || output.includes('level2:'),
+      'Should show depth limitation from preserved setting'
+    )
   })
 
   it('should work with nested setting overrides', async () => {
@@ -114,22 +126,26 @@ describe('Settings Override Tests', () => {
         inspect: {
           depth: 2,
           maxStringLength: 10,
-          colors: false
+          colors: false,
         },
-        debug: false
+        debug: false,
       },
       query: {
-        result: ['util', 'print', {
-          on: '$.given',
-          ts: false,
-          settings: {
-            inspect: {
-              maxStringLength: 100  // Override nested setting
-            }
-            // debug: false should be preserved from query settings
-          }
-        }]
-      }
+        result: [
+          'util',
+          'print',
+          {
+            on: '$.given',
+            ts: false,
+            settings: {
+              inspect: {
+                maxStringLength: 100, // Override nested setting
+              },
+              // debug: false should be preserved from query settings
+            },
+          },
+        ],
+      },
     })
 
     assert(capturedOutput.length > 0, 'Should have captured output')
@@ -143,24 +159,29 @@ describe('Settings Override Tests', () => {
       services: { util },
       settings: {
         inspect: {
-          depth: 1
-        }
+          depth: 1,
+        },
       },
       query: {
-        result: ['util', 'print', {
-          on: '$.given',
-          ts: false,
-          settings: {
-            inspect: {
-              depth: 1,  // Keep existing
-              compact: true  // Add new setting
+        result: [
+          'util',
+          'print',
+          {
+            on: '$.given',
+            ts: false,
+            settings: {
+              inspect: {
+                depth: 1, // Keep existing
+                compact: true, // Add new setting
+              },
+              newBranch: {
+                // Completely new settings branch
+                customSetting: 'value',
+              },
             },
-            newBranch: {  // Completely new settings branch
-              customSetting: 'value'
-            }
-          }
-        }]
-      }
+          },
+        ],
+      },
     })
 
     // Should work without errors

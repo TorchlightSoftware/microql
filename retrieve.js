@@ -12,7 +12,7 @@ export default function retrieve(path, source) {
 
   try {
     let findings = jp.query(source, query)
-    
+
     // Apply post-processing options
     for (const option of opts) {
       switch (option) {
@@ -29,7 +29,7 @@ export default function retrieve(path, source) {
           break
       }
     }
-    
+
     return findings
   } catch (e) {
     return { error: e.message, reason: 'jsonpath', path }

@@ -10,9 +10,7 @@
         "dependencies": []
       }
     },
-    "executionOrder": [
-      "result"
-    ],
+    "executionOrder": ["result"],
     "settings": {
       "timeout": {
         "default": 5000

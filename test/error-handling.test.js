@@ -1,4 +1,4 @@
-import assert from 'assert'
+import assert from 'node:assert'
 import query from '../index.js'
 
 describe('Error Handling Tests', () => {
@@ -9,16 +9,16 @@ describe('Error Handling Tests', () => {
     },
     succeed: async () => {
       return { success: true }
-    }
+    },
   }
-  
+
   const logService = {
     logError: async ({ on }) => {
       const errorContext = on
       return {
         logged: true,
         error: errorContext.error,
-        service: `${errorContext.serviceName}.${errorContext.action}`
+        service: `${errorContext.serviceName}.${errorContext.action}`,
       }
     },
     logQueryError: async ({ on }) => {
@@ -26,9 +26,9 @@ describe('Error Handling Tests', () => {
       return {
         queryLogged: true,
         error: errorContext.error,
-        queryName: errorContext.queryName
+        queryName: errorContext.queryName,
       }
-    }
+    },
   }
 
   describe('Service-Level Error Handling', () => {
@@ -36,133 +36,142 @@ describe('Error Handling Tests', () => {
       const config = {
         services: { error: errorService, log: logService },
         query: {
-          result: ['error', 'fail', {
-            onError: ['log', 'logError', { on: '@' }]
-          }]
-        }
+          result: [
+            'error',
+            'fail',
+            {
+              onError: ['log', 'logError', { on: '@' }],
+            },
+          ],
+        },
       }
-      
+
       const result = await query(config)
       assert.deepStrictEqual(result.result, {
         logged: true,
         error: 'Service failed',
-        service: 'error.fail'
+        service: 'error.fail',
       })
     })
-    
+
     it('should ignore errors when ignoreErrors is true', async () => {
       const config = {
         services: { error: errorService },
         query: {
           failedQuery: ['error', 'fail', { ignoreErrors: true }],
-          successQuery: ['error', 'succeed', {}]
+          successQuery: ['error', 'succeed', {}],
         },
-        select: ['failedQuery', 'successQuery']
+        select: ['failedQuery', 'successQuery'],
       }
-      
+
       const result = await query(config)
       assert.strictEqual(result.failedQuery, null)
       assert.deepStrictEqual(result.successQuery, { success: true })
     })
-    
+
     it('should work with both onError and ignoreErrors', async () => {
       let errorLogged = false
-      
+
       const customLog = {
         track: async ({ on }) => {
           errorLogged = true
           return { tracked: true }
-        }
+        },
       }
-      
+
       const config = {
         services: { error: errorService, customLog },
         query: {
-          result: ['error', 'fail', {
-            onError: ['customLog', 'track', { on: '@' }],
-            ignoreErrors: true
-          }]
-        }
+          result: [
+            'error',
+            'fail',
+            {
+              onError: ['customLog', 'track', { on: '@' }],
+              ignoreErrors: true,
+            },
+          ],
+        },
       }
-      
+
       const result = await query(config)
       assert.strictEqual(result.result, null)
       assert.strictEqual(errorLogged, true)
     })
   })
-  
+
   describe('Query-Level Error Handling', () => {
     it('should call query-level onError for unhandled errors', async () => {
       const config = {
         services: { error: errorService, log: logService },
         query: {
-          willFail: ['error', 'fail', {}]
+          willFail: ['error', 'fail', {}],
         },
-        onError: ['log', 'logQueryError', { on: '@' }]
+        onError: ['log', 'logQueryError', { on: '@' }],
       }
-      
-      await assert.rejects(
-        () => query(config),
-        /Service failed/
-      )
+
+      await assert.rejects(() => query(config), /Service failed/)
     })
-    
+
     it('should handle errors in nested service chains', async () => {
       const chainService = {
         step1: async () => ({ value: 1 }),
         step2: async () => {
           throw new Error('Chain step failed')
-        }
+        },
       }
-      
+
       const config = {
         services: { chain: chainService },
         query: {
           chained: [
             ['chain', 'step1', {}],
-            ['chain', 'step2', { ignoreErrors: true }]
-          ]
-        }
+            ['chain', 'step2', { ignoreErrors: true }],
+          ],
+        },
       }
-      
+
       const result = await query(config)
       assert.strictEqual(result.chained, null)
     })
   })
-  
+
   describe('Error Context', () => {
     it('should provide complete error context to handlers', async () => {
       let capturedContext = null
-      
+
       const captureService = {
         capture: async ({ on }) => {
           capturedContext = on
           return { captured: true }
-        }
+        },
       }
-      
+
       const config = {
         services: { error: errorService, capture: captureService },
         query: {
-          testQuery: ['error', 'fail', {
-            someArg: 'value',
-            onError: ['capture', 'capture', { on: '@' }],
-            ignoreErrors: true
-          }]
-        }
+          testQuery: [
+            'error',
+            'fail',
+            {
+              someArg: 'value',
+              onError: ['capture', 'capture', { on: '@' }],
+              ignoreErrors: true,
+            },
+          ],
+        },
       }
-      
+
       await query(config)
-      
+
       assert.ok(capturedContext)
       assert.strictEqual(capturedContext.error, 'Service failed')
       assert.strictEqual(capturedContext.serviceName, 'error')
       assert.strictEqual(capturedContext.action, 'fail')
-      assert.deepStrictEqual(capturedContext.args, { 
-        someArg: 'value', 
+      assert.deepStrictEqual(capturedContext.args, {
+        someArg: 'value',
         timeout: 5000,
         onError: ['capture', 'capture', { on: '@' }],
-        ignoreErrors: true
+        ignoreErrors: true,
       })
       assert.strictEqual(capturedContext.queryName, 'testQuery')
     })

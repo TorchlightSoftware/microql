@@ -6,7 +6,10 @@
   "type": "module",
   "scripts": {
     "test": "mocha",
-    "callgraph": "./generate-callgraph.sh"
+    "callgraph": "./generate-callgraph.sh",
+    "prepare": "husky",
+    "lint": "npx @biomejs/biome check .",
+    "lint:fix": "npx @biomejs/biome check --write ."
   },
   "repository": {
     "type": "git",
@@ -36,6 +39,8 @@
     "jsonpath": "^1.1.1"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.1.1",
+    "husky": "^9.1.7",
     "mocha": "^11.7.0"
   }
 }

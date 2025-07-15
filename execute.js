@@ -1,6 +1,6 @@
 /**
  * @fileoverview MicroQL AST Execution Engine
- * 
+ *
  * Simple traversal and execution of pre-compiled AST nodes.
  * All compilation, transformation, and wrapper application happens at compile time.
  */
@@ -17,7 +17,7 @@ export const executeAST = async (ast, given, select) => {
   if (given !== undefined && ast.queries.given) {
     ast.queries.given.value = given
   }
-  
+
   /**
    * Execute a single query by name
    */
@@ -26,32 +26,32 @@ export const executeAST = async (ast, given, select) => {
     if (!queryNode) {
       throw new Error(`Query '${queryName}' not found`)
     }
-    
+
     // Return existing result if already completed
     if (queryNode.completed) {
       return queryNode.value
     }
-    
+
     // Return existing promise if already executing
     if (queryNode.executing) {
       return queryNode.executing
     }
-    
+
     // Create promise for this execution
     const promise = executeQueryNode(queryNode)
-    
+
     // Track the promise on the node
     queryNode.executing = promise
-    
+
     // Store result when complete
     const result = await promise
     queryNode.value = result
     queryNode.completed = true
     delete queryNode.executing // Clean up the promise
-    
+
     return result
   }
-  
+
   /**
    * Execute a query node (handles different node types)
    */
@@ -60,29 +60,29 @@ export const executeAST = async (ast, given, select) => {
       case 'resolved':
         // Pre-resolved queries (like given) - return stored value
         return node.value
-        
+
       case 'alias':
         // Execute the target query
         return await executeQuery(node.target)
-        
+
       case 'service':
         // Execute the wrapped function (node has direct AST access)
         return await node.wrappedFunction.call(node)
-        
+
       case 'chain':
         return await executeChainNode(node)
-        
+
       default:
         throw new Error(`Unknown node type: ${node.type}`)
     }
   }
-  
+
   /**
    * Execute a chain node
    */
   const executeChainNode = async (chainNode) => {
     let result = null
-    
+
     // Find the first uncompleted step, or start from beginning
     let startIndex = 0
     for (let i = 0; i < chainNode.steps.length; i++) {
@@ -93,25 +93,29 @@ export const executeAST = async (ast, given, select) => {
         break
       }
     }
-    
+
     // Execute remaining steps in sequence
     for (let i = startIndex; i < chainNode.steps.length; i++) {
       const step = chainNode.steps[i]
-      
+
       // Execute the step (step has direct AST access)
       step.value = await step.wrappedFunction.call(step)
       step.completed = true
       result = step.value
     }
-    
+
     return result
   }
-  
+
   // Start all uncompleted queries in parallel - dependency resolution will coordinate automatically
-  const uncompletedQueries = ast.executionOrder.filter(queryName => !ast.queries[queryName].completed)
-  const allPromises = uncompletedQueries.map(queryName => executeQuery(queryName))
+  const uncompletedQueries = ast.executionOrder.filter(
+    (queryName) => !ast.queries[queryName].completed
+  )
+  const allPromises = uncompletedQueries.map((queryName) =>
+    executeQuery(queryName)
+  )
   await Promise.all(allPromises)
-  
+
   // Return selected query or all results
   if (select) {
     if (Array.isArray(select)) {
@@ -134,7 +138,7 @@ export const executeAST = async (ast, given, select) => {
       return query.value
     }
   }
-  
+
   // Convert AST results to object for return
   const results = {}
   for (const [queryName, queryNode] of Object.entries(ast.queries)) {
