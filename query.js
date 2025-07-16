@@ -2,11 +2,8 @@ import _ from 'lodash'
 import lodashDeep from 'lodash-deep'
 _.mixin(lodashDeep)
 
-import async from 'async'
 import torch from 'torch'
-
 import retrieve from './retrieve.js'
-import guard from './guard.js'
 
 const DEP_REGEX = /\$\.(\w+)/
 
@@ -28,63 +25,99 @@ const mergeArgs = (args, source) => {
   })
 }
 
-function query(config, done) {
-  const {services, input, queries, defaultTimeout, select} = config
+async function query(config) {
+  const {services, input, given, query: queries, select} = config
+  
+  // Handle both 'input' and 'given' for input data
+  const inputData = input || given
   const debug = (...args) => config.debug ? torch.gray(...args) : null
   const debugAlt = (...args) => config.debug ? torch.white(...args) : null
 
-  const tasks = {}
-
-  // add dummy functions to inject input
-  if (input) {
-    tasks.input = (next) => next(null, input)
+  // Build execution plan
+  const executionPlan = {}
+  const results = {}
+  
+  // Add input as pre-resolved result
+  if (inputData) {
+    results.input = inputData
+    // Also add as 'given' for compatibility
+    results.given = inputData
   }
 
-  // add queries
-  _.forIn(queries, (descriptor, name) => {
-
-    // look for optional orchestrator settings
-    var maybeConvertError = (error, result) => [error, result]
-    var timeout = defaultTimeout
-
-    // add a service query
+  // Process each query
+  for (const [queryName, descriptor] of Object.entries(queries)) {
     const [serviceName, action, args] = descriptor
     const deps = getDeps(args)
 
-    if (typeof services[serviceName] !== 'function') {
-      throw new Error(`A query references ${serviceName}.${action} but the '${serviceName}' service was not provided.`)
+    // Validate service exists and has the required method
+    if (!services[serviceName] || typeof services[serviceName] !== 'object') {
+      throw new Error(`Service '${serviceName}' not found or not an object`)
+    }
+    
+    if (!services[serviceName][action] || typeof services[serviceName][action] !== 'function') {
+      throw new Error(`Method '${action}' not found on service '${serviceName}'`)
     }
 
-    // add the query to the end of the dependencies list
-    deps.push(guard((results, next) => {
-      const finalArgs = mergeArgs(args, results)
-      debug('calling:', {serviceName, action, finalArgs})
-      const fn = guard(services[serviceName].bind(null, action), timeout, `${serviceName}.${action}`)
-      fn(finalArgs, (error, result) => {
-        [error, result] = maybeConvertError(error, result)
-        debugAlt('returned:', {serviceName, action, error, result})
-        next(error, result)
-      })
-    }))
-    tasks[name] = deps
-  })
-
-  //torch.white('running:\n', tasks)
-
-  // run all tasks
-  // http://caolan.github.io/async/docs.html#auto
-  async.auto(tasks, (err, results) => {
-
-    // select specified results if user requests
-    if (Array.isArray(select)) {
-      results = _.pick(results, select)
+    executionPlan[queryName] = {
+      serviceName,
+      action,
+      args,
+      dependencies: deps,
+      executed: false
     }
-    else if (typeof select === 'string') {
-      results = results[select]
-    }
+  }
 
-    done(err, results)
-  })
+  // Execute queries in dependency order
+  const executedQueries = new Set()
+  
+  while (executedQueries.size < Object.keys(executionPlan).length) {
+    let progress = false
+    
+    for (const [queryName, queryPlan] of Object.entries(executionPlan)) {
+      if (executedQueries.has(queryName)) continue
+      
+      // Check if all dependencies are satisfied
+      const depsReady = queryPlan.dependencies.every(dep => 
+        dep === 'input' || dep === 'given' ? true : executedQueries.has(dep)
+      )
+      
+      if (depsReady) {
+        // Execute this query
+        try {
+          const finalArgs = mergeArgs(queryPlan.args, results)
+          debug('calling:', {serviceName: queryPlan.serviceName, action: queryPlan.action, finalArgs})
+          
+          const service = services[queryPlan.serviceName]
+          const method = service[queryPlan.action]
+          
+          // Call service method (supports both sync and async)
+          const result = await method(finalArgs)
+          
+          results[queryName] = result
+          executedQueries.add(queryName)
+          progress = true
+          
+          debugAlt('returned:', {serviceName: queryPlan.serviceName, action: queryPlan.action, result})
+        } catch (error) {
+          throw new Error(`Query '${queryName}' failed: ${error.message}`)
+        }
+      }
+    }
+    
+    if (!progress) {
+      const remaining = Object.keys(executionPlan).filter(q => !executedQueries.has(q))
+      throw new Error(`Circular dependency or missing dependencies for queries: ${remaining.join(', ')}`)
+    }
+  }
+
+  // Apply result selection
+  if (Array.isArray(select)) {
+    return _.pick(results, select)
+  } else if (typeof select === 'string') {
+    return results[select]
+  }
+
+  return results
 }
 
 export default query
