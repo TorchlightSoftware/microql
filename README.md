@@ -12,7 +12,7 @@ query({
   debug: true,
   input: {car: 'Monkey'},
   services: {fieldAgent, truck},
-  jobs: {
+  query: {
 
     // result       service        action            args
     monkey:    ['fieldAgent', 'findAnimal',     {animal: '$.input.creatureType'}],

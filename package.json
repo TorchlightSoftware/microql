@@ -2,9 +2,10 @@
   "name": "microql",
   "version": "0.1.1",
   "description": "A query language for composing microservices.",
+  "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "mocha"
+    "test": "node --test test/*.test.js"
   },
   "repository": {
     "type": "git",
@@ -31,8 +32,6 @@
   },
   "homepage": "https://github.com/TorchlightSoftware/microql#readme",
   "devDependencies": {
-    "chai": "^4.1.2",
-    "mocha": "^5.1.1"
   },
   "dependencies": {
     "async": "^2.6.0",

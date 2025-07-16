@@ -1,4 +1,4 @@
-const jp = require('jsonpath')
+import jp from 'jsonpath'
 
 // jsonpath docs:
 // https://github.com/dchester/jsonpath
@@ -32,4 +32,4 @@ function retrieve(path, source) {
   return findings
 }
 
-module.exports = retrieve
+export default retrieve

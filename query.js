@@ -1,11 +1,12 @@
-const _ = require('lodash')
-_.mixin(require('lodash-deep'))
+import _ from 'lodash'
+import lodashDeep from 'lodash-deep'
+_.mixin(lodashDeep)
 
-const async = require('async')
-const torch = require('torch')
+import async from 'async'
+import torch from 'torch'
 
-const retrieve = require('./retrieve')
-const guard = require('./guard')
+import retrieve from './retrieve.js'
+import guard from './guard.js'
 
 const DEP_REGEX = /\$\.(\w+)/
 
@@ -19,7 +20,7 @@ const getDeps = (args) => {
   return _.uniq(deps)
 }
 
-// this runs at 'run time' for each job and interpolates dependencies into the job arguments
+// this runs at 'run time' for each query and interpolates dependencies into the query arguments
 const mergeArgs = (args, source) => {
   return _.deepMapValues(args, (value, path) => {
     let m = (typeof value === 'string') && value.match(DEP_REGEX)
@@ -27,8 +28,8 @@ const mergeArgs = (args, source) => {
   })
 }
 
-module.exports = function query(config, done) {
-  const {services, input, jobs, defaultTimeout, select} = config
+function query(config, done) {
+  const {services, input, queries, defaultTimeout, select} = config
   const debug = (...args) => config.debug ? torch.gray(...args) : null
   const debugAlt = (...args) => config.debug ? torch.white(...args) : null
 
@@ -39,49 +40,22 @@ module.exports = function query(config, done) {
     tasks.input = (next) => next(null, input)
   }
 
-  // add jobs
-  _.forIn(jobs, (descriptor, name) => {
-
-    // add an alias job
-    let m = (typeof descriptor === 'string') && descriptor.match(DEP_REGEX)
-    if (m) {
-      let retriever = (results, next) => next(null, retrieve(descriptor, results))
-      tasks[name] = [m[1], retriever]
-      return
-    }
+  // add queries
+  _.forIn(queries, (descriptor, name) => {
 
     // look for optional orchestrator settings
     var maybeConvertError = (error, result) => [error, result]
     var timeout = defaultTimeout
-    var orchSettings
-    if (Array.isArray(descriptor) && (orchSettings = descriptor[3]) && typeof orchSettings === 'object') {
 
-      // onError config
-      switch (orchSettings.onError) {
-        case 'convertToObject':
-          maybeConvertError = (error, result) => {
-            if (error) {
-              result = {error: error.message, stack: error.stack}
-              error = null
-            }
-            return [error, result]
-          }
-          break
-      }
-
-      // timeout config
-      if (orchSettings.timeout) timeout = orchSettings.timeout
-    }
-
-    // add a service job
+    // add a service query
     const [serviceName, action, args] = descriptor
     const deps = getDeps(args)
 
     if (typeof services[serviceName] !== 'function') {
-      throw new Error(`A job references ${serviceName}.${action} but the '${serviceName}' service was not provided.`)
+      throw new Error(`A query references ${serviceName}.${action} but the '${serviceName}' service was not provided.`)
     }
 
-    // add the job to the end of the dependencies list
+    // add the query to the end of the dependencies list
     deps.push(guard((results, next) => {
       const finalArgs = mergeArgs(args, results)
       debug('calling:', {serviceName, action, finalArgs})
@@ -113,4 +87,5 @@ module.exports = function query(config, done) {
   })
 }
 
-module.exports.mergeArgs = mergeArgs
+export default query
+export { mergeArgs }

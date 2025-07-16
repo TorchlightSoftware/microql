@@ -1,1 +1,1 @@
-module.exports = require('./query')
+export { default, mergeArgs } from './query.js'

@@ -1,12 +1,12 @@
-const _ = require('lodash')
-const {inspect} = require('util')
+import _ from 'lodash'
+import { inspect } from 'util'
 
-// Supply an empty object for the first param if none was provided.
+// Supply an empty object for the first arg if none was provided.
 // This makes the function compatible with async.auto regardless of whether dependencies were specified.
-module.exports = function guard(fn, timeout, name) {
+export default function guard(fn, timeout, name) {
   return (...args) => {
 
-    // ensure that fn is provided an object arg as first param
+    // ensure that fn is provided an object arg as first arg
     let obj, done
     args.length > 1 ? [obj, done] = args : [obj, done] = [{}, args[0]]
 
