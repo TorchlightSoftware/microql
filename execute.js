@@ -5,14 +5,9 @@
  * Handles dependency resolution and service method invocation.
  */
 
-import _ from 'lodash'
-import lodashDeep from 'lodash-deep'
-_.mixin(lodashDeep)
-
 import torch from 'torch'
 import retrieve from './retrieve.js'
-
-const DEP_REGEX = /\$\.(\w+)/
+import { DEP_REGEX, _ } from './compile.js'
 
 // Resolves arguments by interpolating dependencies into the arguments
 const mergeArgs = (args, source) => {

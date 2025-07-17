@@ -5,6 +5,7 @@
  * Handles service validation and dependency extraction.
  */
 
+// Setup lodash with deep extensions
 import _ from 'lodash'
 import lodashDeep from 'lodash-deep'
 _.mixin(lodashDeep)
@@ -65,4 +66,4 @@ export function compile(config) {
   }
 }
 
-export { getDeps }
+export { getDeps, DEP_REGEX, _ }
