@@ -5,7 +5,7 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "node --test test/*.test.js",
+    "test": "node --test --test-reporter=tap test/*.test.js 2>&1 | npx tap-mocha-reporter spec",
     "lint": "npx eslint .",
     "lint:fix": "npx eslint --fix ."
   },
@@ -35,7 +35,8 @@
   "homepage": "https://github.com/TorchlightSoftware/microql#readme",
   "devDependencies": {
     "@stylistic/eslint-plugin": "^5.2.0",
-    "eslint": "^9.31.0"
+    "eslint": "^9.31.0",
+    "tap-mocha-reporter": "^5.0.4"
   },
   "dependencies": {
     "jsonpath": "^1.0.0",
