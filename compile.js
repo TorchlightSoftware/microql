@@ -12,6 +12,15 @@ _.mixin(lodashDeep)
 
 const DEP_REGEX = /\$\.(\w+)/
 const METHOD_REGEX = /^(\w+):(\w+)$/
+const AT_REGEX = /^@(\..+)?$/
+const BARE_DOLLAR_REGEX = /^\$$/
+
+// Detects if a descriptor is a chain (nested arrays)
+const isChain = (descriptor) => {
+  return Array.isArray(descriptor) && 
+         descriptor.length > 0 &&
+         Array.isArray(descriptor[0])
+}
 
 // Detects if a descriptor uses method syntax
 const hasMethodSyntax = (descriptor) => {
@@ -45,6 +54,22 @@ const getDeps = (args) => {
   return _.uniq(deps)
 }
 
+// Compile arguments based on argtypes metadata
+const compileArgs = (args, argtypes) => {
+  const compiled = {}
+  
+  for (const [key, value] of Object.entries(args)) {
+    if (argtypes[key] === 'function' && typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      // Compile object to function that returns the object with resolved values
+      compiled[key] = { _type: 'compiled_function', template: value }
+    } else {
+      compiled[key] = value
+    }
+  }
+  
+  return compiled
+}
+
 /**
  * Compile a query configuration into an execution plan
  * @param {Object} config - Query configuration
@@ -61,25 +86,86 @@ export function compile(config) {
   const executionPlan = {}
   
   for (const [queryName, descriptor] of Object.entries(queries)) {
-    // Transform method syntax to standard form before processing
-    const transformedDescriptor = transformMethodSyntax(descriptor)
-    const [serviceName, action, args] = transformedDescriptor
-    const deps = getDeps(args)
+    // Handle chains - arrays of service calls
+    if (isChain(descriptor)) {
+      const chainSteps = []
+      let allDeps = new Set()
+      
+      for (let i = 0; i < descriptor.length; i++) {
+        const step = descriptor[i]
+        const transformedStep = transformMethodSyntax(step)
+        const [serviceName, action, args] = transformedStep
+        
+        // Collect dependencies from this step
+        const stepDeps = getDeps(args)
+        stepDeps.forEach(dep => allDeps.add(dep))
+        
+        // Validate service exists and has the required method
+        if (!services[serviceName]) {
+          throw new Error(`Service '${serviceName}' not found`)
+        }
+        
+        if (typeof services[serviceName] === 'function') {
+          // Function service - no method validation needed
+        } else if (typeof services[serviceName] === 'object') {
+          // Object service - validate method exists
+          if (!services[serviceName][action] || typeof services[serviceName][action] !== 'function') {
+            throw new Error(`Method '${action}' not found on service '${serviceName}'`)
+          }
+        } else {
+          throw new Error(`Service '${serviceName}' must be a function or object`)
+        }
+        
+        // Compile function arguments based on _argtypes
+        const argtypes = typeof services[serviceName] === 'function' ? {} : (services[serviceName][action]._argtypes || {})
+        const compiledArgs = compileArgs(args, argtypes)
+        
+        chainSteps.push({
+          serviceName,
+          action,
+          args: compiledArgs,
+          stepIndex: i
+        })
+      }
+      
+      executionPlan[queryName] = {
+        type: 'chain',
+        steps: chainSteps,
+        dependencies: Array.from(allDeps)
+      }
+    } else {
+      // Handle single service call
+      const transformedDescriptor = transformMethodSyntax(descriptor)
+      const [serviceName, action, args] = transformedDescriptor
+      const deps = getDeps(args)
 
-    // Validate service exists and has the required method
-    if (!services[serviceName] || typeof services[serviceName] !== 'object') {
-      throw new Error(`Service '${serviceName}' not found or not an object`)
-    }
-    
-    if (!services[serviceName][action] || typeof services[serviceName][action] !== 'function') {
-      throw new Error(`Method '${action}' not found on service '${serviceName}'`)
-    }
+      // Validate service exists and has the required method
+      if (!services[serviceName]) {
+        throw new Error(`Service '${serviceName}' not found`)
+      }
+      
+      if (typeof services[serviceName] === 'function') {
+        // Function service - no method validation needed
+      } else if (typeof services[serviceName] === 'object') {
+        // Object service - validate method exists
+        if (!services[serviceName][action] || typeof services[serviceName][action] !== 'function') {
+          throw new Error(`Method '${action}' not found on service '${serviceName}'`)
+        }
+      } else {
+        throw new Error(`Service '${serviceName}' must be a function or object`)
+      }
 
-    executionPlan[queryName] = {
-      serviceName,
-      action,
-      args,
-      dependencies: deps
+      // Compile function arguments based on _argtypes
+      const argtypes = typeof services[serviceName] === 'function' ? {} : (services[serviceName][action]._argtypes || {})
+      const compiledArgs = compileArgs(args, argtypes)
+      
+      executionPlan[queryName] = {
+        type: 'service',
+        serviceName,
+        action,
+        args: compiledArgs,
+        dependencies: deps
+      }
     }
   }
 
@@ -91,4 +177,4 @@ export function compile(config) {
   }
 }
 
-export { getDeps, DEP_REGEX, transformMethodSyntax, hasMethodSyntax }
+export { getDeps, DEP_REGEX, AT_REGEX, BARE_DOLLAR_REGEX, transformMethodSyntax, hasMethodSyntax, isChain }
