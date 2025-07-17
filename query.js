@@ -1,5 +1,5 @@
 /**
- * @fileoverview MicroQL Classic Query Engine - Main Entry Point
+ * @fileoverview MicroQL Query Engine - Main Entry Point
  * 
  * High-level orchestration of query compilation and execution with clean
  * separation of concerns.
@@ -26,23 +26,19 @@ function applySelection(results, select) {
  * @param {Object} config - Query configuration
  * @param {Object} config.services - Service objects
  * @param {Object} config.query - Query definitions
- * @param {Object} config.input - Input data (alternative to given)
- * @param {Object} config.given - Input data (alternative to input)
+ * @param {Object} config.given - Starting data
  * @param {string|Array} config.select - Result selection
  * @param {boolean} config.debug - Debug logging
  * @returns {*} Query results
  */
 async function query(config) {
-  const { services, input, given, query: queries, select, debug } = config
-  
-  // Handle both 'input' and 'given' for input data
-  const inputData = input || given
+  const { services, given, query: queries, select, debug } = config
   
   // Phase 1: Compile queries into execution plan
   const compilationConfig = {
     services,
     queries,
-    inputData,
+    given,
     debug
   }
   const executionPlan = compile(compilationConfig)

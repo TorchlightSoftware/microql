@@ -1,5 +1,5 @@
 /**
- * @fileoverview MicroQL Classic Query Compiler
+ * @fileoverview MicroQL Query Compiler
  * 
  * Compiles query configurations into execution plans.
  * Handles service validation and dependency extraction.
@@ -11,6 +11,29 @@ import lodashDeep from 'lodash-deep'
 _.mixin(lodashDeep)
 
 const DEP_REGEX = /\$\.(\w+)/
+const METHOD_REGEX = /^(\w+):(\w+)$/
+
+// Detects if a descriptor uses method syntax
+const hasMethodSyntax = (descriptor) => {
+  return Array.isArray(descriptor) && 
+         descriptor.length >= 2 && 
+         typeof descriptor[1] === 'string' && 
+         METHOD_REGEX.test(descriptor[1])
+}
+
+// Transforms method syntax to standard form
+const transformMethodSyntax = (descriptor) => {
+  if (!hasMethodSyntax(descriptor)) {
+    return descriptor
+  }
+  
+  const [target, serviceMethod, args = {}] = descriptor
+  const match = serviceMethod.match(METHOD_REGEX)
+  const [, serviceName, method] = match
+  
+  // Transform to standard form: [service, method, { ...args, on: target }]
+  return [serviceName, method, { ...args, on: target }]
+}
 
 // Extracts dependencies from query arguments
 const getDeps = (args) => {
@@ -27,18 +50,20 @@ const getDeps = (args) => {
  * @param {Object} config - Query configuration
  * @param {Object} config.services - Service objects
  * @param {Object} config.queries - Query definitions
- * @param {Object} config.inputData - Input/given data
+ * @param {Object} config.given - given data
  * @param {boolean} config.debug - Debug logging flag
  * @returns {Object} Compiled execution plan
  */
 export function compile(config) {
-  const { services, queries, inputData, debug } = config
+  const { services, queries, given, debug } = config
   
   // Build execution plan for each query
   const executionPlan = {}
   
   for (const [queryName, descriptor] of Object.entries(queries)) {
-    const [serviceName, action, args] = descriptor
+    // Transform method syntax to standard form before processing
+    const transformedDescriptor = transformMethodSyntax(descriptor)
+    const [serviceName, action, args] = transformedDescriptor
     const deps = getDeps(args)
 
     // Validate service exists and has the required method
@@ -60,10 +85,10 @@ export function compile(config) {
 
   return {
     queries: executionPlan,
-    inputData,
+    given,
     services,
     debug
   }
 }
 
-export { getDeps, DEP_REGEX, _ }
+export { getDeps, DEP_REGEX, transformMethodSyntax, hasMethodSyntax }

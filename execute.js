@@ -1,13 +1,16 @@
 /**
- * @fileoverview MicroQL Classic Execution Engine
+ * @fileoverview MicroQL Execution Engine
  * 
  * Pure execution engine that takes a compiled execution plan and executes it.
  * Handles dependency resolution and service method invocation.
  */
+import _ from 'lodash'
+import lodashDeep from 'lodash-deep'
+_.mixin(lodashDeep)
 
 import torch from 'torch'
 import retrieve from './retrieve.js'
-import { DEP_REGEX, _ } from './compile.js'
+import { DEP_REGEX } from './compile.js'
 
 // Resolves arguments by interpolating dependencies into the arguments
 const mergeArgs = (args, source) => {
@@ -21,23 +24,22 @@ const mergeArgs = (args, source) => {
  * Execute a compiled execution plan
  * @param {Object} plan - Compiled execution plan
  * @param {Object} plan.queries - Query execution plans
- * @param {Object} plan.inputData - Input/given data
+ * @param {Object} plan.given - given data
  * @param {Object} plan.services - Service objects
  * @param {boolean} plan.debug - Debug logging flag
  * @returns {Object} Execution results
  */
 export async function execute(plan) {
-  const { queries, inputData, services, debug } = plan
+  const { queries, given, services, debug } = plan
   
   const debugLog = (...args) => debug ? torch.gray(...args) : null
   const debugAlt = (...args) => debug ? torch.white(...args) : null
   
   const results = {}
   
-  // Add input data as pre-resolved results
-  if (inputData) {
-    results.input = inputData
-    results.given = inputData
+  // Add given data as pre-resolved results
+  if (given) {
+    results.given = given
   }
 
   // Execute queries in dependency order
@@ -51,7 +53,7 @@ export async function execute(plan) {
       
       // Check if all dependencies are satisfied
       const depsReady = queryPlan.dependencies.every(dep => 
-        dep === 'input' || dep === 'given' ? true : executedQueries.has(dep)
+        dep === 'given' ? true : executedQueries.has(dep)
       )
       
       if (depsReady) {
