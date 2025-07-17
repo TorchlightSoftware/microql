@@ -1,6 +1,6 @@
 /**
  * @fileoverview MicroQL Execution Engine
- * 
+ *
  * Pure execution engine that takes a compiled execution plan and executes it.
  * Handles dependency resolution and service method invocation.
  */
@@ -16,7 +16,7 @@ import { DEP_REGEX, AT_REGEX, BARE_DOLLAR_REGEX } from './compile.js'
 const mergeArgs = (args, source, chainContext = null) => {
   const resolveValue = (value) => {
     if (typeof value !== 'string') return value
-    
+
     // Handle bare $ - returns all completed queries
     if (value.match(BARE_DOLLAR_REGEX)) {
       // Return a copy of all results excluding internal keys
@@ -28,11 +28,11 @@ const mergeArgs = (args, source, chainContext = null) => {
       }
       return allQueries
     }
-    
+
     // Handle $.path references
     let m = value.match(DEP_REGEX)
     if (m) return retrieve(value, source)
-    
+
     // Handle @ references
     m = value.match(AT_REGEX)
     if (m && chainContext !== null) {
@@ -45,12 +45,12 @@ const mergeArgs = (args, source, chainContext = null) => {
         return chainContext
       }
     }
-    
+
     return value
   }
-  
+
   const resolved = {}
-  
+
   for (const [key, value] of Object.entries(args)) {
     // Handle compiled functions
     if (value && typeof value === 'object' && value._type === 'compiled_function') {
@@ -70,7 +70,7 @@ const mergeArgs = (args, source, chainContext = null) => {
       resolved[key] = _.deepMapValues(value, resolveValue)
     }
   }
-  
+
   return resolved
 }
 
@@ -85,12 +85,12 @@ const mergeArgs = (args, source, chainContext = null) => {
  */
 export async function execute(plan) {
   const { queries, given, services, debug } = plan
-  
+
   const debugLog = (...args) => debug ? torch.gray(...args) : null
   const debugAlt = (...args) => debug ? torch.white(...args) : null
-  
+
   const results = {}
-  
+
   // Add given data as pre-resolved results
   if (given) {
     results.given = given
@@ -98,33 +98,32 @@ export async function execute(plan) {
 
   // Execute queries in dependency order
   const executedQueries = new Set()
-  
+
   while (executedQueries.size < Object.keys(queries).length) {
     let progress = false
-    
+
     for (const [queryName, queryPlan] of Object.entries(queries)) {
       if (executedQueries.has(queryName)) continue
-      
+
       // Check if all dependencies are satisfied
-      const depsReady = queryPlan.dependencies.every(dep => 
-        dep === 'given' ? true : executedQueries.has(dep)
-      )
-      
+      const depsReady = queryPlan.dependencies.every(dep =>
+        dep === 'given' ? true : executedQueries.has(dep))
+
       if (depsReady) {
         // Execute this query
         try {
           let result
-          
+
           if (queryPlan.type === 'chain') {
             // Execute chain steps sequentially
             let chainResult = null
-            
+
             for (const step of queryPlan.steps) {
               const finalArgs = mergeArgs(step.args, results, chainResult)
-              debugLog('chain step:', {serviceName: step.serviceName, action: step.action, finalArgs})
-              
+              debugLog('chain step:', { serviceName: step.serviceName, action: step.action, finalArgs })
+
               const service = services[step.serviceName]
-              
+
               if (typeof service === 'function') {
                 // Function service - call with action and args
                 chainResult = await service(step.action, finalArgs)
@@ -133,18 +132,18 @@ export async function execute(plan) {
                 const method = service[step.action]
                 chainResult = await method(finalArgs)
               }
-              
-              debugAlt('step returned:', {serviceName: step.serviceName, action: step.action, result: chainResult})
+
+              debugAlt('step returned:', { serviceName: step.serviceName, action: step.action, result: chainResult })
             }
-            
+
             result = chainResult
           } else {
             // Execute single service call
             const finalArgs = mergeArgs(queryPlan.args, results)
-            debugLog('calling:', {serviceName: queryPlan.serviceName, action: queryPlan.action, finalArgs})
-            
+            debugLog('calling:', { serviceName: queryPlan.serviceName, action: queryPlan.action, finalArgs })
+
             const service = services[queryPlan.serviceName]
-            
+
             if (typeof service === 'function') {
               // Function service - call with action and args
               result = await service(queryPlan.action, finalArgs)
@@ -153,10 +152,10 @@ export async function execute(plan) {
               const method = service[queryPlan.action]
               result = await method(finalArgs)
             }
-            
-            debugAlt('returned:', {serviceName: queryPlan.serviceName, action: queryPlan.action, result})
+
+            debugAlt('returned:', { serviceName: queryPlan.serviceName, action: queryPlan.action, result })
           }
-          
+
           results[queryName] = result
           executedQueries.add(queryName)
           progress = true
@@ -165,7 +164,7 @@ export async function execute(plan) {
         }
       }
     }
-    
+
     if (!progress) {
       const remaining = Object.keys(queries).filter(q => !executedQueries.has(q))
       throw new Error(`Circular dependency or missing dependencies for queries: ${remaining.join(', ')}`)

@@ -5,7 +5,9 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "lint": "npx eslint .",
+    "lint:fix": "npx eslint --fix ."
   },
   "repository": {
     "type": "git",
@@ -32,6 +34,8 @@
   },
   "homepage": "https://github.com/TorchlightSoftware/microql#readme",
   "devDependencies": {
+    "@stylistic/eslint-plugin": "^5.2.0",
+    "eslint": "^9.31.0"
   },
   "dependencies": {
     "jsonpath": "^1.0.0",

@@ -1,6 +1,6 @@
 /**
  * @fileoverview MicroQL Query Compiler
- * 
+ *
  * Compiles query configurations into execution plans.
  * Handles service validation and dependency extraction.
  */
@@ -17,16 +17,16 @@ const BARE_DOLLAR_REGEX = /^\$$/
 
 // Detects if a descriptor is a chain (nested arrays)
 const isChain = (descriptor) => {
-  return Array.isArray(descriptor) && 
+  return Array.isArray(descriptor) &&
          descriptor.length > 0 &&
          Array.isArray(descriptor[0])
 }
 
 // Detects if a descriptor uses method syntax
 const hasMethodSyntax = (descriptor) => {
-  return Array.isArray(descriptor) && 
-         descriptor.length >= 2 && 
-         typeof descriptor[1] === 'string' && 
+  return Array.isArray(descriptor) &&
+         descriptor.length >= 2 &&
+         typeof descriptor[1] === 'string' &&
          METHOD_REGEX.test(descriptor[1])
 }
 
@@ -35,11 +35,11 @@ const transformMethodSyntax = (descriptor) => {
   if (!hasMethodSyntax(descriptor)) {
     return descriptor
   }
-  
+
   const [target, serviceMethod, args = {}] = descriptor
   const match = serviceMethod.match(METHOD_REGEX)
   const [, serviceName, method] = match
-  
+
   // Transform to standard form: [service, method, { ...args, on: target }]
   return [serviceName, method, { ...args, on: target }]
 }
@@ -57,7 +57,7 @@ const getDeps = (args) => {
 // Compile arguments based on argtypes metadata
 const compileArgs = (args, argtypes) => {
   const compiled = {}
-  
+
   for (const [key, value] of Object.entries(args)) {
     if (argtypes[key] === 'function' && typeof value === 'object' && value !== null && !Array.isArray(value)) {
       // Compile object to function that returns the object with resolved values
@@ -66,7 +66,7 @@ const compileArgs = (args, argtypes) => {
       compiled[key] = value
     }
   }
-  
+
   return compiled
 }
 
@@ -81,30 +81,30 @@ const compileArgs = (args, argtypes) => {
  */
 export function compile(config) {
   const { services, queries, given, debug } = config
-  
+
   // Build execution plan for each query
   const executionPlan = {}
-  
+
   for (const [queryName, descriptor] of Object.entries(queries)) {
     // Handle chains - arrays of service calls
     if (isChain(descriptor)) {
       const chainSteps = []
       let allDeps = new Set()
-      
+
       for (let i = 0; i < descriptor.length; i++) {
         const step = descriptor[i]
         const transformedStep = transformMethodSyntax(step)
         const [serviceName, action, args] = transformedStep
-        
+
         // Collect dependencies from this step
         const stepDeps = getDeps(args)
         stepDeps.forEach(dep => allDeps.add(dep))
-        
+
         // Validate service exists and has the required method
         if (!services[serviceName]) {
           throw new Error(`Service '${serviceName}' not found`)
         }
-        
+
         if (typeof services[serviceName] === 'function') {
           // Function service - no method validation needed
         } else if (typeof services[serviceName] === 'object') {
@@ -115,11 +115,11 @@ export function compile(config) {
         } else {
           throw new Error(`Service '${serviceName}' must be a function or object`)
         }
-        
+
         // Compile function arguments based on _argtypes
         const argtypes = typeof services[serviceName] === 'function' ? {} : (services[serviceName][action]._argtypes || {})
         const compiledArgs = compileArgs(args, argtypes)
-        
+
         chainSteps.push({
           serviceName,
           action,
@@ -127,7 +127,7 @@ export function compile(config) {
           stepIndex: i
         })
       }
-      
+
       executionPlan[queryName] = {
         type: 'chain',
         steps: chainSteps,
@@ -143,7 +143,7 @@ export function compile(config) {
       if (!services[serviceName]) {
         throw new Error(`Service '${serviceName}' not found`)
       }
-      
+
       if (typeof services[serviceName] === 'function') {
         // Function service - no method validation needed
       } else if (typeof services[serviceName] === 'object') {
@@ -158,7 +158,7 @@ export function compile(config) {
       // Compile function arguments based on _argtypes
       const argtypes = typeof services[serviceName] === 'function' ? {} : (services[serviceName][action]._argtypes || {})
       const compiledArgs = compileArgs(args, argtypes)
-      
+
       executionPlan[queryName] = {
         type: 'service',
         serviceName,

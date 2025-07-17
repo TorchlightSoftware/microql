@@ -1,6 +1,6 @@
 /**
  * @fileoverview MicroQL Query Engine - Main Entry Point
- * 
+ *
  * High-level orchestration of query compilation and execution with clean
  * separation of concerns.
  */
@@ -33,7 +33,7 @@ function applySelection(results, select) {
  */
 async function query(config) {
   const { services, given, query: queries, select, debug } = config
-  
+
   // Phase 1: Compile queries into execution plan
   const compilationConfig = {
     services,
@@ -42,10 +42,10 @@ async function query(config) {
     debug
   }
   const executionPlan = compile(compilationConfig)
-  
+
   // Phase 2: Execute the plan
   const results = await execute(executionPlan)
-  
+
   // Phase 3: Apply result selection
   return applySelection(results, select)
 }

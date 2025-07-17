@@ -27,7 +27,7 @@ function retrieve(path, source) {
       }
     })
   } catch (e) {
-    findings = {error: e.message, reason: 'alias', path}
+    findings = { error: e.message, reason: 'alias', path }
   }
   return findings
 }
