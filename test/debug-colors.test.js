@@ -1,170 +1,133 @@
 import assert from 'node:assert'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import {afterEach, beforeEach, describe, it} from 'node:test'
 import query from '../query.js'
+import {ANSI_COLORS} from '../common.js'
 
 describe('Debug Color Tests', () => {
-  let originalLog
-  let logCalls = []
+  let originalWrite
+  let captureState
+
+  // Helper function to extract ANSI color code from a log string
+  const extractColor = (log) => {
+    // Get all color codes except 'reset'
+    const colorCodes = Object.entries(ANSI_COLORS)
+      .filter(([name]) => name !== 'reset')
+      .map(([, code]) => code)
+    
+    for (const color of colorCodes) {
+      if (log.includes(color)) return color
+    }
+    return null
+  }
 
   beforeEach(() => {
-    // Capture console.log calls
-    originalLog = console.log
-    logCalls = []
-    console.log = (...args) => {
-      logCalls.push(args.join(' '))
+    // Capture stdout.write calls
+    captureState = {outputs: []}
+    originalWrite = process.stdout.write
+    process.stdout.write = function (data) {
+      captureState.outputs.push(data)
+      return true
     }
   })
 
   afterEach(() => {
-    // Restore original console.log
-    console.log = originalLog
+    // Restore original stdout.write
+    process.stdout.write = originalWrite
   })
 
   it('should use unique colors for different services in debug mode', async () => {
-    await query({
-      settings: { debug: true },
+    const _result = await query({
+      settings: {debug: true},
       services: {
         serviceA: {
           async test() {
+            await new Promise(resolve => setTimeout(resolve, 10))
             return 'resultA'
           }
         },
         serviceB: {
           async test() {
+            await new Promise(resolve => setTimeout(resolve, 20))
             return 'resultB'
           }
         },
         serviceC: {
           async test() {
+            await new Promise(resolve => setTimeout(resolve, 30))
             return 'resultC'
           }
         }
       },
-      query: {
+      queries: {
         testA: ['serviceA', 'test', {}],
         testB: ['serviceB', 'test', {}],
         testC: ['serviceC', 'test', {}]
       }
     })
 
-    // Extract service calls from debug logs
-    const serviceCalls = logCalls.filter((log) => log.includes('Called with:'))
+    // Should have captured output
+    assert(captureState.outputs.length > 0, `Should have captured output, but got: ${captureState.outputs.length} items`)
 
     // Should have debug logs for each service
-    assert(
-      serviceCalls.some((log) => log.includes('[serviceA.test]')),
-      'Should log serviceA calls'
-    )
-    assert(
-      serviceCalls.some((log) => log.includes('[serviceB.test]')),
-      'Should log serviceB calls'
-    )
-    assert(
-      serviceCalls.some((log) => log.includes('[serviceC.test]')),
-      'Should log serviceC calls'
-    )
+    const output = captureState.outputs.join('')
+    assert(output.includes('[serviceA:test]'), 'Should log serviceA calls')
+    assert(output.includes('[serviceB:test]'), 'Should log serviceB calls')
+    assert(output.includes('[serviceC:test]'), 'Should log serviceC calls')
 
     // Check for ANSI color codes in the logs
-    const colorCodes = [
-      '\x1b[32m', // green
-      '\x1b[33m', // yellow
-      '\x1b[34m', // blue
-      '\x1b[35m', // magenta
-      '\x1b[36m', // cyan
-      '\x1b[37m' // white
-    ]
-
-    let foundColorCodes = 0
-    for (const log of logCalls) {
-      for (const colorCode of colorCodes) {
-        if (log.includes(colorCode)) {
-          foundColorCodes++
-          break // Count each log only once
-        }
-      }
-    }
-
-    // Should have colored output for debug logs
+    const coloredLogs = captureState.outputs.filter(log => extractColor(log) !== null)
     assert(
-      foundColorCodes > 0,
-      `Expected colored debug output, but found no ANSI color codes in logs: ${JSON.stringify(logCalls)}`
+      coloredLogs.length > 0,
+      `Expected colored debug output, but found no ANSI color codes in logs: ${JSON.stringify(captureState.outputs.slice(0, 3))}`
     )
   })
 
-  it('should assign consistent colors to the same service across calls', async () => {
-    // First call
+
+
+  it('should use consistent colors for same service name', async () => {
+    // Test that the same service gets the same color across multiple queries
     await query({
-      settings: { debug: true },
+      settings: {debug: true},
       services: {
-        testService: {
-          async method() {
-            return 'result1'
-          }
+        consistentService: {
+          async action1() { return 'r1' },
+          async action2() { return 'r2' }
+        },
+        differentService: {
+          async action() { return 'r3' }
         }
       },
-      query: {
-        test1: ['testService', 'method', {}]
+      queries: {
+        q1: ['consistentService', 'action1', {}],
+        q2: ['differentService', 'action', {}],
+        q3: ['consistentService', 'action2', {}]
       }
     })
 
-    const firstCallLogs = [...logCalls]
-    logCalls = []
+    // Find all logs for consistentService
+    const consistentLogs = captureState.outputs.filter(log =>
+      log.includes('[consistentService:'))
+    assert(consistentLogs.length >= 2, 'Should have multiple logs for consistentService')
 
-    // Second call with same service
-    await query({
-      settings: { debug: true },
-      services: {
-        testService: {
-          async method() {
-            return 'result2'
-          }
-        }
-      },
-      query: {
-        test2: ['testService', 'method', {}]
-      }
-    })
+    // Extract colors from logs using helper
+    const colors = consistentLogs.map(extractColor).filter(c => c !== null)
+    assert(colors.length >= 2, 'Should extract colors from logs')
 
-    const secondCallLogs = [...logCalls]
+    // All colors for the same service should be identical
+    const firstColor = colors[0]
+    assert(colors.every(c => c === firstColor), 'Same service should always use same color')
 
-    // Extract color from service logs
-    const extractColor = (logs) => {
-      const serviceLog = logs.find((log) =>
-        log.includes('[testService.method]'))
-      if (!serviceLog) return null
-
-      const colorCodes = [
-        '\x1b[32m', // green
-        '\x1b[33m', // yellow
-        '\x1b[34m', // blue
-        '\x1b[35m', // magenta
-        '\x1b[36m', // cyan
-        '\x1b[37m' // white
-      ]
-
-      for (const colorCode of colorCodes) {
-        if (serviceLog.includes(colorCode)) {
-          return colorCode
-        }
-      }
-      return null
-    }
-
-    const firstColor = extractColor(firstCallLogs)
-    const secondColor = extractColor(secondCallLogs)
-
-    assert(firstColor !== null, 'First call should have colored output')
-    assert(secondColor !== null, 'Second call should have colored output')
-    assert.strictEqual(
-      firstColor,
-      secondColor,
-      'Same service should use same color across calls'
-    )
+    // Different service should have different color
+    const differentLog = captureState.outputs.find(log =>
+      log.includes('[differentService:'))
+    assert(differentLog, 'Should find differentService log')
+    const differentColor = extractColor(differentLog)
+    assert(differentColor !== firstColor, 'Different services should have different colors')
   })
 
   it('should not use red color for services (reserved for errors)', async () => {
     await query({
-      settings: { debug: true },
+      settings: {debug: true},
       services: {
         testService: {
           async method() {
@@ -172,16 +135,15 @@ describe('Debug Color Tests', () => {
           }
         }
       },
-      query: {
+      queries: {
         test: ['testService', 'method', {}]
       }
     })
 
     // Check that no debug logs use red color
-    const redColorCode = '\x1b[31m'
-    const hasRedInDebugLogs = logCalls.some(
+    const hasRedInDebugLogs = captureState.outputs.some(
       (log) =>
-        log.includes('[testService.method]') && log.includes(redColorCode)
+        log.includes('[testService:method]') && log.includes(ANSI_COLORS.red)
     )
 
     assert(
