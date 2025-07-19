@@ -9,20 +9,21 @@ const withArgs = (fn) => {
   return async function (args = {}) {
     //console.log('withArgs this:', this)
     let {queryResults, contextStack} = this
+    //console.log('withArgs received context stack for args:', Object.keys(args), 'stack:', contextStack.stack)
 
     const resolvedArgs = _.cloneDeepWith(args, (value) => {
 
       // Recursively resolve all @ and $ references in the arguments
       if (typeof value === 'string') {
-        return resolveValue(queryResults, contextStack, value)
+        const resolved = resolveValue(queryResults, contextStack, value)
+        return resolved
       }
 
       // Set up a function prepared to receive context from the calling service
+      // Both onError and {type: 'function'} args are now just responsible for calling with (ctx)
       if (typeof value === 'function') {
-        const currentStack = contextStack.extend(null)
         return (ctx) => {
-          currentStack.setCurrent(ctx)
-          return value(queryResults, contextStack)
+          return value(queryResults, contextStack.extend(ctx))
         }
       }
 
@@ -78,19 +79,19 @@ const withRetry = (fn) => {
   return async function (args) {
     //console.log('withRetry this:', this)
     const {settings} = this
-    const {retryCount} = settings
+    const retry = settings.retry || 0
 
     let lastError
 
-    for (let attempt = 1; attempt <= retryCount + 1; attempt++) {
+    for (let attempt = 1; attempt <= retry + 1; attempt++) {
       try {
         return await fn.call(this, args)
       } catch (error) {
         lastError = error
 
-        if (attempt <= retryCount) {
+        if (attempt <= retry) {
           console.error(
-            `Failed (attempt ${attempt}/${retryCount + 1}), retrying...`
+            `Failed (attempt ${attempt}/${retry + 1}), retrying...`
           )
         }
       }
@@ -103,31 +104,27 @@ const withRetry = (fn) => {
 const withErrorHandling = (fn) => {
   return async function (args) {
     //console.log('withErrorHandling this:', this)
-    const {queryName, serviceName, action, queryResults} = this
-    let {contextStack} = this
+    const {queryName, serviceName, action} = this
 
     try {
       return await fn.call(this, args)
     } catch (error) {
       error.message = `[${queryName} - ${serviceName}:${action}] ${error.message}`
+      error.queryName = queryName
+      error.serviceName = serviceName
+      error.action = action
+      error.args = args
 
       // Handle with onError if provided
       if (args.onError) {
-
-        contextStack = contextStack.extend(null)
-        const handler = (ctx) => {
-          contextStack.setCurrent(ctx)
-          return args.onError(queryResults, contextStack)
-        }
-
         try {
-          args.onError(handler)
+          return args.onError(error)
 
         } catch (handlerError) {
           // Error handler failed
           if (!args.ignoreErrors) {
-            handlerError.message = `[${serviceName}:${action}] onError handler failed: ${handlerError.message}`
-            throw handlerError
+            const errorMessage = typeof handlerError === 'string' ? handlerError : handlerError.message
+            throw new Error(`[${serviceName}:${action}] onError handler failed: ${errorMessage}`)
           }
         }
       }
@@ -142,10 +139,11 @@ const withErrorHandling = (fn) => {
   }
 }
 
-
 const applyWrappers = (def, config) => {
   const {queryName, serviceName, action, args} = def
+  // TODO: change this to args when settings are being applied properly
   const settings = _.merge({}, config.settings, args.settings)
+
   const service = config.services[serviceName]
 
   // `this` context is preserved so service can call other sibling services
@@ -177,7 +175,8 @@ const applyWrappers = (def, config) => {
 
   // give all wrappers access to the full calling context so they don't have to fish for it
   // allow the contextStack to be passed at execution time
-  return (queryResults, contextStack) => wrapped.call({queryName, serviceName, action, settings, queryResults, contextStack}, args)
+  return (queryResults, contextStack) =>
+    wrapped.call({queryName, serviceName, action, settings, queryResults, contextStack}, args)
 }
 
 export default applyWrappers

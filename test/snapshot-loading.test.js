@@ -2,7 +2,7 @@ import assert from 'node:assert'
 import path from 'node:path'
 import {fileURLToPath} from 'node:url'
 import fs from 'fs-extra'
-import {describe, it} from 'node:test'
+import {describe, it, afterEach} from 'node:test'
 import query from '../query.js'
 import util from '../services/util.js'
 

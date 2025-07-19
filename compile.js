@@ -54,8 +54,21 @@ const getDeps = (args) => {
   return deps
 }
 
+const mergeSettingsAndReserveArgs = (config, serviceName, args, argtypes) => {
+  const timeout = config.settings?.timeout?.[serviceName] || config.settings?.timeout?.default
+  const defaults = _.omit(config.settings, 'timeout')
+  args.timeout ??= timeout
+
+  for (const [key, type] of Object.entries(argtypes)) {
+    // inject settings
+    if (type === 'settings') {
+      args[key] = _.defaults(args[key], defaults)
+    }
+  }
+}
+
 // Compile arguments based on argtypes metadata
-const compileArgs = (queryName, args, argtypes, config) => {
+const compileArgs = (queryName, serviceName, args, argtypes, config) => {
   const compiled = {}
 
   for (const [key, value] of Object.entries(args)) {
@@ -79,13 +92,7 @@ const compileArgs = (queryName, args, argtypes, config) => {
       compiled[key] = value
     }
   }
-
-  for (const [key, type] of Object.entries(argtypes)) {
-    // inject settings
-    if (type === 'settings') {
-      compiled[key] = _.merge({}, config.settings, compiled[key])
-    }
-  }
+  mergeSettingsAndReserveArgs(config, serviceName, args, argtypes)
 
   return compiled
 }
@@ -114,7 +121,7 @@ function compileServiceFunction(queryName, descriptor, config) {
     queryName,
     serviceName,
     action,
-    args: compileArgs(queryName, args, argtypes, config),
+    args: compileArgs(queryName, serviceName, args, argtypes, config),
     dependencies: getDeps(args)
   }
 

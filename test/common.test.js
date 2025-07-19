@@ -1,8 +1,10 @@
-import test from 'node:test'
 import assert from 'node:assert/strict'
+import {describe, it} from 'node:test'
 import {DEP_REGEX, METHOD_REGEX, AT_REGEX, BARE_DOLLAR_REGEX} from '../common.js'
 
-test('DEP_REGEX - matches dollar dependency patterns', () => {
+describe('Common Regex Tests', () => {
+  describe('DEP_REGEX - matches dollar dependency patterns', () => {
+    it('should match valid dollar dependency patterns', () => {
   // Valid matches
   const validCases = [
     ['$.foo', '$.foo', 'foo'],
@@ -49,9 +51,11 @@ test('DEP_REGEX - matches dollar dependency patterns', () => {
     assert.equal(match[0], expectedMatch)
     assert.equal(match[1], expectedCapture)
   })
-})
+    })
+  })
 
-test('METHOD_REGEX - matches method syntax', () => {
+  describe('METHOD_REGEX - matches method syntax', () => {
+    it('should match valid method syntax patterns', () => {
   // Valid matches
   const validCases = [
     ['service:method', 'service:method', 'service', 'method'],
@@ -91,9 +95,11 @@ test('METHOD_REGEX - matches method syntax', () => {
     const match = input.match(METHOD_REGEX)
     assert.equal(match, null, `Should not match: ${input}`)
   })
-})
+    })
+  })
 
-test('AT_REGEX - matches context references', () => {
+  describe('AT_REGEX - matches context references', () => {
+    it('should match valid context reference patterns', () => {
   // Valid matches - new regex structure: group 1 = @s, group 2 = entire optional part, group 3 = dot, group 4 = content
   const validCases = [
     ['@', '@', '@', undefined, undefined, undefined],
@@ -145,9 +151,11 @@ test('AT_REGEX - matches context references', () => {
     const match = input.match(AT_REGEX)
     assert.equal(match, null, `Should not match: ${input}`)
   })
-})
+    })
+  })
 
-test('BARE_DOLLAR_REGEX - matches bare dollar sign', () => {
+  describe('BARE_DOLLAR_REGEX - matches bare dollar sign', () => {
+    it('should match only bare dollar sign', () => {
   // Valid matches
   assert('$'.match(BARE_DOLLAR_REGEX), 'Should match bare $')
 
@@ -169,10 +177,11 @@ test('BARE_DOLLAR_REGEX - matches bare dollar sign', () => {
     const match = input.match(BARE_DOLLAR_REGEX)
     assert.equal(match, null, `Should not match: ${input}`)
   })
-})
+    })
+  })
 
-// Edge cases and boundary tests
-test('Regex edge cases', () => {
+  describe('Regex edge cases', () => {
+    it('should handle edge cases correctly', () => {
   // Testing empty strings
   assert.equal(''.match(DEP_REGEX), null)
   assert.equal(''.match(METHOD_REGEX), null)
@@ -194,10 +203,11 @@ test('Regex edge cases', () => {
   assert.equal('service:methodsuffix'.match(METHOD_REGEX)?.[0], 'service:methodsuffix') // Valid because 'methodsuffix' is a word
   assert.equal('prefix@.prop'.match(AT_REGEX), null)
   assert.equal('@.prop suffix'.match(AT_REGEX)?.[0], '@.prop suffix') // AT_REGEX doesn't use $ anchor
-})
+    })
+  })
 
-// Unicode and special character tests
-test('Regex unicode and special characters', () => {
+  describe('Regex unicode and special characters', () => {
+    it('should handle unicode and special characters', () => {
   // DEP_REGEX only allows word characters (\w)
   assert.equal('$.émoji'.match(DEP_REGEX), null)
   assert.equal('$.🚀'.match(DEP_REGEX), null)
@@ -210,4 +220,6 @@ test('Regex unicode and special characters', () => {
   assert.equal('@.émoji'.match(AT_REGEX)?.[4], 'émoji')
   assert.equal('@.🚀'.match(AT_REGEX)?.[4], '🚀')
   assert.equal('@.property[🔑]'.match(AT_REGEX)?.[4], 'property[🔑]')
+    })
+  })
 })

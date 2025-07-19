@@ -21,6 +21,7 @@ const resolveValue = (queryResults, contextStack, value) => {
   if (m) {
     const [__, ats, _dotandpath, _dot, path] = m
     const atCount = ats.length
+    //console.log('Resolving @:', value, 'atCount:', atCount, 'stack size:', contextStack.stack.length, 'stack:', contextStack.stack)
     const targetContext = contextStack.get(atCount)
     const result = path && path.length > 0 ? _.get(targetContext, path) : targetContext
     //console.log('ats:', ats, 'path:', path, 'result:', result)

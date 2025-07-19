@@ -42,7 +42,7 @@ describe('Timeout Tests', () => {
             result: ['slow', 'delay', {input: '$.given.value'}]
           }
         }),
-        /slow\.delay.*timed out after 100ms/
+        /result - slow:delay.*Timed out after 100ms/
       )
     })
 
@@ -137,7 +137,7 @@ describe('Timeout Tests', () => {
             ]
           }
         }),
-        /slow\.delay.*timed out after 100ms/
+        /result - slow:delay.*Timed out after 100ms/
       )
     })
   })
@@ -212,7 +212,7 @@ describe('Timeout Tests', () => {
             ]
           }
         }),
-        /step2\.delay.*timed out after 100ms/
+        /chained\[1\] - step2:delay.*Timed out after 100ms/
       )
     })
 

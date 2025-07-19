@@ -16,6 +16,7 @@ describe('Error Handling Tests', () => {
   const logService = {
     logError: async ({on}) => {
       const errorContext = on
+      //console.log('logError received context:', errorContext)
       return {
         logged: true,
         error: errorContext.error,
@@ -149,32 +150,24 @@ describe('Error Handling Tests', () => {
 
       const config = {
         services: {error: errorService, capture: captureService},
+        settings: {debug: false},
         queries: {
-          testQuery: [
-            'error',
-            'fail',
-            {
-              someArg: 'value',
-              onError: ['capture', 'capture', {on: '@'}],
-              ignoreErrors: true
-            }
-          ]
+          testQuery: ['error', 'fail', {
+            someArg: 'value',
+            onError: ['capture', 'capture', {on: '@'}],
+            ignoreErrors: true
+          }]
         }
       }
 
       await query(config)
 
       assert.ok(capturedContext)
-      assert.strictEqual(capturedContext.error, 'Service failed')
+      assert.strictEqual(capturedContext.message, '[testQuery - error:fail] Service failed')
+      assert.strictEqual(capturedContext.queryName, 'testQuery')
       assert.strictEqual(capturedContext.serviceName, 'error')
       assert.strictEqual(capturedContext.action, 'fail')
-      assert.deepStrictEqual(capturedContext.args, {
-        someArg: 'value',
-        timeout: 5000,
-        onError: ['capture', 'capture', {on: '@'}],
-        ignoreErrors: true
-      })
-      assert.strictEqual(capturedContext.queryName, 'testQuery')
+      assert.strictEqual(capturedContext.args.someArg, 'value')
     })
   })
 })

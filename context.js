@@ -8,9 +8,9 @@ class ContextStack {
   }
 
   get(depth) {
-    if (depth < 1) throw 'Depth must be 1 or greater'
+    if (depth < 1) throw new Error('Depth must be 1 or greater')
     const stackRef = this.stack.length - depth
-    if (stackRef < 0) throw 'Invalid stack reference.'
+    if (stackRef < 0) throw new Error('Invalid stack reference.')
     return this.stack[stackRef]
   }
 
@@ -18,7 +18,7 @@ class ContextStack {
 
   setCurrent(value) {
     const stackRef = this.stack.length - 1
-    if (stackRef < 0) throw 'Invalid stack reference.'
+    if (stackRef < 0) throw new Error('Invalid stack reference.')
     this.stack[stackRef] = value
   }
 
