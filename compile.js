@@ -9,7 +9,7 @@ import _ from 'lodash'
 import lodashDeep from 'lodash-deep'
 _.mixin(lodashDeep)
 
-import {DEP_REGEX, METHOD_REGEX} from './common.js'
+import {DEP_REGEX, METHOD_REGEX, RESERVE_ARGS} from './common.js'
 import applyWrappers from './wrappers.js'
 
 // Detects if a descriptor is a chain (nested arrays)
@@ -54,21 +54,24 @@ const getDeps = (args) => {
   return deps
 }
 
-const mergeSettingsAndReserveArgs = (config, serviceName, args, argtypes) => {
-  const timeout = config.settings?.timeout?.[serviceName] || config.settings?.timeout?.default
-  const defaults = _.omit(config.settings, 'timeout')
-  args.timeout ??= timeout
+// settings are merged from query level settings and service level settings
+// they are placed in their own `settings` key on the compiled service definition
+const compileSettings = (queryName, args, argtypes, config) => {
+  const reserveArgs = _.pick(args, RESERVE_ARGS)
+  const settingsArgs = _.pickBy(args, (a, k) => argtypes[k] === 'settings') // get args with their argtypes set to 'settings'
+  const settings = _.defaults({}, reserveArgs, ...Object.values(settingsArgs), config.settings)
 
-  for (const [key, type] of Object.entries(argtypes)) {
-    // inject settings
-    if (type === 'settings') {
-      args[key] = _.defaults(args[key], defaults)
-    }
+  // compile onError if we have it
+  if (settings.onError) {
+    const fn = compileServiceFunction(queryName, settings.onError, config)
+    settings.onError = fn.service
   }
+
+  return settings
 }
 
 // Compile arguments based on argtypes metadata
-const compileArgs = (queryName, serviceName, args, argtypes, config) => {
+const compileArgs = (queryName, serviceName, args, argtypes, config, settings) => {
   const compiled = {}
 
   for (const [key, value] of Object.entries(args)) {
@@ -83,16 +86,20 @@ const compileArgs = (queryName, serviceName, args, argtypes, config) => {
       const fn = compileServiceFunction(queryName, value, config)
       compiled[key] = fn.service
 
-    // compile onError to function
-    } else if (key === 'onError' && Array.isArray(value)) {
-      const fn = compileServiceFunction(queryName, value, config)
-      compiled[key] = fn.service
+    } else if (RESERVE_ARGS.includes(key)) {
+      // exclude reserve args
 
     } else {
       compiled[key] = value
     }
   }
-  mergeSettingsAndReserveArgs(config, serviceName, args, argtypes)
+
+  for (const [key, type] of Object.entries(argtypes)) {
+    // inject settings if requested
+    if (type === 'settings') {
+      args[key] = _.defaults(args[key], settings)
+    }
+  }
 
   return compiled
 }
@@ -113,15 +120,17 @@ function compileServiceFunction(queryName, descriptor, config) {
   } else {
     throw new Error(`Service '${serviceName}' must be an object with methods in the form: async (args) => result`)
   }
+  const argtypes = config.services[serviceName][action]._argtypes || {}
+  const settings = compileSettings(queryName, args, argtypes, config)
 
   // Compile function arguments based on _argtypes
-  const argtypes = config.services[serviceName][action]._argtypes || {}
   const serviceDef = {
     type: 'service',
     queryName,
     serviceName,
     action,
-    args: compileArgs(queryName, serviceName, args, argtypes, config),
+    settings,
+    args: compileArgs(queryName, serviceName, args, argtypes, config, settings),
     dependencies: getDeps(args)
   }
 

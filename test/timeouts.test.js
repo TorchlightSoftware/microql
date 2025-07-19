@@ -34,9 +34,7 @@ describe('Timeout Tests', () => {
             slow: createDelayService(200, 'slow')
           },
           settings: {
-            timeout: {
-              default: 100
-            }
+            timeout: 100
           },
           queries: {
             result: ['slow', 'delay', {input: '$.given.value'}]
@@ -53,9 +51,7 @@ describe('Timeout Tests', () => {
           fast: createDelayService(50, 'fast')
         },
         settings: {
-          timeout: {
-            default: 100
-          }
+          timeout: 100
         },
         queries: {
           result: ['fast', 'delay', {input: '$.given.value'}]
@@ -67,26 +63,6 @@ describe('Timeout Tests', () => {
   })
 
   describe('Timeout Priority', () => {
-    it('should use service-specific timeout over default', async () => {
-      const result = await query({
-        given: {value: 'test'},
-        services: {
-          medium: createDelayService(150, 'medium')
-        },
-        settings: {
-          timeout: {
-            default: 100,
-            medium: 200
-          }
-        },
-        queries: {
-          result: ['medium', 'delay', {input: '$.given.value'}]
-        }
-      })
-
-      assert.strictEqual(result.result, 'medium completed after 150ms')
-    })
-
     it('should use argument timeout over service and default', async () => {
       const result = await query({
         given: {value: 'test'},
@@ -94,20 +70,10 @@ describe('Timeout Tests', () => {
           slow: createDelayService(150, 'slow')
         },
         settings: {
-          timeout: {
-            default: 100,
-            slow: 120
-          }
+          timeout: 100
         },
         queries: {
-          result: [
-            'slow',
-            'delay',
-            {
-              input: '$.given.value',
-              timeout: 200
-            }
-          ]
+          result: ['slow', 'delay', {input: '$.given.value', timeout: 200}]
         }
       })
 
@@ -122,19 +88,10 @@ describe('Timeout Tests', () => {
             slow: createDelayService(150, 'slow')
           },
           settings: {
-            timeout: {
-              default: 1000
-            }
+            timeout: 1000
           },
           queries: {
-            result: [
-              'slow',
-              'delay',
-              {
-                input: '$.given.value',
-                timeout: 100
-              }
-            ]
+            result: ['slow', 'delay', {input: '$.given.value', timeout: 100}]
           }
         }),
         /result - slow:delay.*Timed out after 100ms/
@@ -152,15 +109,12 @@ describe('Timeout Tests', () => {
           slow: createDelayService(150, 'slow')
         },
         settings: {
-          timeout: {
-            default: 100,
-            slow: 200
-          }
+          timeout: 100
         },
         queries: {
           fastResult: ['fast', 'delay', {input: '$.given.value'}],
           mediumResult: ['medium', 'delay', {input: '$.given.value'}],
-          slowResult: ['slow', 'delay', {input: '$.given.value'}]
+          slowResult: ['slow', 'delay', {input: '$.given.value', timeout: 200}]
         }
       })
 
@@ -177,9 +131,7 @@ describe('Timeout Tests', () => {
           step2: createDelayService(60, 'step2')
         },
         settings: {
-          timeout: {
-            default: 200
-          }
+          timeout: 200
         },
         queries: {
           chained: [
@@ -201,9 +153,7 @@ describe('Timeout Tests', () => {
             step2: createDelayService(150, 'step2')
           },
           settings: {
-            timeout: {
-              default: 100
-            }
+            timeout: 100
           },
           queries: {
             chained: [
@@ -214,55 +164,6 @@ describe('Timeout Tests', () => {
         }),
         /chained\[1\] - step2:delay.*Timed out after 100ms/
       )
-    })
-
-    it('should pass timeout value to service', async () => {
-      let receivedTimeout = null
-
-      await query({
-        given: {value: 'test'},
-        services: {
-          test: {
-            async check(args) {
-              receivedTimeout = args.timeout
-              return 'completed'
-            }
-          }
-        },
-        settings: {
-          timeout: {
-            default: 200,
-            test: 300
-          }
-        },
-        queries: {
-          withServiceTimeout: ['test', 'check', {data: 'x'}],
-          withArgTimeout: ['test', 'check', {data: 'y', timeout: 400}]
-        }
-      })
-
-      // Last call should have received timeout: 400
-      assert.strictEqual(receivedTimeout, 400)
-    })
-
-    it('should use service-specific timeout', async () => {
-      const result = await query({
-        given: {value: 'test'},
-        services: {
-          slow: createDelayService(150, 'slow')
-        },
-        settings: {
-          timeout: {
-            default: 100,
-            slow: 200
-          }
-        },
-        queries: {
-          result: ['slow', 'delay', {input: '$.given.value'}]
-        }
-      })
-
-      assert.strictEqual(result.result, 'slow completed after 150ms')
     })
   })
 })

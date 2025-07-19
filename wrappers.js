@@ -20,7 +20,7 @@ const withArgs = (fn) => {
       }
 
       // Set up a function prepared to receive context from the calling service
-      // Both onError and {type: 'function'} args are now just responsible for calling with (ctx)
+      // {type: 'function'} args are now just responsible for calling with (ctx)
       if (typeof value === 'function') {
         return (ctx) => {
           return value(queryResults, contextStack.extend(ctx))
@@ -63,12 +63,12 @@ const withDebug = (fn) => {
 const withTimeout = (fn) => {
   return async function (args) {
     //console.log('withTimeout this:', this)
-    const {settings} = this
+    const {timeout} = this.settings
 
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(() => {
-        reject(new Error(`Timed out after ${settings.timeout}ms`))
-      }, settings.timeout)
+        reject(new Error(`Timed out after ${timeout}ms`))
+      }, timeout)
     })
 
     return Promise.race([fn.call(this, args), timeoutPromise])
@@ -78,8 +78,7 @@ const withTimeout = (fn) => {
 const withRetry = (fn) => {
   return async function (args) {
     //console.log('withRetry this:', this)
-    const {settings} = this
-    const retry = settings.retry || 0
+    const retry = this.settings.retry || 0
 
     let lastError
 
@@ -104,7 +103,7 @@ const withRetry = (fn) => {
 const withErrorHandling = (fn) => {
   return async function (args) {
     //console.log('withErrorHandling this:', this)
-    const {queryName, serviceName, action} = this
+    const {queryName, serviceName, action, settings, queryResults, contextStack} = this
 
     try {
       return await fn.call(this, args)
@@ -116,13 +115,14 @@ const withErrorHandling = (fn) => {
       error.args = args
 
       // Handle with onError if provided
-      if (args.onError) {
+      if (settings.onError) {
+        const errorContextStack = contextStack.extend(error)
         try {
-          return args.onError(error)
+          return settings.onError(queryResults, errorContextStack)
 
         } catch (handlerError) {
           // Error handler failed
-          if (!args.ignoreErrors) {
+          if (!settings.ignoreErrors) {
             const errorMessage = typeof handlerError === 'string' ? handlerError : handlerError.message
             throw new Error(`[${serviceName}:${action}] onError handler failed: ${errorMessage}`)
           }
@@ -130,7 +130,7 @@ const withErrorHandling = (fn) => {
       }
 
       // Re-throw original error
-      if (!args.ignoreErrors) {
+      if (!settings.ignoreErrors) {
         throw error
       }
 
@@ -140,9 +140,7 @@ const withErrorHandling = (fn) => {
 }
 
 const applyWrappers = (def, config) => {
-  const {queryName, serviceName, action, args} = def
-  // TODO: change this to args when settings are being applied properly
-  const settings = _.merge({}, config.settings, args.settings)
+  const {queryName, serviceName, action, args, settings} = def
 
   const service = config.services[serviceName]
 

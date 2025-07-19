@@ -70,9 +70,9 @@ describe('Debug Color Tests', () => {
 
     // Should have debug logs for each service
     const output = captureState.outputs.join('')
-    assert(output.includes('[serviceA:test]'), 'Should log serviceA calls')
-    assert(output.includes('[serviceB:test]'), 'Should log serviceB calls')
-    assert(output.includes('[serviceC:test]'), 'Should log serviceC calls')
+    assert(output.includes('[testA - serviceA:test]'), 'Should log serviceA calls')
+    assert(output.includes('[testB - serviceB:test]'), 'Should log serviceB calls')
+    assert(output.includes('[testC - serviceC:test]'), 'Should log serviceC calls')
 
     // Check for ANSI color codes in the logs
     const coloredLogs = captureState.outputs.filter(log => extractColor(log) !== null)
@@ -106,7 +106,7 @@ describe('Debug Color Tests', () => {
 
     // Find all logs for consistentService
     const consistentLogs = captureState.outputs.filter(log =>
-      log.includes('[consistentService:'))
+      log.includes('- consistentService:'))
     assert(consistentLogs.length >= 2, 'Should have multiple logs for consistentService')
 
     // Extract colors from logs using helper
@@ -119,7 +119,7 @@ describe('Debug Color Tests', () => {
 
     // Different service should have different color
     const differentLog = captureState.outputs.find(log =>
-      log.includes('[differentService:'))
+      log.includes('- differentService:'))
     assert(differentLog, 'Should find differentService log')
     const differentColor = extractColor(differentLog)
     assert(differentColor !== firstColor, 'Different services should have different colors')
@@ -143,7 +143,7 @@ describe('Debug Color Tests', () => {
     // Check that no debug logs use red color
     const hasRedInDebugLogs = captureState.outputs.some(
       (log) =>
-        log.includes('[testService:method]') && log.includes(ANSI_COLORS.red)
+        log.includes('- testService:method]') && log.includes(ANSI_COLORS.red)
     )
 
     assert(

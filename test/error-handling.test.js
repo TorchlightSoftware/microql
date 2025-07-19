@@ -19,7 +19,7 @@ describe('Error Handling Tests', () => {
       //console.log('logError received context:', errorContext)
       return {
         logged: true,
-        error: errorContext.error,
+        error: errorContext.message,
         service: `${errorContext.serviceName}.${errorContext.action}`
       }
     },
@@ -27,7 +27,7 @@ describe('Error Handling Tests', () => {
       const errorContext = on
       return {
         queryLogged: true,
-        error: errorContext.error,
+        error: errorContext.message,
         queryName: errorContext.queryName
       }
     }
@@ -37,21 +37,16 @@ describe('Error Handling Tests', () => {
     it('should call onError handler when service fails', async () => {
       const config = {
         services: {error: errorService, log: logService},
+        settings: {debug: true},
         queries: {
-          result: [
-            'error',
-            'fail',
-            {
-              onError: ['log', 'logError', {on: '@'}]
-            }
-          ]
+          result: ['error', 'fail', {onError: ['log', 'logError', {on: '@'}]}]
         }
       }
 
       const result = await query(config)
       assert.deepStrictEqual(result.result, {
         logged: true,
-        error: 'Service failed',
+        error: '[result - error:fail] Service failed',
         service: 'error.fail'
       })
     })
@@ -84,19 +79,15 @@ describe('Error Handling Tests', () => {
       const config = {
         services: {error: errorService, customLog},
         queries: {
-          result: [
-            'error',
-            'fail',
-            {
-              onError: ['customLog', 'track', {on: '@'}],
-              ignoreErrors: true
-            }
-          ]
+          result: ['error', 'fail', {
+            onError: ['customLog', 'track', {on: '@'}],
+            ignoreErrors: true
+          }]
         }
       }
 
       const result = await query(config)
-      assert.strictEqual(result.result, null)
+      assert.deepStrictEqual(result.result, {tracked: true})
       assert.strictEqual(errorLogged, true)
     })
   })
