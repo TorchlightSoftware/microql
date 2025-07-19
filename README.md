@@ -10,12 +10,12 @@ I probably just reinvented prolog.  Oh well.
 ```js
 query({
   debug: true,
-  input: {car: 'Monkey'},
+  given: {car: 'Monkey'},
   services: {fieldAgent, truck},
-  query: {
+  queries: {
 
     // result       service        action            args
-    monkey:    ['fieldAgent', 'findAnimal',     {animal: '$.input.creatureType'}],
+    monkey:    ['fieldAgent', 'findAnimal',     {animal: '$.given.creatureType'}],
     caged:     ['fieldAgent', 'tranquilize',    {animal: '$.monkey'}],
     pet:       ['truck',      'bringHome',      {animal: '$.caged'}],
   },

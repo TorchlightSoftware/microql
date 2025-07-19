@@ -5,15 +5,12 @@
  * Handles service validation and dependency extraction.
  */
 
-// Setup lodash with deep extensions
 import _ from 'lodash'
 import lodashDeep from 'lodash-deep'
 _.mixin(lodashDeep)
 
-const DEP_REGEX = /\$\.(\w+)/
-const METHOD_REGEX = /^(\w+):(\w+)$/
-const AT_REGEX = /^@(\..+)?$/
-const BARE_DOLLAR_REGEX = /^\$$/
+import {DEP_REGEX, METHOD_REGEX} from './common.js'
+import applyWrappers from './wrappers.js'
 
 // Detects if a descriptor is a chain (nested arrays)
 const isChain = (descriptor) => {
@@ -41,34 +38,117 @@ const transformMethodSyntax = (descriptor) => {
   const [, serviceName, method] = match
 
   // Transform to standard form: [service, method, { ...args, on: target }]
-  return [serviceName, method, { ...args, on: target }]
+  const serviceCall = [serviceName, method, {...args, on: target}]
+
+  //console.log('transformMethodSyntax transformed:', descriptor, 'to:', serviceCall)
+  return serviceCall
 }
 
 // Extracts dependencies from query arguments
 const getDeps = (args) => {
-  const deps = []
+  const deps = new Set()
   _.deepMapValues(args, (value) => {
     let m = (typeof value === 'string') && value.match(DEP_REGEX)
-    if (m) deps.push(m[1])
+    if (m) deps.add(m[1])
   })
-  return _.uniq(deps)
+  return deps
 }
 
 // Compile arguments based on argtypes metadata
-const compileArgs = (args, argtypes) => {
+const compileArgs = (queryName, args, argtypes, config) => {
   const compiled = {}
 
   for (const [key, value] of Object.entries(args)) {
-    if (argtypes[key] === 'function' && typeof value === 'object' && value !== null && !Array.isArray(value)) {
-      // Compile object to function that returns the object with resolved values
-      compiled[key] = { _type: 'compiled_function', template: value }
+
+    // compile object to function template
+    if (argtypes[key] === 'function' && typeof value === 'object' && !Array.isArray(value)) {
+      const fn = compileServiceFunction(queryName, ['util', 'template', value], config)
+      compiled[key] = fn.service
+
+    // compile service to function
+    } else if (argtypes[key] === 'function' && Array.isArray(value)) {
+      const fn = compileServiceFunction(queryName, value, config)
+      compiled[key] = fn.service
+
+    // compile onError to function
+    } else if (key === 'onError' && Array.isArray(value)) {
+      const fn = compileServiceFunction(queryName, value, config)
+      compiled[key] = fn.service
+
     } else {
       compiled[key] = value
     }
   }
 
+  for (const [key, type] of Object.entries(argtypes)) {
+    // inject settings
+    if (type === 'settings') {
+      compiled[key] = _.merge({}, config.settings, compiled[key])
+    }
+  }
+
   return compiled
 }
+
+// turn a descriptor like ['@', 'util:print', {color: 'green'}] into [a compiled function, recursive dependencies]
+function compileServiceFunction(queryName, descriptor, config) {
+  const [serviceName, action, args] = transformMethodSyntax(descriptor)
+
+  // Validate service exists and has the required method
+  if (!config.services[serviceName]) {
+    throw new Error(`Service '${serviceName}' not found`)
+  }
+
+  if (typeof config.services[serviceName] === 'object') {
+    if (!config.services[serviceName][action] || typeof config.services[serviceName][action] !== 'function') {
+      throw new Error(`Method '${action}' not found on service '${serviceName}'`)
+    }
+  } else {
+    throw new Error(`Service '${serviceName}' must be an object with methods in the form: async (args) => result`)
+  }
+
+  // Compile function arguments based on _argtypes
+  const argtypes = config.services[serviceName][action]._argtypes || {}
+  const serviceDef = {
+    type: 'service',
+    queryName,
+    serviceName,
+    action,
+    args: compileArgs(queryName, args, argtypes, config),
+    dependencies: getDeps(args)
+  }
+
+  // prepare the service with arg resolution, debugging, error handling, timeout, retry
+  serviceDef.service = applyWrappers(serviceDef, config)
+
+  return serviceDef
+}
+
+function compileDescriptor(queryName, descriptor, config) {
+  // Handle chains - arrays of service calls
+  if (isChain(descriptor)) {
+    let allDeps = new Set()
+
+    // for each step in chain, collect the service definition and the dependencies
+    const chainSteps = descriptor.map((d, i) => {
+      const def = compileServiceFunction(`${queryName}[${i}]`, d, config)
+      allDeps = allDeps.union(def.dependencies)
+      def.stepIndex = i
+      delete def.dependencies
+      return def
+    })
+
+    return {
+      type: 'chain',
+      steps: chainSteps,
+      dependencies: allDeps
+    }
+  } else {
+    // Handle single service call
+    return compileServiceFunction(queryName, descriptor, config)
+  }
+}
+
 
 /**
  * Compile a query configuration into an execution plan
@@ -80,93 +160,13 @@ const compileArgs = (args, argtypes) => {
  * @returns {Object} Compiled execution plan
  */
 export function compile(config) {
-  const { services, queries, given, debug } = config
+  const {services, queries, given, debug} = config
 
   // Build execution plan for each query
   const executionPlan = {}
 
   for (const [queryName, descriptor] of Object.entries(queries)) {
-    // Handle chains - arrays of service calls
-    if (isChain(descriptor)) {
-      const chainSteps = []
-      let allDeps = new Set()
-
-      for (let i = 0; i < descriptor.length; i++) {
-        const step = descriptor[i]
-        const transformedStep = transformMethodSyntax(step)
-        const [serviceName, action, args] = transformedStep
-
-        // Collect dependencies from this step
-        const stepDeps = getDeps(args)
-        stepDeps.forEach(dep => allDeps.add(dep))
-
-        // Validate service exists and has the required method
-        if (!services[serviceName]) {
-          throw new Error(`Service '${serviceName}' not found`)
-        }
-
-        if (typeof services[serviceName] === 'function') {
-          // Function service - no method validation needed
-        } else if (typeof services[serviceName] === 'object') {
-          // Object service - validate method exists
-          if (!services[serviceName][action] || typeof services[serviceName][action] !== 'function') {
-            throw new Error(`Method '${action}' not found on service '${serviceName}'`)
-          }
-        } else {
-          throw new Error(`Service '${serviceName}' must be a function or object`)
-        }
-
-        // Compile function arguments based on _argtypes
-        const argtypes = typeof services[serviceName] === 'function' ? {} : (services[serviceName][action]._argtypes || {})
-        const compiledArgs = compileArgs(args, argtypes)
-
-        chainSteps.push({
-          serviceName,
-          action,
-          args: compiledArgs,
-          stepIndex: i
-        })
-      }
-
-      executionPlan[queryName] = {
-        type: 'chain',
-        steps: chainSteps,
-        dependencies: Array.from(allDeps)
-      }
-    } else {
-      // Handle single service call
-      const transformedDescriptor = transformMethodSyntax(descriptor)
-      const [serviceName, action, args] = transformedDescriptor
-      const deps = getDeps(args)
-
-      // Validate service exists and has the required method
-      if (!services[serviceName]) {
-        throw new Error(`Service '${serviceName}' not found`)
-      }
-
-      if (typeof services[serviceName] === 'function') {
-        // Function service - no method validation needed
-      } else if (typeof services[serviceName] === 'object') {
-        // Object service - validate method exists
-        if (!services[serviceName][action] || typeof services[serviceName][action] !== 'function') {
-          throw new Error(`Method '${action}' not found on service '${serviceName}'`)
-        }
-      } else {
-        throw new Error(`Service '${serviceName}' must be a function or object`)
-      }
-
-      // Compile function arguments based on _argtypes
-      const argtypes = typeof services[serviceName] === 'function' ? {} : (services[serviceName][action]._argtypes || {})
-      const compiledArgs = compileArgs(args, argtypes)
-
-      executionPlan[queryName] = {
-        type: 'service',
-        serviceName,
-        action,
-        args: compiledArgs,
-        dependencies: deps
-      }
-    }
+    executionPlan[queryName] = compileDescriptor(queryName, descriptor, config)
   }
 
   return {
@@ -177,4 +177,4 @@ export function compile(config) {
   }
 }
 
-export { getDeps, DEP_REGEX, AT_REGEX, BARE_DOLLAR_REGEX, transformMethodSyntax, hasMethodSyntax, isChain }
+export default compile

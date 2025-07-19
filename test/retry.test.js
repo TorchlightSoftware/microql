@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import {describe, it} from 'node:test'
 import query from '../query.js'
 
 describe('Retry Tests', () => {
@@ -8,19 +8,21 @@ describe('Retry Tests', () => {
       let callCount = 0
 
       const services = {
-        flaky: async (_action, _args) => {
-          callCount++
-          if (callCount < 3) {
-            throw new Error('Service temporarily unavailable')
+        flaky: {
+          async process(_args) {
+            callCount++
+            if (callCount < 3) {
+              throw new Error('Service temporarily unavailable')
+            }
+            return {success: true, attempts: callCount}
           }
-          return { success: true, attempts: callCount }
         }
       }
 
       const result = await query({
-        given: { value: 'test' },
+        given: {value: 'test'},
         services,
-        query: {
+        queries: {
           result: [
             'flaky',
             'process',
@@ -41,17 +43,19 @@ describe('Retry Tests', () => {
       let callCount = 0
 
       const services = {
-        broken: async (_action, _args) => {
-          callCount++
-          throw new Error('Service permanently broken')
+        broken: {
+          async process(_args) {
+            callCount++
+            throw new Error('Service permanently broken')
+          }
         }
       }
 
       try {
         await query({
-          given: { value: 'test' },
+          given: {value: 'test'},
           services,
-          query: {
+          queries: {
             result: [
               'broken',
               'process',
@@ -74,16 +78,18 @@ describe('Retry Tests', () => {
       let callCount = 0
 
       const services = {
-        stable: async (_action, _args) => {
-          callCount++
-          return { success: true }
+        stable: {
+          async process(_args) {
+            callCount++
+            return {success: true}
+          }
         }
       }
 
       const result = await query({
-        given: { value: 'test' },
+        given: {value: 'test'},
         services,
-        query: {
+        queries: {
           result: [
             'stable',
             'process',
@@ -102,18 +108,20 @@ describe('Retry Tests', () => {
 
     it('should pass retry value to service', async () => {
       const services = {
-        aware: async (_action, args) => {
-          return {
-            retryReceived: args.retry,
-            timeoutReceived: args.timeout
+        aware: {
+          async check(args) {
+            return {
+              retryReceived: args.retry,
+              timeoutReceived: args.timeout
+            }
           }
         }
       }
 
       const result = await query({
-        given: { value: 'test' },
+        given: {value: 'test'},
         services,
-        query: {
+        queries: {
           result: [
             'aware',
             'check',
@@ -134,29 +142,30 @@ describe('Retry Tests', () => {
 
   describe('Retry with Chains', () => {
     it('should retry individual steps in a chain', async () => {
-      const callCounts = { step1: 0, step2: 0 }
+      const callCounts = {step1: 0, step2: 0}
 
       const services = {
-        chain: async (action, args) => {
-          if (action === 'step1') {
+        chain: {
+          async step1(args) {
             callCounts.step1++
-            return { step: 1, data: args.input }
-          } else if (action === 'step2') {
+            return {step: 1, data: args.input}
+          },
+          async step2(args) {
             callCounts.step2++
             if (callCounts.step2 < 2) {
               throw new Error('Step 2 failed')
             }
-            return { step: 2, data: args.input, previous: args.previous }
+            return {step: 2, data: args.input, previous: args.previous}
           }
         }
       }
 
       const result = await query({
-        given: { value: 'test' },
+        given: {value: 'test'},
         services,
-        query: {
+        queries: {
           result: [
-            ['chain', 'step1', { input: '$.given.value' }],
+            ['chain', 'step1', {input: '$.given.value'}],
             [
               'chain',
               'step2',
@@ -183,25 +192,25 @@ describe('Retry Tests', () => {
 
       const services = {
         processor: {
-          transform: async ({ on, retry }) => {
+          transform: async ({on, retry}) => {
             callCount++
             if (callCount < 2) {
               throw new Error('Transform failed')
             }
-            return on.map((item) => ({ ...item, processed: true }))
+            return on.map((item) => ({...item, processed: true}))
           }
         }
       }
 
       const result = await query({
         given: {
-          items: [{ id: 1 }, { id: 2 }]
+          items: [{id: 1}, {id: 2}]
         },
         services,
         methods: ['processor'],
-        query: {
+        queries: {
           // Method syntax with retry
-          result: ['$.given.items', 'processor:transform', { retry: 2 }]
+          result: ['$.given.items', 'processor:transform', {retry: 2}]
         },
         select: 'result'
       })

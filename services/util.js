@@ -5,29 +5,14 @@
 
 import path from 'node:path'
 import fs from 'fs-extra'
-
-/**
- * Available color names for util:print service
- */
-const COLORS = {
-  red: '\x1b[31m',
-  green: '\x1b[32m',
-  yellow: '\x1b[33m',
-  blue: '\x1b[34m',
-  magenta: '\x1b[35m',
-  cyan: '\x1b[36m',
-  white: '\x1b[37m',
-  reset: '\x1b[0m'
-}
+import {ANSI_COLORS} from '../common.js'
 
 /**
  * Ordered list of color names for service assignment
  */
 const COLOR_NAMES = ['green', 'yellow', 'blue', 'magenta', 'cyan', 'white']
 
-/**
- * Validation utility for checking argument types
- */
+// TODO: get rid of this, it's garbage
 const validateType = (value, expectedType, name) => {
   if (expectedType === 'array' && !Array.isArray(value)) {
     throw new Error(`${name}: expected array, got ${typeof value}`)
@@ -64,7 +49,7 @@ const util = {
   /**
    * Transform each item in a collection using a function
    */
-  async map({ on, fn }) {
+  async map({on, fn}) {
     validateType(on, 'array', 'on')
 
     if (fn && typeof fn === 'function') {
@@ -77,7 +62,7 @@ const util = {
   /**
    * Filter collection based on a predicate function
    */
-  async filter({ on, predicate }) {
+  async filter({on, predicate}) {
     validateType(on, 'array', 'on')
 
     if (!predicate || typeof predicate !== 'function') {
@@ -91,15 +76,15 @@ const util = {
   /**
    * Map and then flatten the results
    */
-  async flatMap({ on, fn }) {
-    const results = await util.map({ on, fn })
+  async flatMap({on, fn}) {
+    const results = await util.map({on, fn})
     return results.flat()
   },
 
   /**
    * Concatenate multiple arrays into a single array
    */
-  async concat({ args }) {
+  async concat({args}) {
     if (!Array.isArray(args)) {
       throw new Error('Args must be an array of arrays')
     }
@@ -110,49 +95,49 @@ const util = {
   /**
    * Conditional logic - return different values based on test
    */
-  async when({ test, then, or }) {
+  async when({test, then, or}) {
     return test ? then : or
   },
 
   /**
    * Equality comparison
    */
-  async eq({ l, r }) {
+  async eq({l, r}) {
     return l === r
   },
 
   /**
    * Greater than comparison
    */
-  async gt({ l, r }) {
+  async gt({l, r}) {
     return l > r
   },
 
   /**
    * Less than comparison
    */
-  async lt({ l, r }) {
+  async lt({l, r}) {
     return l < r
   },
 
   /**
    * Check if value exists (not null/undefined)
    */
-  async exists({ value }) {
+  async exists({value}) {
     return value != null
   },
 
   /**
    * Get length of array or string
    */
-  async length({ value }) {
+  async length({value}) {
     return value?.length || 0
   },
 
   /**
    * Pick specific fields from an object (similar to lodash pick)
    */
-  async pick({ on, fields }) {
+  async pick({on, fields}) {
     if (!on || typeof on !== 'object' || Array.isArray(on)) {
       throw new Error('`on` must be an object')
     }
@@ -175,12 +160,12 @@ const util = {
    * Print values to console with formatting options and color coding
    * Uses query-level inspect settings for consistent formatting
    */
-  async print({ on, settings, color, ts = true }) {
+  async print({on, settings, color}) {
     if (settings && typeof settings !== 'object')
       throw new Error('`settings` if provided must be an object')
 
     // Format timestamp if enabled
-    const timestamp = ts ? `[${new Date().toISOString()}] ` : ''
+    const timestamp = settings?.ts ? `[${new Date().toISOString()}] ` : ''
 
     // Filter hidden properties (starting with _) before formatting
     const filterHidden = (val) => {
@@ -211,8 +196,8 @@ const util = {
     }
 
     // Apply color if specified
-    const colorCode = COLORS[color] || ''
-    const resetCode = colorCode ? COLORS.reset : ''
+    const colorCode = ANSI_COLORS[color] || ''
+    const resetCode = colorCode ? ANSI_COLORS.reset : ''
 
     // Print with formatting and color
     process.stdout.write(`${colorCode + timestamp + formatted + resetCode}\n`)
@@ -237,7 +222,7 @@ const util = {
    * The `$` reference unlike most paths, does not imply waiting for any queries to finish.
    * This allows capturing current execution state at any point.
    */
-  async snapshot({ on, capture, out }) {
+  async snapshot({on, capture, out}) {
     if (!out) {
       throw new Error('snapshot requires "out" argument specifying file path')
     }
@@ -265,7 +250,7 @@ const util = {
   /**
    * Record a failure to disk with error context from MicroQL
    */
-  async recordFailure({ on, location }) {
+  async recordFailure({on, location}) {
     if (!location) {
       throw new Error(
         'recordFailure requires "location" argument specifying directory path'
@@ -312,10 +297,8 @@ const util = {
    * Template service - returns the provided template object
    * MicroQL handles @ symbol resolution automatically through arg compilation
    */
-  template(templateArgs) {
-    // Remove any non-template arguments (like auto-injected settings)
-    const { settings, ...template } = templateArgs
-    return template
+  template(args) {
+    return args
   }
 }
 
@@ -337,7 +320,7 @@ util.when._argtypes = {
 }
 
 util.print._argtypes = {
-  settings: 'function'
+  settings: 'settings'
 }
 
 util.snapshot._argtypes = {
@@ -348,4 +331,4 @@ util.snapshot._argtypes = {
 util.template._argtypes = {}
 
 export default util
-export { COLOR_NAMES }
+export {COLOR_NAMES}

@@ -1,7 +1,7 @@
 import assert from 'node:assert'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import {afterEach, beforeEach, describe, it} from 'node:test'
 import query from '../query.js'
-import util from '../util.js'
+import util from '../services/util.js'
 
 describe('Settings Override Tests', () => {
   let originalWrite
@@ -27,7 +27,7 @@ describe('Settings Override Tests', () => {
 
     await query({
       given: testData,
-      services: { util },
+      services: {util},
       settings: {
         inspect: {
           maxArrayLength: 2,
@@ -35,7 +35,7 @@ describe('Settings Override Tests', () => {
           colors: false
         }
       },
-      query: {
+      queries: {
         result: [
           'util',
           'print',
@@ -80,7 +80,7 @@ describe('Settings Override Tests', () => {
 
     await query({
       given: testData,
-      services: { util },
+      services: {util},
       settings: {
         inspect: {
           depth: 1, // This should be preserved
@@ -88,7 +88,7 @@ describe('Settings Override Tests', () => {
           colors: false
         }
       },
-      query: {
+      queries: {
         result: [
           'util',
           'print',
@@ -119,8 +119,8 @@ describe('Settings Override Tests', () => {
 
   it('should work with nested setting overrides', async () => {
     await query({
-      given: { test: 'value' },
-      services: { util },
+      given: {test: 'value'},
+      services: {util},
       settings: {
         inspect: {
           depth: 2,
@@ -129,7 +129,7 @@ describe('Settings Override Tests', () => {
         },
         debug: false
       },
-      query: {
+      queries: {
         result: [
           'util',
           'print',
@@ -155,13 +155,13 @@ describe('Settings Override Tests', () => {
   it('should handle completely new settings branches', async () => {
     await query({
       given: ['a', 'b'],
-      services: { util },
+      services: {util},
       settings: {
         inspect: {
           depth: 1
         }
       },
-      query: {
+      queries: {
         result: [
           'util',
           'print',

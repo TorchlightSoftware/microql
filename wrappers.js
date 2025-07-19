@@ -1,64 +1,72 @@
 import _ from 'lodash'
+import resolveValue from './resolve.js'
+import {getServiceColor} from './common.js'
+import {inspect} from 'util'
+
+import utilService from './services/util.js'
+
+const withArgs = (fn) => {
+  return async function (args = {}) {
+    //console.log('withArgs this:', this)
+    let {queryResults, contextStack} = this
+
+    const resolvedArgs = _.cloneDeepWith(args, (value) => {
+
+      // Recursively resolve all @ and $ references in the arguments
+      if (typeof value === 'string') {
+        return resolveValue(queryResults, contextStack, value)
+      }
+
+      // Set up a function prepared to receive context from the calling service
+      if (typeof value === 'function') {
+        const currentStack = contextStack.extend(null)
+        return (ctx) => {
+          currentStack.setCurrent(ctx)
+          return value(queryResults, contextStack)
+        }
+      }
+
+      // Let cloneDeepWith handle objects and arrays recursively
+      return undefined
+    })
+
+    return await fn.call(this, resolvedArgs)
+  }
+}
 
 const withDebug = (fn) => {
-  const {serviceName, action, settings} = this
   return async function (args) {
+    //console.log('withDebug this:', this)
+    const {queryName, serviceName, action, settings} = this
     const startTime = Date.now()
+    const [color, reset] = getServiceColor(serviceName)
 
     if (settings.debug) {
-      const color = getServiceColor(serviceName)
-      const colorCode = ANSI_COLORS[color] || ''
-      const resetCode = colorCode ? ANSI_COLORS.reset : ''
-
-      console.log(
-        `${colorCode}[${serviceName}.${action}] Called with:${resetCode}`,
-        inspect(args, settings.inspect || {})
-      )
+      const printArgs = inspect(args, settings.inspect)
+      utilService.print({on: `${color}[${queryName} - ${serviceName}:${action}] Called with args:\n${printArgs}${reset}`, settings})
     }
 
-    try {
-      const result = await fn.call(this, args)
+    // no try/catch - let errors be handled by withError
+    const result = await fn.call(this, args)
 
-      if (settings.debug) {
-        const duration = Date.now() - startTime
-        const color = getServiceColor(serviceName)
-        const colorCode = ANSI_COLORS[color] || ''
-        const resetCode = colorCode ? ANSI_COLORS.reset : ''
-
-        console.log(
-          `${colorCode}[${serviceName}.${action}] Completed in ${duration}ms:${resetCode}`,
-          inspect(result, settings.inspect || {})
-        )
-      }
-
-      return result
-    } catch (error) {
-      if (settings.debug) {
-        const duration = Date.now() - startTime
-        const color = getServiceColor(serviceName)
-        const colorCode = ANSI_COLORS[color] || ''
-        const resetCode = colorCode ? ANSI_COLORS.reset : ''
-
-        console.log(
-          `${colorCode}[${serviceName}.${action}] Failed after ${duration}ms:${resetCode}`,
-          error.message
-        )
-      }
-      throw error
+    if (settings.debug) {
+      const duration = Date.now() - startTime
+      const printResult = inspect(result, settings.inspect)
+      utilService.print({on: `${color}[${queryName} - ${serviceName}:${action}] Completed in ${duration}ms returning:\n${printResult}${reset}`, settings})
     }
+
+    return result
   }
 }
 
 const withTimeout = (fn) => {
-  const {settings, serviceName, action} = this
   return async function (args) {
+    //console.log('withTimeout this:', this)
+    const {settings} = this
+
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(() => {
-        reject(
-          new Error(
-            `Service '${serviceName}.${action}' timed out after ${settings.timeout}ms`
-          )
-        )
+        reject(new Error(`Timed out after ${settings.timeout}ms`))
       }, settings.timeout)
     })
 
@@ -67,10 +75,11 @@ const withTimeout = (fn) => {
 }
 
 const withRetry = (fn) => {
-  const {settings, serviceName, action} = this
-  const {retryCount} = settings
-
   return async function (args) {
+    //console.log('withRetry this:', this)
+    const {settings} = this
+    const {retryCount} = settings
+
     let lastError
 
     for (let attempt = 1; attempt <= retryCount + 1; attempt++) {
@@ -81,7 +90,7 @@ const withRetry = (fn) => {
 
         if (attempt <= retryCount) {
           console.error(
-            `Service '${serviceName}.${action}' failed (attempt ${attempt}/${retryCount + 1}), retrying...`
+            `Failed (attempt ${attempt}/${retryCount + 1}), retrying...`
           )
         }
       }
@@ -92,56 +101,34 @@ const withRetry = (fn) => {
 }
 
 const withErrorHandling = (fn) => {
-  const {serviceName, action, config} = this
   return async function (args) {
+    //console.log('withErrorHandling this:', this)
+    const {queryName, serviceName, action, queryResults} = this
+    let {contextStack} = this
+
     try {
       return await fn.call(this, args)
     } catch (error) {
-
-      // Prepare error context with complete args + query name
-      const errorContext = {
-        error: error.message,
-        originalError: error,
-        serviceName,
-        action,
-        args,
-        queryName: this?.reference || 'unknown'
-      }
+      error.message = `[${queryName} - ${serviceName}:${action}] ${error.message}`
 
       // Handle with onError if provided
       if (args.onError) {
+
+        contextStack = contextStack.extend(null)
+        const handler = (ctx) => {
+          contextStack.setCurrent(ctx)
+          return args.onError(queryResults, contextStack)
+        }
+
         try {
-          // Compile the error handler
-          const errorHandler = compileServiceFunction(
-            args.onError,
-            config,
-            this.root,
-            this
-          )
+          args.onError(handler)
 
-          // Create a virtual node for the error handler with error context
-          let handlerResult
-          if (errorHandler.__compiledNode) {
-            const virtualNode = createVirtualNode(errorHandler.__compiledNode, errorContext, this)
-            handlerResult = await virtualNode.execute()
-          } else {
-            // Fallback for handlers without compiled nodes
-            handlerResult = await errorHandler(errorContext)
-          }
-
-          // If ignoreErrors is true, run handler for side effects but return null
-          if (args.ignoreErrors) {
-            return null
-          }
-
-          // Otherwise return the handler result
-          return handlerResult
         } catch (handlerError) {
           // Error handler failed
           if (!args.ignoreErrors) {
+            handlerError.message = `[${serviceName}:${action}] onError handler failed: ${handlerError.message}`
             throw handlerError
           }
-          return null
         }
       }
 
@@ -149,73 +136,15 @@ const withErrorHandling = (fn) => {
       if (!args.ignoreErrors) {
         throw error
       }
+
+      return null
     }
   }
 }
 
-const withArgs = (fn) => {
-  return async function (args) {
-    const {contextStack} = this
-    
-    // If no contextStack provided, pass args through unchanged
-    if (!contextStack || !contextStack.length) {
-      return await fn.call(this, args)
-    }
-    
-    // Get the current context (top of stack) and query results (from root)
-    const currentContext = contextStack[contextStack.length - 1]
-    const queryResults = contextStack[0] // Root context contains all query results
-    
-    // Helper function to resolve @ and $ references in values
-    const resolveValue = (value) => {
-      if (typeof value !== 'string') return value
-      
-      // Handle bare $ - returns all completed queries
-      if (value === '$') {
-        const allQueries = {}
-        for (const [key, val] of Object.entries(queryResults)) {
-          if (!key.startsWith('_')) {
-            allQueries[key] = val
-          }
-        }
-        return allQueries
-      }
-      
-      // Handle $.path references (e.g., "$.given.value")
-      if (value.startsWith('$.')) {
-        const path = value.substring(2) // Remove "$."
-        return _.get(queryResults, path)
-      }
-      
-      // Handle @ references (current context)
-      if (value === '@') {
-        return currentContext
-      }
-      
-      // Handle @.path references (e.g., "@.field")
-      if (value.startsWith('@.')) {
-        const path = value.substring(2) // Remove "@."
-        return _.get(currentContext, path)
-      }
-      
-      return value
-    }
-    
-    // Recursively resolve all @ and $ references in the arguments
-    const resolvedArgs = _.cloneDeepWith(args, (value) => {
-      if (typeof value === 'string') {
-        return resolveValue(value)
-      }
-      // Let cloneDeepWith handle objects and arrays recursively
-      return undefined
-    })
-    
-    return await fn.call(this, resolvedArgs)
-  }
-}
 
 const applyWrappers = (def, config) => {
-  const {serviceName, action, args} = def
+  const {queryName, serviceName, action, args} = def
   const settings = _.merge({}, config.settings, args.settings)
   const service = config.services[serviceName]
 
@@ -231,22 +160,24 @@ const applyWrappers = (def, config) => {
   if (settings.debug) {
     wrappers.push(withDebug)
   }
-  if (settings.timeout && settings.timeout > 0) {
-    wrappers.push(withTimeout)
-  }
+
+  wrappers.push(withErrorHandling)
+
   if (settings.retry > 0) {
     wrappers.push(withRetry)
   }
-  if (settings.onError || settings.ignoreErrors) {
-    wrappers.push(withErrorHandling)
+  if (settings.timeout && settings.timeout > 0) {
+    wrappers.push(withTimeout)
   }
 
+  //console.log('wrappers:', wrappers.map(f => f.name))
+
   // Apply all wrappers using functional composition
-  const wrapped = wrappers.reduce((fn, wrapper) => wrapper(fn), serviceCall)
+  const wrapped = wrappers.reduceRight((fn, wrapper) => wrapper(fn), serviceCall)
 
   // give all wrappers access to the full calling context so they don't have to fish for it
   // allow the contextStack to be passed at execution time
-  return (contextStack) => wrapped.call({serviceName, action, settings, contextStack})
+  return (queryResults, contextStack) => wrapped.call({queryName, serviceName, action, settings, queryResults, contextStack}, args)
 }
 
 export default applyWrappers

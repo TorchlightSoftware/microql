@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import {describe, it} from 'node:test'
 import query from '../query.js'
 
 describe('Service This Binding Tests', () => {
@@ -11,7 +11,7 @@ describe('Service This Binding Tests', () => {
         return 'internal-method-result'
       },
 
-      async testMethod({ input }) {
+      async testMethod({input}) {
         // This should refer to the service object, not AST node
         assert.strictEqual(this.internalState, 'service-internal-data')
         assert.strictEqual(this.internalMethod(), 'internal-method-result')
@@ -25,10 +25,10 @@ describe('Service This Binding Tests', () => {
     }
 
     const result = await query({
-      given: { value: 'test-input' },
-      services: { testService },
-      query: {
-        result: ['testService', 'testMethod', { input: '$.given.value' }]
+      given: {value: 'test-input'},
+      services: {testService},
+      queries: {
+        result: ['testService', 'testMethod', {input: '$.given.value'}]
       },
       select: 'result'
     })
@@ -45,7 +45,7 @@ describe('Service This Binding Tests', () => {
     const counterService = {
       count: 0,
 
-      async increment({ by = 1 }) {
+      async increment({by = 1}) {
         this.count += by
         return this.count
       },
@@ -56,10 +56,10 @@ describe('Service This Binding Tests', () => {
     }
 
     const result = await query({
-      services: { counterService },
-      query: {
-        first: ['counterService', 'increment', { by: 5 }],
-        second: ['counterService', 'increment', { by: 3 }],
+      services: {counterService},
+      queries: {
+        first: ['counterService', 'increment', {by: 5}],
+        second: ['counterService', 'increment', {by: 3}],
         final: ['counterService', 'getCount', {}]
       },
       select: ['first', 'second', 'final']

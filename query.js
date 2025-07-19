@@ -6,8 +6,8 @@
  */
 
 import _ from 'lodash'
-import { compile } from './compile.js'
-import { execute } from './execute.js'
+import compile from './compile.js'
+import execute from './execute.js'
 
 /**
  * Apply result selection to execution results
@@ -32,22 +32,14 @@ function applySelection(results, select) {
  * @returns {*} Query results
  */
 async function query(config) {
-  const { services, given, query: queries, select, debug } = config
-
   // Phase 1: Compile queries into execution plan
-  const compilationConfig = {
-    services,
-    queries,
-    given,
-    debug
-  }
-  const executionPlan = compile(compilationConfig)
+  const executionPlan = compile(config)
 
   // Phase 2: Execute the plan
   const results = await execute(executionPlan)
 
   // Phase 3: Apply result selection
-  return applySelection(results, select)
+  return applySelection(results, config.select)
 }
 
 export default query

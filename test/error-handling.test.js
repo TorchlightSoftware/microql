@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import {describe, it} from 'node:test'
 import query from '../index.js'
 
 describe('Error Handling Tests', () => {
@@ -9,12 +9,12 @@ describe('Error Handling Tests', () => {
       throw new Error('Service failed')
     },
     succeed: async () => {
-      return { success: true }
+      return {success: true}
     }
   }
 
   const logService = {
-    logError: async ({ on }) => {
+    logError: async ({on}) => {
       const errorContext = on
       return {
         logged: true,
@@ -22,7 +22,7 @@ describe('Error Handling Tests', () => {
         service: `${errorContext.serviceName}.${errorContext.action}`
       }
     },
-    logQueryError: async ({ on }) => {
+    logQueryError: async ({on}) => {
       const errorContext = on
       return {
         queryLogged: true,
@@ -35,13 +35,13 @@ describe('Error Handling Tests', () => {
   describe('Service-Level Error Handling', () => {
     it('should call onError handler when service fails', async () => {
       const config = {
-        services: { error: errorService, log: logService },
-        query: {
+        services: {error: errorService, log: logService},
+        queries: {
           result: [
             'error',
             'fail',
             {
-              onError: ['log', 'logError', { on: '@' }]
+              onError: ['log', 'logError', {on: '@'}]
             }
           ]
         }
@@ -57,9 +57,9 @@ describe('Error Handling Tests', () => {
 
     it('should ignore errors when ignoreErrors is true', async () => {
       const config = {
-        services: { error: errorService },
-        query: {
-          failedQuery: ['error', 'fail', { ignoreErrors: true }],
+        services: {error: errorService},
+        queries: {
+          failedQuery: ['error', 'fail', {ignoreErrors: true}],
           successQuery: ['error', 'succeed', {}]
         },
         select: ['failedQuery', 'successQuery']
@@ -67,27 +67,27 @@ describe('Error Handling Tests', () => {
 
       const result = await query(config)
       assert.strictEqual(result.failedQuery, null)
-      assert.deepStrictEqual(result.successQuery, { success: true })
+      assert.deepStrictEqual(result.successQuery, {success: true})
     })
 
     it('should work with both onError and ignoreErrors', async () => {
       let errorLogged = false
 
       const customLog = {
-        track: async ({ on }) => {
+        track: async ({on}) => {
           errorLogged = true
-          return { tracked: true }
+          return {tracked: true}
         }
       }
 
       const config = {
-        services: { error: errorService, customLog },
-        query: {
+        services: {error: errorService, customLog},
+        queries: {
           result: [
             'error',
             'fail',
             {
-              onError: ['customLog', 'track', { on: '@' }],
+              onError: ['customLog', 'track', {on: '@'}],
               ignoreErrors: true
             }
           ]
@@ -103,11 +103,11 @@ describe('Error Handling Tests', () => {
   describe('Query-Level Error Handling', () => {
     it('should call query-level onError for unhandled errors', async () => {
       const config = {
-        services: { error: errorService, log: logService },
-        query: {
+        services: {error: errorService, log: logService},
+        queries: {
           willFail: ['error', 'fail', {}]
         },
-        onError: ['log', 'logQueryError', { on: '@' }]
+        onError: ['log', 'logQueryError', {on: '@'}]
       }
 
       await assert.rejects(() => query(config), /Service failed/)
@@ -115,18 +115,18 @@ describe('Error Handling Tests', () => {
 
     it('should handle errors in nested service chains', async () => {
       const chainService = {
-        step1: async () => ({ value: 1 }),
+        step1: async () => ({value: 1}),
         step2: async () => {
           throw new Error('Chain step failed')
         }
       }
 
       const config = {
-        services: { chain: chainService },
-        query: {
+        services: {chain: chainService},
+        queries: {
           chained: [
             ['chain', 'step1', {}],
-            ['chain', 'step2', { ignoreErrors: true }]
+            ['chain', 'step2', {ignoreErrors: true}]
           ]
         }
       }
@@ -141,21 +141,21 @@ describe('Error Handling Tests', () => {
       let capturedContext = null
 
       const captureService = {
-        capture: async ({ on }) => {
+        capture: async ({on}) => {
           capturedContext = on
-          return { captured: true }
+          return {captured: true}
         }
       }
 
       const config = {
-        services: { error: errorService, capture: captureService },
-        query: {
+        services: {error: errorService, capture: captureService},
+        queries: {
           testQuery: [
             'error',
             'fail',
             {
               someArg: 'value',
-              onError: ['capture', 'capture', { on: '@' }],
+              onError: ['capture', 'capture', {on: '@'}],
               ignoreErrors: true
             }
           ]
@@ -171,7 +171,7 @@ describe('Error Handling Tests', () => {
       assert.deepStrictEqual(capturedContext.args, {
         someArg: 'value',
         timeout: 5000,
-        onError: ['capture', 'capture', { on: '@' }],
+        onError: ['capture', 'capture', {on: '@'}],
         ignoreErrors: true
       })
       assert.strictEqual(capturedContext.queryName, 'testQuery')

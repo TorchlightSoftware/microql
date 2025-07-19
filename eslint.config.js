@@ -1,11 +1,28 @@
 import stylistic from '@stylistic/eslint-plugin'
+import js from '@eslint/js'
 
 export default [
+  js.configs.recommended,
   {
     files: ['**/*.js'],
     languageOptions: {
       ecmaVersion: 2022,
-      sourceType: 'module'
+      sourceType: 'module',
+      globals: {
+        // Node.js globals
+        console: 'readonly',
+        process: 'readonly',
+        Buffer: 'readonly',
+        __dirname: 'readonly',
+        __filename: 'readonly',
+        global: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
+        setImmediate: 'readonly',
+        clearImmediate: 'readonly'
+      }
     },
     plugins: {
       '@stylistic': stylistic
@@ -18,10 +35,10 @@ export default [
       '@stylistic/semi': ['error', 'never'],
 
       // Object formatting - keep objects concise when possible
-      '@stylistic/object-curly-spacing': ['error', 'always'],
+      '@stylistic/object-curly-spacing': ['error', 'never'],
       '@stylistic/object-curly-newline': ['error', {
-        ObjectExpression: { multiline: true, consistent: true },
-        ObjectPattern: { multiline: true, consistent: true }
+        ObjectExpression: {multiline: true, consistent: true},
+        ObjectPattern: {multiline: true, consistent: true}
       }],
 
       // Array formatting - keep arrays concise when possible
@@ -31,8 +48,8 @@ export default [
 
       // Additional formatting rules
       '@stylistic/comma-dangle': ['error', 'never'],
-      '@stylistic/comma-spacing': ['error', { before: false, after: true }],
-      '@stylistic/key-spacing': ['error', { beforeColon: false, afterColon: true }],
+      '@stylistic/comma-spacing': ['error', {before: false, after: true}],
+      '@stylistic/key-spacing': ['error', {beforeColon: false, afterColon: true}],
       '@stylistic/quote-props': ['error', 'as-needed'],
       '@stylistic/quotes': ['error', 'single'],
       '@stylistic/no-trailing-spaces': 'error',
@@ -48,11 +65,17 @@ export default [
       '@stylistic/function-call-spacing': ['error', 'never'],
 
       // Brace style
-      '@stylistic/brace-style': ['error', '1tbs', { allowSingleLine: true }],
+      '@stylistic/brace-style': ['error', '1tbs', {allowSingleLine: true}],
 
       // Spacing
       '@stylistic/space-infix-ops': 'error',
-      '@stylistic/space-unary-ops': 'error'
+      '@stylistic/space-unary-ops': 'error',
+
+      // Unused variables - ignore variables starting with underscore
+      'no-unused-vars': ['error', { 
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_' 
+      }]
     }
   }
 ]

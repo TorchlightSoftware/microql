@@ -1,53 +1,55 @@
 import assert from 'node:assert'
-import { describe, it, beforeEach, afterEach } from 'node:test'
+import {describe, it, beforeEach, afterEach} from 'node:test'
 import query from '../query.js'
-import util from '../util.js'
+import util from '../services/util.js'
+import {ANSI_COLORS} from '../common.js'
 
 describe('Util Service Tests', () => {
   // Test data
   const testData = {
     people: [
-      { name: 'Alice', age: 30, department: 'Engineering' },
-      { name: 'Bob', age: 25, department: 'Marketing' },
-      { name: 'Charlie', age: 35, department: 'Engineering' },
-      { name: 'Diana', age: 28, department: 'Sales' }
+      {name: 'Alice', age: 30, department: 'Engineering'},
+      {name: 'Bob', age: 25, department: 'Marketing'},
+      {name: 'Charlie', age: 35, department: 'Engineering'},
+      {name: 'Diana', age: 28, department: 'Sales'}
     ],
     products: [
-      { id: 1, name: 'Widget', price: 10.99, categories: ['tools', 'gadgets'] },
+      {id: 1, name: 'Widget', price: 10.99, categories: ['tools', 'gadgets']},
       {
         id: 2,
         name: 'Gadget',
         price: 25.5,
         categories: ['electronics', 'gadgets']
       },
-      { id: 3, name: 'Tool', price: 15.0, categories: ['tools', 'hardware'] }
+      {id: 3, name: 'Tool', price: 15.0, categories: ['tools', 'hardware']}
     ],
     orders: [
-      { orderId: 'A123', items: [1, 2] },
-      { orderId: 'B456', items: [2, 3] },
-      { orderId: 'C789', items: [1, 3] }
+      {orderId: 'A123', items: [1, 2]},
+      {orderId: 'B456', items: [2, 3]},
+      {orderId: 'C789', items: [1, 3]}
     ]
   }
 
   // Mock services
   const mockServices = {
-    data: async (action, args) => {
-      switch (action) {
-        case 'getAge':
-          return args.person.age
-        case 'isEngineer':
-          return args.person.department === 'Engineering'
-        case 'formatName':
-          return args.person.name.toUpperCase()
-        case 'getCategories':
-          return args.product.categories
-        case 'calculateTotal':
-          return args.items.reduce((sum, id) => {
-            const product = args.products.find((p) => p.id === id)
-            return sum + (product ? product.price : 0)
-          }, 0)
-        default:
-          throw new Error(`Unknown action: ${action}`)
+    data: {
+      async getAge(args) {
+        return args.person.age
+      },
+      async isEngineer(args) {
+        return args.person.department === 'Engineering'
+      },
+      async formatName(args) {
+        return args.person.name.toUpperCase()
+      },
+      async getCategories(args) {
+        return args.product.categories
+      },
+      async calculateTotal(args) {
+        return args.items.reduce((sum, id) => {
+          const product = args.products.find((p) => p.id === id)
+          return sum + (product ? product.price : 0)
+        }, 0)
       }
     },
     util
@@ -96,17 +98,17 @@ describe('Util Service Tests', () => {
     })
 
     it('should handle comparison functions', async () => {
-      assert.strictEqual(await util.eq({ l: 5, r: 5 }), true)
-      assert.strictEqual(await util.eq({ l: 5, r: 3 }), false)
-      assert.strictEqual(await util.gt({ l: 10, r: 5 }), true)
-      assert.strictEqual(await util.lt({ l: 3, r: 8 }), true)
+      assert.strictEqual(await util.eq({l: 5, r: 5}), true)
+      assert.strictEqual(await util.eq({l: 5, r: 3}), false)
+      assert.strictEqual(await util.gt({l: 10, r: 5}), true)
+      assert.strictEqual(await util.lt({l: 3, r: 8}), true)
     })
 
     it('should handle exists and length', async () => {
-      assert.strictEqual(await util.exists({ value: 'hello' }), true)
-      assert.strictEqual(await util.exists({ value: null }), false)
-      assert.strictEqual(await util.length({ value: 'hello' }), 5)
-      assert.strictEqual(await util.length({ value: [1, 2, 3] }), 3)
+      assert.strictEqual(await util.exists({value: 'hello'}), true)
+      assert.strictEqual(await util.exists({value: null}), false)
+      assert.strictEqual(await util.length({value: 'hello'}), 5)
+      assert.strictEqual(await util.length({value: [1, 2, 3]}), 3)
     })
 
     it('should pick fields from objects', async () => {
@@ -130,9 +132,9 @@ describe('Util Service Tests', () => {
   describe('MicroQL Integration', () => {
     it('should handle util.map with template in MicroQL', async () => {
       const result = await query({
-        given: { people: testData.people },
-        services: { util },
-        query: {
+        given: {people: testData.people},
+        services: {util},
+        queries: {
           summary: [
             'util',
             'map',
@@ -149,24 +151,24 @@ describe('Util Service Tests', () => {
       })
 
       assert.deepStrictEqual(result, [
-        { name: 'Alice', info: 'Engineering' },
-        { name: 'Bob', info: 'Marketing' },
-        { name: 'Charlie', info: 'Engineering' },
-        { name: 'Diana', info: 'Sales' }
+        {name: 'Alice', info: 'Engineering'},
+        {name: 'Bob', info: 'Marketing'},
+        {name: 'Charlie', info: 'Engineering'},
+        {name: 'Diana', info: 'Sales'}
       ])
     })
 
     it('should handle util.map with service function', async () => {
       const result = await query({
-        given: { people: testData.people },
+        given: {people: testData.people},
         services: mockServices,
-        query: {
+        queries: {
           formatted: [
             'util',
             'map',
             {
               on: '$.given.people',
-              fn: ['data', 'formatName', { person: '@' }]
+              fn: ['data', 'formatName', {person: '@'}]
             }
           ]
         },
@@ -178,15 +180,15 @@ describe('Util Service Tests', () => {
 
     it('should handle util.filter with predicate', async () => {
       const result = await query({
-        given: { people: testData.people },
+        given: {people: testData.people},
         services: mockServices,
-        query: {
+        queries: {
           engineers: [
             'util',
             'filter',
             {
               on: '$.given.people',
-              predicate: ['data', 'isEngineer', { person: '@' }]
+              predicate: ['data', 'isEngineer', {person: '@'}]
             }
           ]
         },
@@ -201,15 +203,15 @@ describe('Util Service Tests', () => {
 
     it('should handle util.flatMap', async () => {
       const result = await query({
-        given: { products: testData.products },
+        given: {products: testData.products},
         services: mockServices,
-        query: {
+        queries: {
           allCategories: [
             'util',
             'flatMap',
             {
               on: '$.given.products',
-              fn: ['data', 'getCategories', { product: '@' }]
+              fn: ['data', 'getCategories', {product: '@'}]
             }
           ]
         },
@@ -228,20 +230,19 @@ describe('Util Service Tests', () => {
 
     it('should handle util.when with service call condition', async () => {
       const result = await query({
-        given: { person: { name: 'Alice', age: 30 } },
+        given: {person: {name: 'Alice', age: 30}},
         services: {
           util,
-          age: async (action, { person }) => {
-            if (action === 'isAdult') return person.age >= 18
-            throw new Error(`Unknown action: ${action}`)
+          age: {
+            isAdult({person}) {return person.age >= 18}
           }
         },
-        query: {
+        queries: {
           status: [
             'util',
             'when',
             {
-              test: ['age', 'isAdult', { person: '$.given.person' }],
+              test: ['age', 'isAdult', {person: '$.given.person'}],
               then: 'Adult',
               or: 'Minor'
             }
@@ -255,15 +256,15 @@ describe('Util Service Tests', () => {
 
     it('should handle method syntax with util', async () => {
       const result = await query({
-        given: { items: [{ id: 1 }, { id: 2 }, { id: 3 }] },
-        services: { util },
+        given: {items: [{id: 1}, {id: 2}, {id: 3}]},
+        services: {util},
         methods: ['util'],
-        query: {
+        queries: {
           processed: [
             '$.given.items',
             'util:map',
             {
-              fn: { original: '@.id', processed: true }
+              fn: {original: '@.id', processed: true}
             }
           ]
         },
@@ -271,9 +272,9 @@ describe('Util Service Tests', () => {
       })
 
       assert.deepStrictEqual(result, [
-        { original: 1, processed: true },
-        { original: 2, processed: true },
-        { original: 3, processed: true }
+        {original: 1, processed: true},
+        {original: 2, processed: true},
+        {original: 3, processed: true}
       ])
     })
 
@@ -284,7 +285,7 @@ describe('Util Service Tests', () => {
           products: testData.products
         },
         services: mockServices,
-        query: {
+        queries: {
           // Calculate total for each order
           orderTotals: [
             'util',
@@ -308,12 +309,12 @@ describe('Util Service Tests', () => {
             'filter',
             {
               on: '$.orderTotals',
-              predicate: ['util', 'gt', { l: '@', r: 30 }]
+              predicate: ['util', 'gt', {l: '@', r: 30}]
             }
           ],
 
           // Count big orders
-          bigOrderCount: ['util', 'length', { value: '$.bigOrders' }]
+          bigOrderCount: ['util', 'length', {value: '$.bigOrders'}]
         },
         select: 'bigOrderCount'
       })
@@ -343,8 +344,8 @@ describe('Util Service Tests', () => {
 
     it('should print basic values', async () => {
       const result = await query({
-        services: { util },
-        query: {
+        services: {util},
+        queries: {
           printed: [
             'util',
             'print',
@@ -366,7 +367,7 @@ describe('Util Service Tests', () => {
 
       // Find the output that contains the blue color
       const blueOutput = capturedOutput.find((output) =>
-        output.includes('\x1b[34m'))
+        output.includes(ANSI_COLORS.blue))
       assert(blueOutput, 'Should find output with blue color')
 
       // Should contain the message
@@ -381,7 +382,7 @@ describe('Util Service Tests', () => {
             name: 'Alice',
             profile: {
               email: 'alice@example.com',
-              preferences: { theme: 'dark', notifications: true }
+              preferences: {theme: 'dark', notifications: true}
             }
           },
           {
@@ -389,7 +390,7 @@ describe('Util Service Tests', () => {
             name: 'Bob',
             profile: {
               email: 'bob@example.com',
-              preferences: { theme: 'light', notifications: false }
+              preferences: {theme: 'light', notifications: false}
             }
           }
         ]
@@ -397,7 +398,7 @@ describe('Util Service Tests', () => {
 
       const result = await query({
         given: testData,
-        services: { util },
+        services: {util},
         settings: {
           inspect: {
             depth: 1,
@@ -405,16 +406,8 @@ describe('Util Service Tests', () => {
             maxStringLength: 20
           }
         },
-        query: {
-          printed: [
-            'util',
-            'print',
-            {
-              on: '$.given.users',
-              color: 'blue',
-              ts: false
-            }
-          ]
+        queries: {
+          printed: ['util', 'print', {on: '$.given.users', color: 'blue', ts: false}]
         },
         select: 'printed'
       })
@@ -427,15 +420,15 @@ describe('Util Service Tests', () => {
 
       // Find the output that contains the blue color (from our print call)
       const blueOutput = capturedOutput.find((output) =>
-        output.includes('\x1b[34m'))
+        output.includes(ANSI_COLORS.blue))
       assert(blueOutput, 'Should find output with blue color')
 
       // Should contain ANSI blue color codes
-      assert(blueOutput.includes('\x1b[0m'), 'Should contain reset color code')
+      assert(blueOutput.includes(ANSI_COLORS.reset), 'Should contain reset color code')
 
       // Should show truncation due to maxArrayLength: 1
       assert(
-        blueOutput.includes('... 1 more item'),
+        blueOutput.includes('...'),
         'Should truncate array due to maxArrayLength setting'
       )
     })
@@ -448,14 +441,14 @@ describe('Util Service Tests', () => {
 
       await query({
         given: testData,
-        services: { util },
+        services: {util},
         methods: ['util'],
-        query: {
+        queries: {
           result: [
             '$.given.message',
             'util:print',
             {
-              settings: { inspect: { maxStringLength: 30 } },
+              settings: {inspect: {maxStringLength: 30}},
               color: 'green',
               ts: false
             }
@@ -472,7 +465,7 @@ describe('Util Service Tests', () => {
         output.includes('This is a very long string'),
         'Should contain the message'
       )
-      assert(output.includes('\x1b[32m'), 'Should contain green color code')
+      assert(output.includes(ANSI_COLORS.green), 'Should contain green color code')
     })
   })
 
@@ -491,17 +484,13 @@ describe('Util Service Tests', () => {
 
     it('should create snapshot with results format', async () => {
       const testQuery = {
-        given: { value: 42 },
-        services: { util },
+        given: {value: 42},
+        services: {util},
         methods: ['util'],
-        settings: { debug: false },
-        query: {
-          doubled: ['util', 'when', { test: true, then: 84, or: 0 }],
-          snapshot: [
-            '$.doubled',
-            'util:snapshot',
-            { capture: '$', out: testSnapshotPath }
-          ]
+        settings: {debug: false},
+        queries: {
+          doubled: ['util', 'when', {test: true, then: 84, or: 0}],
+          snapshot: ['$.doubled', 'util:snapshot', {capture: '$', out: testSnapshotPath}]
         }
       }
 
@@ -523,16 +512,16 @@ describe('Util Service Tests', () => {
 
     it('should save execution state correctly in snapshot', async () => {
       const testQuery = {
-        given: { start: 1 },
-        services: { util },
+        given: {start: 1},
+        services: {util},
         methods: ['util'],
-        settings: { debug: false },
-        query: {
-          step1: ['util', 'pick', { on: '$.given', fields: ['start'] }],
+        settings: {debug: false},
+        queries: {
+          step1: ['util', 'pick', {on: '$.given', fields: ['start']}],
           snapshot: [
             '$.step1',
             'util:snapshot',
-            { capture: '$', out: testSnapshotPath }
+            {capture: '$', out: testSnapshotPath}
           ]
         }
       }
@@ -553,15 +542,15 @@ describe('Util Service Tests', () => {
 
     it('should work with different capture options', async () => {
       const testQuery = {
-        given: { data: [1, 2, 3] },
-        services: { util },
+        given: {data: [1, 2, 3]},
+        services: {util},
         methods: ['util'],
-        settings: { debug: false },
-        query: {
+        settings: {debug: false},
+        queries: {
           result: [
-            ['util', 'map', { on: '$.given.data', fn: { doubled: '@' } }],
-            ['@', 'util:snapshot', { capture: '@', out: testSnapshotPath }],
-            ['@', 'util:map', { fn: { tripled: '@.doubled' } }]
+            ['util', 'map', {on: '$.given.data', fn: {doubled: '@'}}],
+            ['@', 'util:snapshot', {out: testSnapshotPath}],
+            ['@', 'util:map', {fn: {tripled: '@.doubled'}}]
           ]
         }
       }

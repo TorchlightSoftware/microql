@@ -1,5 +1,5 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import {describe, it} from 'node:test'
 import query from '../query.js'
 
 describe('TearDown Tests', () => {
@@ -18,8 +18,8 @@ describe('TearDown Tests', () => {
     }
 
     await query({
-      services: { mockService },
-      query: {
+      services: {mockService},
+      queries: {
         test: ['mockService', 'testAction', {}]
       }
     })
@@ -37,13 +37,13 @@ describe('TearDown Tests', () => {
 
     // This should not throw an error
     const result = await query({
-      services: { serviceWithoutTearDown },
-      query: {
+      services: {serviceWithoutTearDown},
+      queries: {
         test: ['serviceWithoutTearDown', 'testAction', {}]
       }
     })
 
-    assert.deepStrictEqual(result, { test: 'test result' })
+    assert.deepStrictEqual(result, {test: 'test result'})
   })
 
   it('should call tearDown on multiple services', async () => {
@@ -68,8 +68,8 @@ describe('TearDown Tests', () => {
     }
 
     await query({
-      services: { service1, service2 },
-      query: {
+      services: {service1, service2},
+      queries: {
         test1: ['service1', 'action', {}],
         test2: ['service2', 'action', {}]
       }
@@ -105,8 +105,8 @@ describe('TearDown Tests', () => {
 
     try {
       await query({
-        services: { serviceWithError },
-        query: {
+        services: {serviceWithError},
+        queries: {
           test: ['serviceWithError', 'failingAction', {}]
         }
       })
@@ -142,8 +142,8 @@ describe('TearDown Tests', () => {
     }
 
     await query({
-      services: { usedService, unusedService },
-      query: {
+      services: {usedService, unusedService},
+      queries: {
         test: ['usedService', 'action', {}]
       }
     })
@@ -169,12 +169,12 @@ describe('TearDown Tests', () => {
 
     // Should not throw despite tearDown error
     const result = await query({
-      services: { serviceWithBadTearDown },
-      query: {
+      services: {serviceWithBadTearDown},
+      queries: {
         test: ['serviceWithBadTearDown', 'action', {}]
       }
     })
 
-    assert.deepStrictEqual(result, { test: 'result' })
+    assert.deepStrictEqual(result, {test: 'result'})
   })
 })

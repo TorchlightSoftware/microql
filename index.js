@@ -1,2 +1,1 @@
-export { default } from './query.js'
-export { mergeArgs } from './execute.js'
+export {default} from './query.js'

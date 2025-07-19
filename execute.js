@@ -8,70 +8,30 @@ import _ from 'lodash'
 import lodashDeep from 'lodash-deep'
 _.mixin(lodashDeep)
 
-import torch from 'torch'
-import retrieve from './retrieve.js'
-import { DEP_REGEX, AT_REGEX, BARE_DOLLAR_REGEX } from './compile.js'
+import ContextStack from './context.js'
 
-// Resolves arguments by interpolating dependencies and @ context
-const mergeArgs = (args, source, chainContext = null) => {
-  const resolveValue = (value) => {
-    if (typeof value !== 'string') return value
+async function executePlan(plan, results, contextStack) {
+  // Execute a service
+  if (plan.type === 'service') {
+    return plan.service(results, contextStack)
 
-    // Handle bare $ - returns all completed queries
-    if (value.match(BARE_DOLLAR_REGEX)) {
-      // Return a copy of all results excluding internal keys
-      const allQueries = {}
-      for (const [key, val] of Object.entries(source)) {
-        if (!key.startsWith('_')) {
-          allQueries[key] = val
-        }
-      }
-      return allQueries
+  // Execute each chain step, storing result in contextStack
+  } else if (plan.type === 'chain') {
+
+    // add a blank contextStack as a placeholder for the first chain step
+    contextStack = contextStack.extend(null)
+
+    for (const step of plan.steps) {
+      //const {queryName, serviceName, action} = step
+      //console.log(`[${queryName} - ${serviceName}:${action}] EXECUTE provide stack:\n`, contextStack.stack)
+
+      const result = await step.service(results, contextStack)
+      contextStack.setCurrent(result)
     }
 
-    // Handle $.path references
-    let m = value.match(DEP_REGEX)
-    if (m) return retrieve(value, source)
-
-    // Handle @ references
-    m = value.match(AT_REGEX)
-    if (m && chainContext !== null) {
-      const atPath = m[1] // e.g., '.field' from '@.field'
-      if (atPath) {
-        // Access nested field in chain context
-        return retrieve('@' + atPath, { '@': chainContext })
-      } else {
-        // Return the whole chain context
-        return chainContext
-      }
-    }
-
-    return value
+    return contextStack.getCurrent()
   }
 
-  const resolved = {}
-
-  for (const [key, value] of Object.entries(args)) {
-    // Handle compiled functions
-    if (value && typeof value === 'object' && value._type === 'compiled_function') {
-      // Return a function that resolves the template
-      resolved[key] = (item) => {
-        // Create a context that includes the current item as @
-        const fnContext = { ...source, '@': item }
-        return _.deepMapValues(value.template, (v) => {
-          if (typeof v === 'string' && v.match(AT_REGEX)) {
-            const atPath = v.match(AT_REGEX)[1]
-            return atPath ? retrieve('@' + atPath, fnContext) : item
-          }
-          return resolveValue(v)
-        })
-      }
-    } else {
-      resolved[key] = _.deepMapValues(value, resolveValue)
-    }
-  }
-
-  return resolved
 }
 
 /**
@@ -84,88 +44,37 @@ const mergeArgs = (args, source, chainContext = null) => {
  * @returns {Object} Execution results
  */
 export async function execute(plan) {
-  const { queries, given, services, debug } = plan
-
-  const debugLog = (...args) => debug ? torch.gray(...args) : null
-  const debugAlt = (...args) => debug ? torch.white(...args) : null
+  const {queries, given} = plan
 
   const results = {}
 
-  // Add given data as pre-resolved results
-  if (given) {
-    results.given = given
-  }
-
   // Execute queries in dependency order
   const executedQueries = new Set()
+  const alreadyExecuted = (queryName) => executedQueries.has(queryName)
+  const readyToExecute = (plan) => plan.dependencies.difference(executedQueries).size === 0
 
-  while (executedQueries.size < Object.keys(queries).length) {
-    let progress = false
+  let queryCount = Object.keys(queries).length
+
+  // Add given data as a pre-resolved query
+  if (given) {
+    results.given = given
+    executedQueries.add('given')
+    queryCount++
+  }
+
+  while (executedQueries.size < queryCount) {
+    let previouslyCompleted = executedQueries.size
 
     for (const [queryName, queryPlan] of Object.entries(queries)) {
-      if (executedQueries.has(queryName)) continue
+      if (alreadyExecuted(queryName) || !readyToExecute(queryPlan)) continue
 
-      // Check if all dependencies are satisfied
-      const depsReady = queryPlan.dependencies.every(dep =>
-        dep === 'given' ? true : executedQueries.has(dep))
-
-      if (depsReady) {
-        // Execute this query
-        try {
-          let result
-
-          if (queryPlan.type === 'chain') {
-            // Execute chain steps sequentially
-            let chainResult = null
-
-            for (const step of queryPlan.steps) {
-              const finalArgs = mergeArgs(step.args, results, chainResult)
-              debugLog('chain step:', { serviceName: step.serviceName, action: step.action, finalArgs })
-
-              const service = services[step.serviceName]
-
-              if (typeof service === 'function') {
-                // Function service - call with action and args
-                chainResult = await service(step.action, finalArgs)
-              } else {
-                // Object service - call method with args
-                const method = service[step.action]
-                chainResult = await method(finalArgs)
-              }
-
-              debugAlt('step returned:', { serviceName: step.serviceName, action: step.action, result: chainResult })
-            }
-
-            result = chainResult
-          } else {
-            // Execute single service call
-            const finalArgs = mergeArgs(queryPlan.args, results)
-            debugLog('calling:', { serviceName: queryPlan.serviceName, action: queryPlan.action, finalArgs })
-
-            const service = services[queryPlan.serviceName]
-
-            if (typeof service === 'function') {
-              // Function service - call with action and args
-              result = await service(queryPlan.action, finalArgs)
-            } else {
-              // Object service - call method with args
-              const method = service[queryPlan.action]
-              result = await method(finalArgs)
-            }
-
-            debugAlt('returned:', { serviceName: queryPlan.serviceName, action: queryPlan.action, result })
-          }
-
-          results[queryName] = result
-          executedQueries.add(queryName)
-          progress = true
-        } catch (error) {
-          throw new Error(`Query '${queryName}' failed: ${error.message}`)
-        }
-      }
+      results[queryName] = await executePlan(queryPlan, results, new ContextStack())
+      executedQueries.add(queryName)
     }
 
-    if (!progress) {
+    // if we didn't count up at least one query each time, that's an error
+    // TODO: check and see if we can detect circular references at compile time
+    if (executedQueries.size <= previouslyCompleted) {
       const remaining = Object.keys(queries).filter(q => !executedQueries.has(q))
       throw new Error(`Circular dependency or missing dependencies for queries: ${remaining.join(', ')}`)
     }
@@ -174,4 +83,4 @@ export async function execute(plan) {
   return results
 }
 
-export { mergeArgs }
+export default execute

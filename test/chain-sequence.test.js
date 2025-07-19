@@ -1,7 +1,7 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import {describe, it} from 'node:test'
 import query from '../query.js'
-import util from '../util.js'
+import util from '../services/util.js'
 
 describe('Chain Sequential Execution Tests', () => {
   describe('Chain steps without path dependencies', () => {
@@ -9,31 +9,32 @@ describe('Chain Sequential Execution Tests', () => {
       const executionOrder = []
 
       const result = await query({
-        given: { start: 1 },
+        given: {start: 1},
+        settings: {debug: false},
         services: {
           tracker: {
-            async step1({ value }) {
+            async step1({value}) {
               executionOrder.push('step1')
               return value + 1
             },
-            async step2({ value }) {
+            async step2({value}) {
               executionOrder.push('step2')
               return value + 10
             },
-            async step3({ value }) {
+            async step3({value}) {
               executionOrder.push('step3')
               return value + 100
             }
           }
         },
-        query: {
+        queries: {
           result: [
             // Step 1: uses given data (has $ dependency)
-            ['tracker', 'step1', { value: '$.given.start' }],
+            ['tracker', 'step1', {value: '$.given.start'}],
             // Step 2: uses static value (NO @ or $ dependency)
-            ['tracker', 'step2', { value: 5 }],
+            ['tracker', 'step2', {value: 5}],
             // Step 3: uses @ dependency from previous step
-            ['tracker', 'step3', { value: '@' }]
+            ['tracker', 'step3', {value: '@'}]
           ]
         }
       })
@@ -49,35 +50,35 @@ describe('Chain Sequential Execution Tests', () => {
       const executionOrder = []
 
       const result = await query({
-        given: { base: 10 },
+        given: {base: 10},
         services: {
           calc: {
-            async add({ a, b }) {
+            async add({a, b}) {
               executionOrder.push(`add-${a}-${b}`)
               return a + b
             },
-            async multiply({ a, b }) {
+            async multiply({a, b}) {
               executionOrder.push(`multiply-${a}-${b}`)
               return a * b
             },
-            async constant({ value }) {
+            async constant({value}) {
               executionOrder.push(`constant-${value}`)
               return value
             }
           }
         },
-        query: {
+        queries: {
           result: [
             // Step 1: uses given data
-            ['calc', 'add', { a: '$.given.base', b: 5 }], // 10 + 5 = 15
+            ['calc', 'add', {a: '$.given.base', b: 5}], // 10 + 5 = 15
             // Step 2: no path dependencies (static values)
-            ['calc', 'multiply', { a: 2, b: 3 }], // 2 * 3 = 6
+            ['calc', 'multiply', {a: 2, b: 3}], // 2 * 3 = 6
             // Step 3: uses previous chain result
-            ['calc', 'add', { a: '@', b: 1 }], // 6 + 1 = 7
+            ['calc', 'add', {a: '@', b: 1}], // 6 + 1 = 7
             // Step 4: uses constant (no dependencies)
-            ['calc', 'constant', { value: 100 }], // 100
+            ['calc', 'constant', {value: 100}], // 100
             // Step 5: uses previous result
-            ['calc', 'add', { a: '@', b: 0 }] // 100 + 0 = 100
+            ['calc', 'add', {a: '@', b: 0}] // 100 + 0 = 100
           ]
         }
       })
@@ -99,26 +100,26 @@ describe('Chain Sequential Execution Tests', () => {
       const executionOrder = []
 
       const result = await query({
-        given: { ignored: 'not used' },
+        given: {ignored: 'not used'},
         services: {
           math: {
-            async getValue({ n }) {
+            async getValue({n}) {
               executionOrder.push(`getValue-${n}`)
               return n * 2
             },
-            async process({ data }) {
+            async process({data}) {
               executionOrder.push(`process-${data}`)
               return data + 1
             }
           }
         },
-        query: {
+        queries: {
           result: [
             // All steps use static values, no path dependencies
-            ['math', 'getValue', { n: 5 }], // 10
-            ['math', 'getValue', { n: 3 }], // 6 (ignores previous @)
-            ['math', 'process', { data: 100 }], // 101 (ignores previous @)
-            ['math', 'getValue', { n: 1 }] // 2 (ignores previous @)
+            ['math', 'getValue', {n: 5}], // 10
+            ['math', 'getValue', {n: 3}], // 6 (ignores previous @)
+            ['math', 'process', {data: 100}], // 101 (ignores previous @)
+            ['math', 'getValue', {n: 1}] // 2 (ignores previous @)
           ]
         }
       })
@@ -139,16 +140,16 @@ describe('Chain Sequential Execution Tests', () => {
   describe('Template and function parameter sequences', () => {
     it('should handle util.map with service function in chain', async () => {
       const result = await query({
-        given: { numbers: [1, 2, 3] },
+        given: {numbers: [1, 2, 3]},
         services: {
           math: {
-            async double({ value }) {
+            async double({value}) {
               return value * 2
             }
           },
           util
         },
-        query: {
+        queries: {
           result: [
             // Step 1: map with service function
             [
@@ -156,11 +157,11 @@ describe('Chain Sequential Execution Tests', () => {
               'map',
               {
                 on: '$.given.numbers',
-                fn: ['math', 'double', { value: '@' }]
+                fn: ['math', 'double', {value: '@'}]
               }
             ],
             // Step 2: use result in static operation
-            ['util', 'length', { value: '@' }]
+            ['util', 'length', {value: '@'}]
           ]
         }
       })
@@ -173,12 +174,12 @@ describe('Chain Sequential Execution Tests', () => {
       const result = await query({
         given: {
           items: [
-            { id: 1, name: 'A' },
-            { id: 2, name: 'B' }
+            {id: 1, name: 'A'},
+            {id: 2, name: 'B'}
           ]
         },
-        services: { util },
-        query: {
+        services: {util},
+        queries: {
           result: [
             // Step 1: map with template
             [
@@ -186,11 +187,11 @@ describe('Chain Sequential Execution Tests', () => {
               'map',
               {
                 on: '$.given.items',
-                fn: { itemId: '@.id', itemName: '@.name' }
+                fn: {itemId: '@.id', itemName: '@.name'}
               }
             ],
             // Step 2: use result in static operation
-            ['util', 'length', { value: '@' }]
+            ['util', 'length', {value: '@'}]
           ]
         }
       })
@@ -206,28 +207,28 @@ describe('Chain Sequential Execution Tests', () => {
 
       await assert.rejects(
         query({
-          given: { start: 1 },
+          given: {start: 1},
           services: {
             test: {
-              async step1({ value }) {
+              async step1({value}) {
                 executionOrder.push('step1')
                 return value + 1
               },
-              async step2({ value }) {
+              async step2({value}) {
                 executionOrder.push('step2')
                 throw new Error('Step 2 failed')
               },
-              async step3({ value }) {
+              async step3({value}) {
                 executionOrder.push('step3')
                 return value + 100
               }
             }
           },
-          query: {
+          queries: {
             result: [
-              ['test', 'step1', { value: '$.given.start' }],
-              ['test', 'step2', { value: 5 }], // This will fail
-              ['test', 'step3', { value: '@' }] // This should never execute
+              ['test', 'step1', {value: '$.given.start'}],
+              ['test', 'step2', {value: 5}], // This will fail
+              ['test', 'step3', {value: '@'}] // This should never execute
             ]
           }
         }),

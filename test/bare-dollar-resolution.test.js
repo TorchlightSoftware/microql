@@ -1,26 +1,26 @@
 import assert from 'node:assert'
-import { describe, it } from 'node:test'
+import {describe, it} from 'node:test'
 import query from '../query.js'
-import util from '../util.js'
+import util from '../services/util.js'
 
 describe('Bare $ Resolution Tests', () => {
   it('should resolve $ to all completed queries at execution time', async () => {
     const result = await query({
-      given: { value: 'test' },
-      services: { util },
-      query: {
-        step1: ['util', 'pick', { on: '$.given', fields: ['value'] }],
+      given: {value: 'test'},
+      services: {util},
+      queries: {
+        step1: ['util', 'pick', {on: '$.given', fields: ['value']}],
         step2: [
           'util',
           'when',
-          { test: true, then: 'completed', or: 'failed' }
+          {test: true, then: 'completed', or: 'failed'}
         ],
         // Create dependency on step1 and step2, then capture state
         // $ semantic: "can see present state of all queries" but "depends on none"
         // Since captureState depends on step1 and step2, they will be completed when $ is resolved
         captureState: [
-          ['util', 'template', { step1: '$.step1', step2: '$.step2' }],
-          ['util', 'template', { allQueries: '$', context: '@' }]
+          ['util', 'template', {step1: '$.step1', step2: '$.step2'}],
+          ['util', 'template', {allQueries: '$', context: '@'}]
         ]
       },
       select: 'captureState'
@@ -41,10 +41,10 @@ describe('Bare $ Resolution Tests', () => {
     // $ semantic: "can see present state of all queries" but "depends on none"
     // This means immediate and delayed can run in parallel
     const result = await query({
-      services: { util },
-      query: {
+      services: {util},
+      queries: {
         immediate: ['util', 'template', '$'], // Should execute immediately, capture empty state
-        delayed: ['util', 'when', { test: true, then: 'done', or: 'failed' }]
+        delayed: ['util', 'when', {test: true, then: 'done', or: 'failed'}]
       },
       select: ['immediate', 'delayed']
     })
@@ -58,24 +58,33 @@ describe('Bare $ Resolution Tests', () => {
 
   it('should work with method syntax', async () => {
     const result = await query({
-      given: { data: [1, 2, 3] },
-      services: { util },
+      given: {data: [1, 2, 3]},
+      services: {util},
       methods: ['util'],
-      query: {
-        processed: ['$.given.data', 'util:map', { fn: { doubled: '@' } }],
+      queries: {
+        processed: ['$.given.data', 'util:map', {fn: {value: '@'}}],
         // Use method syntax to capture current state after processed completes
         // $ semantic: "can see present state of all queries" but "depends on none"
         // Since result depends on processed, processed will be completed when $ is resolved
-        result: ['$.processed', 'util:template', { allState: '$' }]
+        result: ['$.processed', 'util:template', {allState: '$'}]
       },
       select: 'result'
     })
+
+    // This is what *I* would expect result to be:
+    //result = {
+    //  allState: {
+    //    given: [1, 2, 3],
+    //    processed: [{value: 1}, {value: 2}, {value: 3}]
+    //  },
+    //  on: [{value: 1}, {value: 2}, {value: 3}]
+    //}
 
     // Should capture both given and processed
     assert(result.allState.given)
     assert.deepStrictEqual(result.allState.given.data, [1, 2, 3])
     assert(result.allState.processed)
     assert(Array.isArray(result.allState.processed))
-    assert.strictEqual(result.allState.processed[0].doubled, 1)
+    assert.deepStrictEqual(result.allState.processed.map(p => p.value), [1, 2, 3])
   })
 })
