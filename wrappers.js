@@ -9,7 +9,8 @@ const withArgs = (fn) => {
   return async function (args = {}) {
     //console.log('withArgs this:', this)
     let {queryResults, contextStack} = this
-    //console.log('withArgs received context stack for args:', Object.keys(args), 'stack:', contextStack.stack)
+    //let {queryName, serviceName, action} = this
+    //console.log(`withArgs for [${queryName} - ${serviceName}:${action}] received:`, args, 'stack:', contextStack.stack)
 
     const resolvedArgs = _.cloneDeepWith(args, (value) => {
 
@@ -33,15 +34,17 @@ const withArgs = (fn) => {
           // we need to push two layers of stack for the `fn` and the `chain`
           // @ will refer to chain, @@ will refer to fn
           const chainStack = contextStack.extend(ctx).extend(null)
-          for (fn in value) {
+          for (const fn of value) {
             chainStack.setCurrent(await fn(queryResults, chainStack))
           }
+          return chainStack.getCurrent()
         }
       }
 
       // Let cloneDeepWith handle objects and arrays recursively
       return undefined
     })
+    //console.log(`withArgs for [${queryName} - ${serviceName}:${action}] resolved as:`, resolvedArgs)
 
     return await fn.call(this, resolvedArgs)
   }

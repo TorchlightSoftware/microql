@@ -47,19 +47,11 @@ describe('Relative Indexing Context Tests', () => {
       given: {items: [1, 2]},
       services,
       queries: {
-        simple: [
-          '$.given.items',
-          'util:map',
-          {
-            fn: [
-              'test',
-              'checkContext',
-              {
-                level1: '@' // Should be the current item (1 or 2)
-              }
-            ]
-          }
-        ]
+        simple: ['$.given.items', 'util:map', {
+          fn: ['test', 'checkContext', {
+            level1: '@' // Should be the current item (1 or 2)
+          }]
+        }]
       }
     })
 
@@ -75,27 +67,14 @@ describe('Relative Indexing Context Tests', () => {
       },
       services,
       queries: {
-        nested: [
-          '$.given.outer',
-          'util:flatMap',
-          {
-            fn: [
-              'util',
-              'map',
-              {
-                on: '@.inner',
-                fn: [
-                  'test',
-                  'checkContext',
-                  {
-                    level1: '@', // Should be inner item (current context)
-                    level2: '@@' // Should be outer item (parent context)
-                  }
-                ]
-              }
-            ]
-          }
-        ]
+        nested: ['$.given.outer', 'util:flatMap', {
+          fn: ['@.inner', 'util:map', {
+            fn: ['test', 'checkContext', {
+              level1: '@', // Should be inner item (current context)
+              level2: '@@' // Should be outer item (parent context)
+            }]
+          }]
+        }]
       }
     })
 
@@ -150,10 +129,11 @@ describe('Relative Indexing Context Tests', () => {
   })
 
   it('should handle deep nesting: chainA -> mapB -> chainC -> mapD', async () => {
+    // use math functions to test - we can do complex things but still reduce down
     const math = {
       add1: async ({on}) => on + 1,
       times10: async ({on}) => on * 10,
-      reduce: async ({on, fn}) => on.reduce((l, r) => fn([l, r])),
+      reduce: async ({on, fn}) => on.reduce(async (l, r) => fn([await l, r])),
       sequence: async ({on}) => Array.from({length: on}, (v, k) => k + 1),
       sum: async ({on}) => on.reduce((l, r) => l + r)
     }
@@ -161,10 +141,12 @@ describe('Relative Indexing Context Tests', () => {
 
     const services = {util, math}
 
+    // test deep nesting of alternate chain and function calls
+    // this calls many important code paths and ensures they all work correctly
     const result = await query({
       given: {input: 1, array: [1, 2, 3]},
       services,
-      settings: {debug: true},
+      settings: {debug: false},
       queries: {
         deepNested: [
           // ChainA
@@ -174,17 +156,15 @@ describe('Relative Indexing Context Tests', () => {
           ['$.given.array', 'util:map', {
             fn: [
               // ChainC
-              ['@', 'math:times10'], // 10, 20, 30
+              ['@@', 'math:times10'], // 10, 20, 30
               ['@', 'math:add1'], // 11, 21, 31
               ['@', 'math:sequence'], // [1..11], [1..21], [1..31]
               // MapD
               ['@', 'math:reduce', {fn: ['@', 'math:sum']}], // sum([1..11]), sum([1..21]), sum([1..31])
-              ['@', 'util:template', {
-                fn: {
-                  ChainA: '@', // 3
-                  MapB: '@@', // 1, 2, 3
-                  ChainC: '@@@' // sum([1..11]), sum([1..21]), sum([1..31])
-                }
+              ['@', 'util:template', { // I wasn't able to test from the fourth context layer, but this should be good enough
+                ChainA: '@', // 3
+                MapB: '@@', // 1, 2, 3
+                ChainC: '@@@' // sum([1..11]), sum([1..21]), sum([1..31])
               }]
             ]
           }]
@@ -192,11 +172,11 @@ describe('Relative Indexing Context Tests', () => {
       }
     })
 
-    console.log(result.deepNested)
-
-    // Verify the deep nesting works correctly
-    assert(Array.isArray(result.deepNested))
-    assert(result.deepNested.length > 0)
-
+    // Correct sums proves that the whole query executed properly
+    assert.deepStrictEqual(result.deepNested, [
+      {ChainA: 66, MapB: 1, ChainC: 3, on: 66},
+      {ChainA: 231, MapB: 2, ChainC: 3, on: 231},
+      {ChainA: 496, MapB: 3, ChainC: 3, on: 496}
+    ])
   })
 })

@@ -83,17 +83,15 @@ const compileArgs = (queryName, serviceName, args, argtypes, config, settings) =
 
     // compile service to function
     } else if (argtypes[key] === 'function' && Array.isArray(value)) {
-      const makeFn = (descriptor) => {
-        compiled[key] = compileServiceFunction(queryName, descriptor, config).service
-      }
+      const makeFn = (descriptor) => compileServiceFunction(queryName, descriptor, config).service
 
       // is it a chain?
       if (_.every(value, v => Array.isArray(v))) {
-        value.map(makeFn)
+        compiled[key] = value.map(makeFn)
 
       // or a single service call?
       } else {
-        makeFn(value)
+        compiled[key] = makeFn(value)
       }
 
     } else if (RESERVE_ARGS.includes(key)) {

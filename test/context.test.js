@@ -79,4 +79,20 @@ describe('ContextStack Tests', () => {
     assert.equal(stack2.getCurrent(), 'modified-c')
     assert.equal(stack2.get(2), 'b') // Original value preserved
   })
+
+  it('should extend with arrays as single layers, not concatenate elements', () => {
+    const original = new ContextStack(['a', 'b'])
+    const arrayValue = [1, 2, 3]
+    const extended = original.extend(arrayValue)
+
+    // Array should be treated as single stack layer
+    assert.deepEqual(extended.stack, ['a', 'b', [1, 2, 3]])
+    assert.equal(extended.stack.length, 3)
+    
+    // The array should be accessible as a single unit
+    assert.deepEqual(extended.getCurrent(), [1, 2, 3])
+    assert.equal(extended.get(1), arrayValue) // Should be the array itself
+    assert.equal(extended.get(2), 'b')
+    assert.equal(extended.get(3), 'a')
+  })
 })

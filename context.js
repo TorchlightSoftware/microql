@@ -26,7 +26,7 @@ class ContextStack {
   }
 
   extend(value) {
-    return new ContextStack(this.stack.concat(value))
+    return new ContextStack(this.stack.concat([value]))
   }
 }
 
