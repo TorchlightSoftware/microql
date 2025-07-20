@@ -25,7 +25,7 @@ describe('ContextStack Tests', () => {
     assert.equal(stack.get(3), 'a') // Third to last
 
     // Invalid depth should throw
-    assert.throws(() => stack.get(4), /Invalid stack reference/)
+    assert.throws(() => stack.get(4), /@@@@ not available - context not deep enough/)
 
     // Depth 0 should throw
     assert.throws(() => stack.get(0), /Depth must be 1 or greater/)
@@ -42,7 +42,7 @@ describe('ContextStack Tests', () => {
 
     // Should throw on empty stack
     const empty = new ContextStack()
-    assert.throws(() => empty.getCurrent(), /Invalid stack reference/)
+    assert.throws(() => empty.getCurrent(), /@ not available - context not deep enough/)
     assert.throws(() => empty.setCurrent('value'), /Invalid stack reference/)
   })
 
@@ -88,7 +88,7 @@ describe('ContextStack Tests', () => {
     // Array should be treated as single stack layer
     assert.deepEqual(extended.stack, ['a', 'b', [1, 2, 3]])
     assert.equal(extended.stack.length, 3)
-    
+
     // The array should be accessible as a single unit
     assert.deepEqual(extended.getCurrent(), [1, 2, 3])
     assert.equal(extended.get(1), arrayValue) // Should be the array itself

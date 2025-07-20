@@ -90,23 +90,29 @@ export async function execute(plan) {
   }
 
   try {
-    // Execute queries in dependency order
+    // Execute queries in dependency order with parallel execution
     while (executedQueries.size < queryCount) {
-      let previouslyCompleted = executedQueries.size
 
-      for (const [queryName, queryPlan] of Object.entries(queries)) {
-        if (alreadyExecuted(queryName) || !readyToExecute(queryPlan)) continue
+      // Collect all queries that are ready to execute (no unresolved dependencies)
+      const readyQueries = Object.entries(queries).filter(([queryName, queryPlan]) =>
+        !alreadyExecuted(queryName) && readyToExecute(queryPlan))
 
-        results[queryName] = await executePlan(queryPlan, results, new ContextStack(), usedServices)
-        executedQueries.add(queryName)
-      }
-
-      // if we didn't count up at least one query each time, that's an error
-      // TODO: check and see if we can detect circular references at compile time
-      if (executedQueries.size <= previouslyCompleted) {
+      if (readyQueries.length === 0) {
+        // if we didn't find any ready queries, that's an error
+        // TODO: check and see if we can detect circular references at compile time
         const remaining = Object.keys(queries).filter(q => !executedQueries.has(q))
         throw new Error(`Circular dependency or missing dependencies for queries: ${remaining.join(', ')}`)
       }
+
+      // prepare to execute everything that's ready
+      const queryPromises = readyQueries.map(async ([queryName, queryPlan]) => {
+        // Store results and mark queries as executed
+        results[queryName] = await executePlan(queryPlan, results, new ContextStack(), usedServices)
+        executedQueries.add(queryName)
+      })
+
+      // Execute all ready queries in parallel using Promise.all()
+      await Promise.all(queryPromises)
     }
 
     return results
