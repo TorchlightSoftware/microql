@@ -214,7 +214,7 @@ describe('Chain Sequential Execution Tests', () => {
                 executionOrder.push('step1')
                 return value + 1
               },
-              async step2({value}) {
+              async step2({_value}) {
                 executionOrder.push('step2')
                 throw new Error('Step 2 failed')
               },

@@ -199,7 +199,7 @@ describe('Retry Tests', () => {
 
       const services = {
         processor: {
-          transform: async ({on, retry}) => {
+          transform: async ({on, _retry}) => {
             callCount++
             if (callCount < 2) {
               throw new Error('Transform failed')
@@ -214,7 +214,6 @@ describe('Retry Tests', () => {
           items: [{id: 1}, {id: 2}]
         },
         services,
-        methods: ['processor'],
         queries: {
           // Method syntax with retry
           result: ['$.given.items', 'processor:transform', {retry: 2}]

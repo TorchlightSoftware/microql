@@ -70,7 +70,7 @@ describe('Error Handling Tests', () => {
       let errorLogged = false
 
       const customLog = {
-        track: async ({on}) => {
+        track: async ({_on}) => {
           errorLogged = true
           return {tracked: true}
         }

@@ -9,6 +9,9 @@
     "lint": "npx eslint .",
     "lint:fix": "npx eslint --fix ."
   },
+  "simple-git-hooks": {
+    "pre-commit": "npm run lint:fix"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/TorchlightSoftware/microql.git"
@@ -36,6 +39,7 @@
   "devDependencies": {
     "@stylistic/eslint-plugin": "^5.2.0",
     "eslint": "^9.31.0",
+    "simple-git-hooks": "^2.13.0",
     "tap-mocha-reporter": "^5.0.4"
   },
   "dependencies": {

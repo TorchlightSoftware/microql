@@ -72,9 +72,10 @@ export default [
       '@stylistic/space-unary-ops': 'error',
 
       // Unused variables - ignore variables starting with underscore
-      'no-unused-vars': ['error', { 
+      'no-unused-vars': ['error', {
         argsIgnorePattern: '^_',
-        varsIgnorePattern: '^_' 
+        varsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_'
       }]
     }
   }
