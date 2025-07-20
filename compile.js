@@ -1,7 +1,7 @@
 /**
  * @fileoverview MicroQL Query Compiler
  *
- * Compiles query configurations into execution plans.
+ * Compiles query configurations into queryAST
  * Handles service validation and dependency extraction.
  */
 
@@ -165,6 +165,7 @@ function compileDescriptor(queryName, descriptor, config) {
 
     return {
       type: 'chain',
+      queryName,
       steps: chainSteps,
       dependencies: allDeps
     }
@@ -176,26 +177,26 @@ function compileDescriptor(queryName, descriptor, config) {
 
 
 /**
- * Compile a query configuration into an execution plan
+ * Compile a query configuration into a queryAST
  * @param {Object} config - Query configuration
  * @param {Object} config.services - Service objects
  * @param {Object} config.queries - Query definitions
  * @param {Object} config.given - given data
  * @param {boolean} config.debug - Debug logging flag
- * @returns {Object} Compiled execution plan
+ * @returns {Object} Compiled queryAST
  */
 export function compile(config) {
   const {services, queries, given, debug} = config
 
-  // Build execution plan for each query
-  const executionPlan = {}
+  // Build AST for each query
+  const queryAST = {}
 
   for (const [queryName, descriptor] of Object.entries(queries)) {
-    executionPlan[queryName] = compileDescriptor(queryName, descriptor, config)
+    queryAST[queryName] = compileDescriptor(queryName, descriptor, config)
   }
 
   return {
-    queries: executionPlan,
+    queries: queryAST,
     given,
     services,
     debug

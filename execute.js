@@ -54,65 +54,38 @@ async function callTearDown(services, usedServices) {
 }
 
 /**
- * Execute a compiled execution plan
- * @param {Object} plan - Compiled execution plan
- * @param {Object} plan.queries - Query execution plans
+ * Execute a staged execution plan
+ * @param {Object} plan - Staged execution plan
+ * @param {Array} plan.stages - Array of stages, each containing query plans to execute in parallel
  * @param {Object} plan.given - given data
  * @param {Object} plan.services - Service objects
- * @param {boolean} plan.debug - Debug logging flag
+ * @param {Object} plan.queries - All query AST nodes (for snapshot handling)
  * @returns {Object} Execution results
  */
 export async function execute(plan) {
-  const {queries, given, services} = plan
+  const {stages, given, services, queries} = plan
 
   const results = {}
   const usedServices = new Set()
-  const executedQueries = new Set()
 
-  const alreadyExecuted = (queryName) => executedQueries.has(queryName)
-  const readyToExecute = (plan) => plan.dependencies.difference(executedQueries).size === 0
+  // Add given data
+  if (given) results.given = given
 
-  let queryCount = Object.keys(queries).length
-
-  // Add given data as a pre-resolved query
-  if (given) {
-    results.given = given
-    executedQueries.add('given')
-    queryCount++
-  }
-
-  // Handle pre-completed queries (from snapshot loading)
-  for (const [queryName, queryPlan] of Object.entries(queries)) {
-    if (queryPlan.completed && queryPlan.value !== undefined) {
-      results[queryName] = queryPlan.value
-      executedQueries.add(queryName)
+  // Add pre-completed queries (from snapshot loading)
+  if (queries) {
+    for (const [queryName, queryPlan] of Object.entries(queries)) {
+      if (queryPlan.completed && queryPlan.value !== undefined) {
+        results[queryName] = queryPlan.value
+      }
     }
   }
 
   try {
-    // Execute queries in dependency order with parallel execution
-    while (executedQueries.size < queryCount) {
-
-      // Collect all queries that are ready to execute (no unresolved dependencies)
-      const readyQueries = Object.entries(queries).filter(([queryName, queryPlan]) =>
-        !alreadyExecuted(queryName) && readyToExecute(queryPlan))
-
-      if (readyQueries.length === 0) {
-        // if we didn't find any ready queries, that's an error
-        // TODO: check and see if we can detect circular references at compile time
-        const remaining = Object.keys(queries).filter(q => !executedQueries.has(q))
-        throw new Error(`Circular dependency or missing dependencies for queries: ${remaining.join(', ')}`)
-      }
-
-      // prepare to execute everything that's ready
-      const queryPromises = readyQueries.map(async ([queryName, queryPlan]) => {
-        // Store results and mark queries as executed
-        results[queryName] = await executePlan(queryPlan, results, new ContextStack(), usedServices)
-        executedQueries.add(queryName)
-      })
-
-      // Execute all ready queries in parallel using Promise.all()
-      await Promise.all(queryPromises)
+    // Execute each stage
+    for (const stage of stages) {
+      await Promise.all(stage.map(async (queryPlan) => {
+        results[queryPlan.queryName] = await executePlan(queryPlan, results, new ContextStack(), usedServices)
+      }))
     }
 
     return results
