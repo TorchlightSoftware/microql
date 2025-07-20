@@ -126,6 +126,51 @@ describe('Error Handling Tests', () => {
       const result = await query(config)
       assert.strictEqual(result.chained, null)
     })
+
+    it('should call onError chain when service fails', async () => {
+      const errorContexts = []
+      
+      const logService = {
+        addContext: async ({on, severity}) => {
+          // @ should be the error object
+          return {
+            ...on,
+            severity,
+            timestamp: new Date().toISOString()
+          }
+        },
+        logError: async ({on}) => {
+          // @ should be the enriched error from addContext
+          errorContexts.push(on)
+          return {logged: true, severity: on.severity}
+        }
+      }
+
+      const config = {
+        services: {error: errorService, log: logService},
+        queries: {
+          result: ['error', 'fail', {
+            onError: [
+              ['@', 'log:addContext', {severity: 'bad'}],
+              ['@', 'log:logError']
+            ]
+          }]
+        }
+      }
+
+      const result = await query(config)
+      
+      // Verify the chain executed correctly
+      assert.strictEqual(errorContexts.length, 1)
+      assert.strictEqual(errorContexts[0].severity, 'bad')
+      assert.strictEqual(errorContexts[0].message, '[result - error:fail] Service failed')
+      assert.strictEqual(errorContexts[0].serviceName, 'error')
+      assert.strictEqual(errorContexts[0].action, 'fail')
+      assert.ok(errorContexts[0].timestamp)
+      
+      // Verify the result is what the error handler chain returned
+      assert.deepStrictEqual(result.result, {logged: true, severity: 'bad'})
+    })
   })
 
   describe('Error Context', () => {
