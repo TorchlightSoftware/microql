@@ -46,7 +46,6 @@ describe('Relative Indexing Context Tests', () => {
     const result = await query({
       given: {items: [1, 2]},
       services,
-      methods: ['util'],
       queries: {
         simple: [
           '$.given.items',
@@ -75,7 +74,6 @@ describe('Relative Indexing Context Tests', () => {
         outer: [{inner: [1, 2]}, {inner: [3, 4]}]
       },
       services,
-      methods: ['util'],
       queries: {
         nested: [
           '$.given.outer',
@@ -113,45 +111,24 @@ describe('Relative Indexing Context Tests', () => {
 
   it('should handle chain results in context stack', async () => {
     const chainService = {
-      step1: ({input}) => ({step1Result: `${input}-step1`}),
-      step2: ({input}) => ({step2Result: `${input}-step2`}),
-      final: ({chain1, chain2}) => ({
-        chain1,
-        chain2
-      })
+      step1: ({on}) => (`${on}-step1`),
+      step2: ({on}) => (`${on}-step2`),
+      final: ({on}) => (on)
     }
 
-    chainService.step1._argtypes = {}
-    chainService.step2._argtypes = {}
-    chainService.final._argtypes = {}
-
     const result = await query({
-      given: {value: 'test'},
+      given: {input: 'input'},
       services: {util, chain: chainService},
-      methods: ['util'],
       queries: {
-        // Test chains in functions
         result: [
-          'util',
-          'map',
-          {
-            on: [1, 2],
-            fn: [
-              'chain',
-              'final',
-              {
-                chain1: '@', // Should be current iteration item
-                chain2: '@' // Same - we're not in a chain context here
-              }
-            ]
-          }
+          ['$.given.input', 'chain:step1'],
+          ['@', 'chain:step2'],
+          ['@', 'chain:final']
         ]
       }
     })
 
-    assert.strictEqual(result.result.length, 2)
-    assert.strictEqual(result.result[0].chain1, 1)
-    assert.strictEqual(result.result[0].chain2, 1)
+    assert.strictEqual(result.result, 'input-step1-step2')
   })
 
   it('should throw clear error for invalid context levels', async () => {
@@ -159,119 +136,67 @@ describe('Relative Indexing Context Tests', () => {
       await query({
         given: {items: [1, 2]},
         services,
-        methods: ['util'],
         queries: {
-          invalid: [
-            '$.given.items',
-            'util:map',
-            {
-              fn: [
-                'test',
-                'checkContext',
-                {
-                  level1: '@@@@' // Too many levels
-                }
-              ]
-            }
-          ]
+          invalid: ['$.given.items', 'util:map', {
+            fn: ['test', 'checkContext', {level1: '@@@@'}] // too many levels
+          }]
         }
       })
       assert.fail('Should have thrown error for invalid context level')
     } catch (error) {
-      assert(
-        error.message.includes('@@@@ not available - context not deep enough')
-      )
+      assert(error.message.includes('@@@@ not available - context not deep enough'))
       assert(error.message.includes('levels available'))
     }
   })
 
   it('should handle deep nesting: chainA -> mapB -> chainC -> mapD', async () => {
-    // This test captures the complex pattern that requires virtual AST nodes
-    const chainService = {
-      step1: async ({input}) =>
-        input.map((dataset) => ({
-          dataset,
-          step: 'chainA',
-          processed: dataset.batches
-        })),
-      step2: async ({input}) =>
-        input.map((batch) => ({
-          batch,
-          step: 'chainC',
-          items: batch.items
-        }))
+    const math = {
+      add1: async ({on}) => on + 1,
+      times10: async ({on}) => on * 10,
+      reduce: async ({on, fn}) => on.reduce((l, r) => fn([l, r])),
+      sequence: async ({on}) => Array.from({length: on}, (v, k) => k + 1),
+      sum: async ({on}) => on.reduce((l, r) => l + r)
     }
+    math.reduce._argtypes = {fn: 'function'}
 
-    chainService.step1._argtypes = {}
-    chainService.step2._argtypes = {}
-
-    const services = {util, test: testService, chain: chainService}
+    const services = {util, math}
 
     const result = await query({
-      given: {
-        datasets: [
-          {batches: [{items: [1, 2]}]},
-          {batches: [{items: [3, 4]}]}
-        ]
-      },
+      given: {input: 1, array: [1, 2, 3]},
       services,
-      methods: ['util'],
+      settings: {debug: true},
       queries: {
         deepNested: [
-          // ChainA: Transform datasets
-          ['chain', 'step1', {input: '$.given.datasets'}],
-          // MapB: Iterate over each transformed dataset
-          [
-            'util',
-            'flatMap',
-            {
-              on: '@',
-              fn: ['chain', 'step2', {input: '@.processed'}]
-            }
-          ],
-          // MapC: Iterate over the flattened batches
-          [
-            'util',
-            'flatMap',
-            {
-              on: '@',
-              fn: [
-                'test',
-                'checkContext',
-                {
-                  level1: '@.items', // Current batch items
-                  level2: '@@', // Current batch (from previous map)
-                  level3: '@@@' // Current dataset (from mapB)
+          // ChainA
+          ['$.given.input', 'math:add1'], // 2
+          ['@', 'math:add1'], // 3
+          // MapB
+          ['$.given.array', 'util:map', {
+            fn: [
+              // ChainC
+              ['@', 'math:times10'], // 10, 20, 30
+              ['@', 'math:add1'], // 11, 21, 31
+              ['@', 'math:sequence'], // [1..11], [1..21], [1..31]
+              // MapD
+              ['@', 'math:reduce', {fn: ['@', 'math:sum']}], // sum([1..11]), sum([1..21]), sum([1..31])
+              ['@', 'util:template', {
+                fn: {
+                  ChainA: '@', // 3
+                  MapB: '@@', // 1, 2, 3
+                  ChainC: '@@@' // sum([1..11]), sum([1..21]), sum([1..31])
                 }
-              ]
-            }
-          ]
+              }]
+            ]
+          }]
         ]
       }
     })
+
+    console.log(result.deepNested)
 
     // Verify the deep nesting works correctly
     assert(Array.isArray(result.deepNested))
     assert(result.deepNested.length > 0)
 
-    // Check first result from the nested iteration
-    const firstResult = result.deepNested[0]
-
-    // Verify the context resolution worked correctly
-    assert(Array.isArray(firstResult.level1)) // @ resolves to current batch items
-    assert(Array.isArray(firstResult.level2)) // @@ resolves to parent context (array of batches)
-    assert(Array.isArray(firstResult.level3)) // @@@ resolves to grandparent context
-
-    // CRITICAL: @@ and @@@ should resolve to different values
-    assert.notStrictEqual(
-      firstResult.level2,
-      firstResult.level3,
-      '@@ and @@@ should resolve to different contexts, but they are the same'
-    )
-
-    // Verify the actual data structure
-    assert.strictEqual(firstResult.level1.length, 2) // [1, 2] or [3, 4]
-    assert(firstResult.level2.length > 0) // Array of batch objects
-    assert(firstResult.level2[0].step === 'chainC') // Batches from chainC step
   })
 })

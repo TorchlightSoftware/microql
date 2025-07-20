@@ -14,7 +14,7 @@ const resolveValue = (queryResults, contextStack, value) => {
     return _.get(queryResults, path)
   }
 
-  //console.log('matching context for: [', value, '], with stack:', contextStack)
+  //console.log('matching context for: [', value, '], with stack:', contextStack, 'stack contents:', contextStack.stack)
 
   // Handle @ references (current context)
   let m = value.match(AT_REGEX)

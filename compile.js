@@ -83,8 +83,18 @@ const compileArgs = (queryName, serviceName, args, argtypes, config, settings) =
 
     // compile service to function
     } else if (argtypes[key] === 'function' && Array.isArray(value)) {
-      const fn = compileServiceFunction(queryName, value, config)
-      compiled[key] = fn.service
+      const makeFn = (descriptor) => {
+        compiled[key] = compileServiceFunction(queryName, descriptor, config).service
+      }
+
+      // is it a chain?
+      if (_.every(value, v => Array.isArray(v))) {
+        value.map(makeFn)
+
+      // or a single service call?
+      } else {
+        makeFn(value)
+      }
 
     } else if (RESERVE_ARGS.includes(key)) {
       // exclude reserve args
@@ -122,6 +132,7 @@ function compileServiceFunction(queryName, descriptor, config) {
   }
   const argtypes = config.services[serviceName][action]._argtypes || {}
   const settings = compileSettings(queryName, args, argtypes, config)
+  const compiledArgs = compileArgs(queryName, serviceName, args, argtypes, config, settings)
 
   // Compile function arguments based on _argtypes
   const serviceDef = {
@@ -130,7 +141,7 @@ function compileServiceFunction(queryName, descriptor, config) {
     serviceName,
     action,
     settings,
-    args: compileArgs(queryName, serviceName, args, argtypes, config, settings),
+    args: compiledArgs,
     dependencies: getDeps(args)
   }
 

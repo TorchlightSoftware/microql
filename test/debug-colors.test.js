@@ -13,7 +13,7 @@ describe('Debug Color Tests', () => {
     const colorCodes = Object.entries(ANSI_COLORS)
       .filter(([name]) => name !== 'reset')
       .map(([, code]) => code)
-    
+
     for (const color of colorCodes) {
       if (log.includes(color)) return color
     }

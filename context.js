@@ -10,7 +10,10 @@ class ContextStack {
   get(depth) {
     if (depth < 1) throw new Error('Depth must be 1 or greater')
     const stackRef = this.stack.length - depth
-    if (stackRef < 0) throw new Error('Invalid stack reference.')
+    if (stackRef < 0) {
+      const ats = '@'.repeat(depth)
+      throw new Error(`${ats} not available - context not deep enough (only ${this.stack.length} levels available)`)
+    }
     return this.stack[stackRef]
   }
 

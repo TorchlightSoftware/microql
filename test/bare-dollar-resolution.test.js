@@ -60,7 +60,6 @@ describe('Bare $ Resolution Tests', () => {
     const result = await query({
       given: {data: [1, 2, 3]},
       services: {util},
-      methods: ['util'],
       queries: {
         processed: ['$.given.data', 'util:map', {fn: {value: '@'}}],
         // Use method syntax to capture current state after processed completes

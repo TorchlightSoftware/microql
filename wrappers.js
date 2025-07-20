@@ -27,6 +27,18 @@ const withArgs = (fn) => {
         }
       }
 
+      // is it a chain?
+      if (Array.isArray(value) && _.every(value, v => typeof v === 'function')) {
+        return async (ctx) => {
+          // we need to push two layers of stack for the `fn` and the `chain`
+          // @ will refer to chain, @@ will refer to fn
+          const chainStack = contextStack.extend(ctx).extend(null)
+          for (fn in value) {
+            chainStack.setCurrent(await fn(queryResults, chainStack))
+          }
+        }
+      }
+
       // Let cloneDeepWith handle objects and arrays recursively
       return undefined
     })

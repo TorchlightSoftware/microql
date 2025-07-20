@@ -77,7 +77,6 @@ describe('MicroQL Comprehensive Tests', () => {
             }
           }
         },
-        methods: ['transform'],
         queries: {
           filtered: ['$.given.items', 'transform:filter', {predicate: 'a'}],
           uppercased: ['$.filtered', 'transform:upper', {}],
@@ -428,7 +427,6 @@ describe('MicroQL Comprehensive Tests', () => {
             }
           }
         },
-        methods: ['arrayOps'],
         queries: {
           merged: [
             '$.given.baseNumbers',

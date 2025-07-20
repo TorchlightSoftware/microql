@@ -258,7 +258,6 @@ describe('Util Service Tests', () => {
       const result = await query({
         given: {items: [{id: 1}, {id: 2}, {id: 3}]},
         services: {util},
-        methods: ['util'],
         queries: {
           processed: [
             '$.given.items',
@@ -442,7 +441,6 @@ describe('Util Service Tests', () => {
       await query({
         given: testData,
         services: {util},
-        methods: ['util'],
         queries: {
           result: [
             '$.given.message',
@@ -486,7 +484,6 @@ describe('Util Service Tests', () => {
       const testQuery = {
         given: {value: 42},
         services: {util},
-        methods: ['util'],
         settings: {debug: false},
         queries: {
           doubled: ['util', 'when', {test: true, then: 84, or: 0}],
@@ -514,7 +511,6 @@ describe('Util Service Tests', () => {
       const testQuery = {
         given: {start: 1},
         services: {util},
-        methods: ['util'],
         settings: {debug: false},
         queries: {
           step1: ['util', 'pick', {on: '$.given', fields: ['start']}],
@@ -544,7 +540,6 @@ describe('Util Service Tests', () => {
       const testQuery = {
         given: {data: [1, 2, 3]},
         services: {util},
-        methods: ['util'],
         settings: {debug: false},
         queries: {
           result: [
