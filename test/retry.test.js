@@ -106,16 +106,22 @@ describe('Retry Tests', () => {
       assert.strictEqual(callCount, 1) // No retries
     })
 
-    it('should pass retry value to service', async () => {
+    it('should pass retry and timeout values via settings', async () => {
       const services = {
         aware: {
           async check(args) {
             return {
-              retryReceived: args.retry,
-              timeoutReceived: args.timeout
+              retryReceived: args.settings?.retry,
+              timeoutReceived: args.settings?.timeout,
+              inputReceived: args.input
             }
           }
         }
+      }
+
+      // Add settings argtype so settings get injected
+      services.aware.check._argtypes = {
+        settings: 'settings'
       }
 
       const result = await query({
@@ -137,6 +143,7 @@ describe('Retry Tests', () => {
 
       assert.strictEqual(result.retryReceived, 3)
       assert.strictEqual(result.timeoutReceived, 5000)
+      assert.strictEqual(result.inputReceived, 'test')
     })
   })
 

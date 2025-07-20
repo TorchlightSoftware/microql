@@ -97,7 +97,7 @@ const compileArgs = (queryName, serviceName, args, argtypes, config, settings) =
   for (const [key, type] of Object.entries(argtypes)) {
     // inject settings if requested
     if (type === 'settings') {
-      args[key] = _.defaults(args[key], settings)
+      compiled[key] = _.defaults(args[key], settings)
     }
   }
 

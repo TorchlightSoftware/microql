@@ -428,7 +428,7 @@ describe('Util Service Tests', () => {
 
       // Should show truncation due to maxArrayLength: 1
       assert(
-        blueOutput.includes('...'),
+        blueOutput.includes('... 1 more item') || blueOutput.includes('...'),
         'Should truncate array due to maxArrayLength setting'
       )
     })

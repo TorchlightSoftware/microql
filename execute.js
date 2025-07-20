@@ -81,6 +81,14 @@ export async function execute(plan) {
     queryCount++
   }
 
+  // Handle pre-completed queries (from snapshot loading)
+  for (const [queryName, queryPlan] of Object.entries(queries)) {
+    if (queryPlan.completed && queryPlan.value !== undefined) {
+      results[queryName] = queryPlan.value
+      executedQueries.add(queryName)
+    }
+  }
+
   try {
     // Execute queries in dependency order
     while (executedQueries.size < queryCount) {

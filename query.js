@@ -6,8 +6,46 @@
  */
 
 import _ from 'lodash'
+import fs from 'fs-extra'
 import compile from './compile.js'
 import execute from './execute.js'
+
+/**
+ * Load snapshot data and inject it into execution plan
+ */
+async function loadSnapshot(snapshotPath, executionPlan) {
+  if (!snapshotPath || !(await fs.pathExists(snapshotPath))) {
+    return
+  }
+
+  try {
+    const snapshotData = JSON.parse(await fs.readFile(snapshotPath, 'utf8'))
+
+    if (!snapshotData.results) {
+      return
+    }
+
+    // Add snapshotRestoreTimestamp query to the execution plan
+    executionPlan.queries.snapshotRestoreTimestamp = {
+      type: 'literal',
+      value: snapshotData.timestamp,
+      dependencies: new Set(),
+      completed: true
+    }
+
+    // Pre-load snapshot results for matching queries
+    for (const [queryName, result] of Object.entries(snapshotData.results)) {
+      if (executionPlan.queries[queryName]) {
+        // Preserve the original query structure but mark as completed with value
+        executionPlan.queries[queryName].value = result
+        executionPlan.queries[queryName].completed = true
+      }
+    }
+  } catch (error) {
+    // Ignore snapshot loading errors - proceed with normal execution
+    console.warn(`Failed to load snapshot from ${snapshotPath}:`, error.message)
+  }
+}
 
 /**
  * Apply result selection to execution results
@@ -35,10 +73,15 @@ async function query(config) {
   // Phase 1: Compile queries into execution plan
   const executionPlan = compile(config)
 
-  // Phase 2: Execute the plan
+  // Phase 2: Load snapshot if specified
+  if (config.snapshot) {
+    await loadSnapshot(config.snapshot, executionPlan)
+  }
+
+  // Phase 3: Execute the plan
   const results = await execute(executionPlan)
 
-  // Phase 3: Apply result selection
+  // Phase 4: Apply result selection
   return applySelection(results, config.select)
 }
 
