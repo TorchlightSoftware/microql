@@ -63,11 +63,24 @@ const compileSettings = (queryName, args, argtypes, config) => {
 
   // compile onError if we have it
   if (settings.onError) {
-    const fn = compileServiceFunction(queryName, settings.onError, config)
-    settings.onError = fn.service
+    settings.onError = compileFunctionOrChain(queryName, settings.onError, config)
   }
 
   return settings
+}
+
+// any time we expect a function, it could instead be a chain
+const compileFunctionOrChain = (queryName, value, config) => {
+  const makeFn = (descriptor) => compileServiceFunction(queryName, descriptor, config).service
+
+  // is it a chain?
+  if (_.every(value, v => Array.isArray(v))) {
+    return value.map(makeFn)
+
+    // or a single service call?
+  } else {
+    return makeFn(value)
+  }
 }
 
 // Compile arguments based on argtypes metadata
@@ -83,16 +96,7 @@ const compileArgs = (queryName, serviceName, args, argtypes, config, settings) =
 
     // compile service to function
     } else if (argtypes[key] === 'function' && Array.isArray(value)) {
-      const makeFn = (descriptor) => compileServiceFunction(queryName, descriptor, config).service
-
-      // is it a chain?
-      if (_.every(value, v => Array.isArray(v))) {
-        compiled[key] = value.map(makeFn)
-
-      // or a single service call?
-      } else {
-        compiled[key] = makeFn(value)
-      }
+      compiled[key] = compileFunctionOrChain(queryName, value, config)
 
     } else if (RESERVE_ARGS.includes(key)) {
       // exclude reserve args

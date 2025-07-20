@@ -10,20 +10,20 @@ _.mixin(lodashDeep)
 
 import ContextStack from './context.js'
 
-async function executePlan(plan, results, contextStack, usedServices) {
+async function executeNode(node, results, contextStack, usedServices) {
   // Execute a service
-  if (plan.type === 'service') {
+  if (node.type === 'service') {
     // Track service usage
-    usedServices.add(plan.serviceName)
-    return plan.service(results, contextStack)
+    usedServices.add(node.serviceName)
+    return node.service(results, contextStack)
 
   // Execute each chain step, storing result in contextStack
-  } else if (plan.type === 'chain') {
+  } else if (node.type === 'chain') {
 
     // add a blank contextStack as a placeholder for the first chain step
     contextStack = contextStack.extend(null)
 
-    for (const step of plan.steps) {
+    for (const step of node.steps) {
       //const {queryName, serviceName, action} = step
       //console.log(`[${queryName} - ${serviceName}:${action}] EXECUTE provide stack:\n`, contextStack.stack)
 
@@ -54,12 +54,12 @@ async function callTearDown(services, usedServices) {
 }
 
 /**
- * Execute a staged execution plan
+ * Execute a prepared execution plan on the provided queryTree
  * @param {Object} plan - Staged execution plan
  * @param {Array} plan.stages - Array of stages, each containing query plans to execute in parallel
- * @param {Object} plan.given - given data
- * @param {Object} plan.services - Service objects
- * @param {Object} plan.queries - All query AST nodes (for snapshot handling)
+ * @param {Object} queryTree.given - given data
+ * @param {Object} queryTree.services - Service objects
+ * @param {Object} queryTree.queries - All query AST nodes (for snapshot handling)
  * @returns {Object} Execution results
  */
 export async function execute(plan, queryTree) {
@@ -73,26 +73,31 @@ export async function execute(plan, queryTree) {
 
   // Add pre-completed queries (from snapshot loading)
   if (queries) {
-    for (const [queryName, queryPlan] of Object.entries(queries)) {
-      if (queryPlan.completed && queryPlan.value !== undefined) {
-        results[queryName] = queryPlan.value
+    for (const [queryName, queryNode] of Object.entries(queries)) {
+      if (queryNode.completed && queryNode.value !== undefined) {
+        results[queryName] = queryNode.value
       }
     }
   }
 
+  // Execute each stage of our execution plan
   try {
-    // Execute each stage of our execution plan
     for (const stage of plan) {
-      await Promise.all(stage.map(async (queryPlan) => {
-        results[queryPlan.queryName] = await executePlan(queryPlan, results, new ContextStack(), usedServices)
+      await Promise.all(stage.map(async (queryNode) => {
+        results[queryNode.queryName] = await executeNode(queryNode, results, new ContextStack(), usedServices)
       }))
     }
-
-    return results
+  //} catch (error) {
+  //  //   do we have a global onError?
+  //  //   do we have a global ignoreError?
+  //  throw error
   } finally {
     // Call tearDown on used services
     await callTearDown(services, usedServices)
   }
+
+
+  return results
 }
 
 export default execute

@@ -14,8 +14,8 @@ import execute from './execute.js'
  * Create execution plan with stages for parallel execution
  * Detects circular dependencies at compile time
  */
-function createExecutionPlan(queryAST) {
-  const {queries, given} = queryAST
+function createExecutionPlan(queryTree) {
+  const {queries, given} = queryTree
   const planStages = []
   const executedQueries = new Set()
 
@@ -54,7 +54,7 @@ function createExecutionPlan(queryAST) {
 /**
  * Load snapshot data and inject it into execution plan
  */
-async function loadSnapshot(snapshotPath, queryAST) {
+async function loadSnapshot(snapshotPath, queryTree) {
   if (!snapshotPath || !(await fs.pathExists(snapshotPath))) {
     return
   }
@@ -67,7 +67,7 @@ async function loadSnapshot(snapshotPath, queryAST) {
     }
 
     // Add snapshotRestoreTimestamp query to the execution plan
-    queryAST.queries.snapshotRestoreTimestamp = {
+    queryTree.queries.snapshotRestoreTimestamp = {
       type: 'literal',
       value: snapshotData.timestamp,
       dependencies: new Set(),
@@ -76,10 +76,10 @@ async function loadSnapshot(snapshotPath, queryAST) {
 
     // Pre-load snapshot results for matching queries
     for (const [queryName, result] of Object.entries(snapshotData.results)) {
-      if (queryAST.queries[queryName]) {
+      if (queryTree.queries[queryName]) {
         // Preserve the original query structure but mark as completed with value
-        queryAST.queries[queryName].value = result
-        queryAST.queries[queryName].completed = true
+        queryTree.queries[queryName].value = result
+        queryTree.queries[queryName].completed = true
       }
     }
   } catch (error) {
@@ -111,7 +111,7 @@ function applySelection(results, select) {
  * @returns {*} Query results
  */
 async function query(config) {
-  // Phase 1: Compile queries into queryAST
+  // Phase 1: Compile queries into queryTree
   const queryTree = compile(config)
 
   // Phase 2: Load snapshot if specified

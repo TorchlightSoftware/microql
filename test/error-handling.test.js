@@ -43,12 +43,16 @@ describe('Error Handling Tests', () => {
         }
       }
 
-      const result = await query(config)
-      assert.deepStrictEqual(result.result, {
-        logged: true,
-        error: '[result - error:fail] Service failed',
-        service: 'error.fail'
-      })
+      await assert.rejects(
+        query(config),
+        (error) => {
+          // Verify the error has all expected properties
+          assert.strictEqual(error.message, '[result - error:fail] Service failed')
+          assert.strictEqual(error.serviceName, 'error')
+          assert.strictEqual(error.action, 'fail')
+          return true
+        }
+      )
     })
 
     it('should ignore errors when ignoreErrors is true', async () => {
@@ -128,48 +132,47 @@ describe('Error Handling Tests', () => {
     })
 
     it('should call onError chain when service fails', async () => {
-      const errorContexts = []
-      
       const logService = {
         addContext: async ({on, severity}) => {
-          // @ should be the error object
-          return {
-            ...on,
-            severity,
-            timestamp: new Date().toISOString()
-          }
+          // `on` should be the error object
+          on.severity = severity
+          on.timestamp = new Date().toISOString()
+          return on
         },
         logError: async ({on}) => {
-          // @ should be the enriched error from addContext
-          errorContexts.push(on)
-          return {logged: true, severity: on.severity}
+          // `on` should be the enriched error from addContext
+          return {status: 'error', logged: true, severity: on.severity}
         }
       }
 
       const config = {
         services: {error: errorService, log: logService},
+        settings: {debug: false},
         queries: {
           result: ['error', 'fail', {
             onError: [
-              ['@', 'log:addContext', {severity: 'bad'}],
+              // when processing an error in a chain, you actually need to use @@ to refer to the original error
+              // ...because @ refers to the current chain context, and will be null within the first operation on the chain
+              ['@@', 'log:addContext', {severity: 'bad'}],
               ['@', 'log:logError']
             ]
           }]
         }
       }
 
-      const result = await query(config)
-      
-      // Verify the chain executed correctly
-      assert.strictEqual(errorContexts.length, 1)
-      assert.strictEqual(errorContexts[0].severity, 'bad')
-      assert.strictEqual(errorContexts[0].message, '[result - error:fail] Service failed')
-      assert.strictEqual(errorContexts[0].serviceName, 'error')
-      assert.strictEqual(errorContexts[0].action, 'fail')
-      assert.ok(errorContexts[0].timestamp)
-      
-      // Verify the result is what the error handler chain returned
-      assert.deepStrictEqual(result.result, {logged: true, severity: 'bad'})
+      await assert.rejects(
+        query(config),
+        (error) => {
+          // Verify the error has all expected properties
+          assert.strictEqual(error.severity, 'bad')
+          assert.strictEqual(error.message, '[result - error:fail] Service failed')
+          assert.strictEqual(error.serviceName, 'error')
+          assert.strictEqual(error.action, 'fail')
+          assert.ok(error.timestamp)
+          return true
+        }
+      )
+
     })
   })
 

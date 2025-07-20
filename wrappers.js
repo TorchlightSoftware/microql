@@ -12,7 +12,7 @@ const withArgs = (fn) => {
     //let {queryName, serviceName, action} = this
     //console.log(`withArgs for [${queryName} - ${serviceName}:${action}] received:`, args, 'stack:', contextStack.stack)
 
-    const resolvedArgs = _.cloneDeepWith(args, (value) => {
+    const resolveArg = (value) => {
 
       // Recursively resolve all @ and $ references in the arguments
       if (typeof value === 'string') {
@@ -43,9 +43,12 @@ const withArgs = (fn) => {
 
       // Let cloneDeepWith handle objects and arrays recursively
       return undefined
-    })
-    //console.log(`withArgs for [${queryName} - ${serviceName}:${action}] resolved as:`, resolvedArgs)
+    }
 
+    const resolvedArgs = _.cloneDeepWith(args, resolveArg)
+    this.settings.onError = resolveArg(this.settings.onError)
+
+    //console.log(`withArgs for [${queryName} - ${serviceName}:${action}] resolved as:`, resolvedArgs)
     return await fn.call(this, resolvedArgs)
   }
 }
@@ -118,7 +121,7 @@ const withRetry = (fn) => {
 const withErrorHandling = (fn) => {
   return async function (args) {
     //console.log('withErrorHandling this:', this)
-    const {queryName, serviceName, action, settings, queryResults, contextStack} = this
+    const {queryName, serviceName, action, settings} = this
 
     try {
       return await fn.call(this, args)
@@ -131,21 +134,23 @@ const withErrorHandling = (fn) => {
 
       // Handle with onError if provided
       if (settings.onError) {
-        const errorContextStack = contextStack.extend(error)
         try {
-          return settings.onError(queryResults, errorContextStack)
+          const result = settings.onError(error)
+          if (settings.ignoreErrors) return result
 
         } catch (handlerError) {
+          const errorMessage = `[${serviceName}:${action}] onError handler failed: ${handlerError.message}`
+          console.warn(errorMessage)
           // Error handler failed
           if (!settings.ignoreErrors) {
-            const errorMessage = typeof handlerError === 'string' ? handlerError : handlerError.message
-            throw new Error(`[${serviceName}:${action}] onError handler failed: ${errorMessage}`)
+            throw new Error(errorMessage)
           }
         }
       }
 
       // Re-throw original error
       if (!settings.ignoreErrors) {
+        console.log('throwing error with augmented properties:', error)
         throw error
       }
 
