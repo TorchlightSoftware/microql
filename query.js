@@ -15,40 +15,40 @@ import execute from './execute.js'
  * Detects circular dependencies at compile time
  */
 function createExecutionPlan(queryAST) {
-  const { queries, given } = queryAST
-  const stages = []
+  const {queries, given} = queryAST
+  const planStages = []
   const executedQueries = new Set()
-  
+
   // Add given data as pre-resolved
   if (given) executedQueries.add('given')
-  
+
   // Handle pre-completed queries (from snapshot loading)
-  for (const [queryName, queryPlan] of Object.entries(queries)) {
-    if (queryPlan.completed) {
+  for (const [queryName, queryTree] of Object.entries(queries)) {
+    if (queryTree.completed) {
       executedQueries.add(queryName)
     }
   }
-  
+
   // Create stages by finding queries ready to execute
   while (executedQueries.size < Object.keys(queries).length + (given ? 1 : 0)) {
-    const readyQueries = Object.entries(queries).filter(([queryName, queryPlan]) =>
-      !executedQueries.has(queryName) && 
-      queryPlan.dependencies.difference(executedQueries).size === 0)
-    
+    const readyQueries = Object.entries(queries).filter(([queryName, queryTree]) =>
+      !executedQueries.has(queryName) &&
+      queryTree.dependencies.difference(executedQueries).size === 0)
+
     if (readyQueries.length === 0) {
       const remaining = Object.keys(queries).filter(q => !executedQueries.has(q))
       throw new Error(`Circular dependency detected at compile time: ${remaining.join(', ')}`)
     }
-    
-    const stage = readyQueries.map(([queryName, queryPlan]) => {
+
+    const stage = readyQueries.map(([queryName, queryTree]) => {
       executedQueries.add(queryName)
-      return queryPlan
+      return queryTree
     })
-    
-    stages.push(stage)
+
+    planStages.push(stage)
   }
-  
-  return stages
+
+  return planStages
 }
 
 /**
@@ -112,18 +112,18 @@ function applySelection(results, select) {
  */
 async function query(config) {
   // Phase 1: Compile queries into queryAST
-  const queryAST = compile(config)
+  const queryTree = compile(config)
 
   // Phase 2: Load snapshot if specified
   if (config.snapshot) {
-    await loadSnapshot(config.snapshot, queryAST)
+    await loadSnapshot(config.snapshot, queryTree)
   }
 
   // Phase 3: Create execution plan and detect circular dependencies
-  const stages = createExecutionPlan(queryAST)
+  const plan = createExecutionPlan(queryTree)
 
-  // Phase 4: Execute the plan  
-  const results = await execute({ stages, given: queryAST.given, services: queryAST.services, queries: queryAST.queries })
+  // Phase 4: Execute the plan
+  const results = await execute(plan, queryTree)
 
   // Phase 5: Apply result selection
   return applySelection(results, config.select)

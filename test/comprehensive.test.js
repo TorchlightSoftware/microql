@@ -252,7 +252,7 @@ describe('MicroQL Comprehensive Tests', () => {
             result: ['test', 'increment', {value: '$.nonexistent'}]
           }
         }),
-/Circular dependency detected at compile time: result/
+        /Circular dependency detected at compile time: result/
       )
     })
 

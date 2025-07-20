@@ -62,8 +62,8 @@ async function callTearDown(services, usedServices) {
  * @param {Object} plan.queries - All query AST nodes (for snapshot handling)
  * @returns {Object} Execution results
  */
-export async function execute(plan) {
-  const {stages, given, services, queries} = plan
+export async function execute(plan, queryTree) {
+  const {given, services, queries} = queryTree
 
   const results = {}
   const usedServices = new Set()
@@ -81,8 +81,8 @@ export async function execute(plan) {
   }
 
   try {
-    // Execute each stage
-    for (const stage of stages) {
+    // Execute each stage of our execution plan
+    for (const stage of plan) {
       await Promise.all(stage.map(async (queryPlan) => {
         results[queryPlan.queryName] = await executePlan(queryPlan, results, new ContextStack(), usedServices)
       }))

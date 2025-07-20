@@ -1,7 +1,7 @@
 /**
  * @fileoverview MicroQL Query Compiler
  *
- * Compiles query configurations into queryAST
+ * Compiles query configurations into queryTree
  * Handles service validation and dependency extraction.
  */
 
@@ -177,26 +177,26 @@ function compileDescriptor(queryName, descriptor, config) {
 
 
 /**
- * Compile a query configuration into a queryAST
+ * Compile a query configuration into a queryTree
  * @param {Object} config - Query configuration
  * @param {Object} config.services - Service objects
  * @param {Object} config.queries - Query definitions
  * @param {Object} config.given - given data
  * @param {boolean} config.debug - Debug logging flag
- * @returns {Object} Compiled queryAST
+ * @returns {Object} Compiled queryTree
  */
 export function compile(config) {
   const {services, queries, given, debug} = config
 
-  // Build AST for each query
-  const queryAST = {}
+  // Build tree for each query
+  const queryTree = {}
 
   for (const [queryName, descriptor] of Object.entries(queries)) {
-    queryAST[queryName] = compileDescriptor(queryName, descriptor, config)
+    queryTree[queryName] = compileDescriptor(queryName, descriptor, config)
   }
 
   return {
-    queries: queryAST,
+    queries: queryTree,
     given,
     services,
     debug
