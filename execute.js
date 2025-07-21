@@ -63,7 +63,7 @@ async function callTearDown(services, usedServices) {
  * @returns {Object} Execution results
  */
 export async function execute(plan, queryTree) {
-  const {given, services, queries} = queryTree
+  const {given, services, queries, settings = {}} = queryTree
 
   const results = {}
   const usedServices = new Set()
@@ -72,11 +72,9 @@ export async function execute(plan, queryTree) {
   if (given) results.given = given
 
   // Add pre-completed queries (from snapshot loading)
-  if (queries) {
-    for (const [queryName, queryNode] of Object.entries(queries)) {
-      if (queryNode.completed && queryNode.value !== undefined) {
-        results[queryName] = queryNode.value
-      }
+  for (const [queryName, queryNode] of Object.entries(queries)) {
+    if (queryNode.completed && queryNode.value !== undefined) {
+      results[queryName] = queryNode.value
     }
   }
 
@@ -87,15 +85,29 @@ export async function execute(plan, queryTree) {
         results[queryNode.queryName] = await executeNode(queryNode, results, new ContextStack(), usedServices)
       }))
     }
-  //} catch (error) {
-  //  //   do we have a global onError?
-  //  //   do we have a global ignoreError?
-  //  throw error
+  } catch (error) {
+
+    // Handle global error settings
+    if (settings.onError) {
+      try {
+        const errorContext = new ContextStack().extend(error)
+        await settings.onError(results, errorContext)
+      } catch (handlerError) {
+        handlerError.message = `Global onError handler failed: ${handlerError.message}`
+        if (!settings.ignoreErrors) {
+          throw handlerError
+        }
+      }
+    }
+
+    if (!settings.ignoreErrors) {
+      throw error
+    }
+
   } finally {
     // Call tearDown on used services
     await callTearDown(services, usedServices)
   }
-
 
   return results
 }

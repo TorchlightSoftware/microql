@@ -15,8 +15,8 @@ import applyWrappers from './wrappers.js'
 // Detects if a descriptor is a chain (nested arrays)
 const isChain = (descriptor) => {
   return Array.isArray(descriptor) &&
-         descriptor.length > 0 &&
-         Array.isArray(descriptor[0])
+    descriptor.length > 0 &&
+    _.every(descriptor, d => Array.isArray(d))
 }
 
 // Detects if a descriptor uses method syntax
@@ -59,10 +59,13 @@ const getDeps = (args) => {
 const compileSettings = (queryName, args, argtypes, config) => {
   const reserveArgs = _.pick(args, RESERVE_ARGS)
   const settingsArgs = _.pickBy(args, (a, k) => argtypes[k] === 'settings') // get args with their argtypes set to 'settings'
-  const settings = _.defaults({}, reserveArgs, ...Object.values(settingsArgs), config.settings)
+
+  // Only exclude global-level error handling from service settings merging
+  const configSettingsForServices = config.settings ? _.omit(config.settings, ['onError', 'ignoreErrors']) : {}
+  const settings = _.defaults({}, reserveArgs, ...Object.values(settingsArgs), configSettingsForServices)
 
   // compile onError if we have it
-  if (settings.onError) {
+  if (settings.onError && Array.isArray(settings.onError) && settings.onError.length > 0) {
     settings.onError = compileFunctionOrChain(queryName, settings.onError, config)
   }
 
@@ -74,7 +77,7 @@ const compileFunctionOrChain = (queryName, value, config) => {
   const makeFn = (descriptor) => compileServiceFunction(queryName, descriptor, config).service
 
   // is it a chain?
-  if (_.every(value, v => Array.isArray(v))) {
+  if (isChain(value)) {
     return value.map(makeFn)
 
     // or a single service call?
@@ -190,20 +193,27 @@ function compileDescriptor(queryName, descriptor, config) {
  * @returns {Object} Compiled queryTree
  */
 export function compile(config) {
-  const {services, queries, given, debug} = config
+  const {services, queries, given, debug, settings = {}} = config
 
-  // Build tree for each query
+  // Build tree for each query (use config as-is for service compilation)
   const queryTree = {}
 
   for (const [queryName, descriptor] of Object.entries(queries)) {
     queryTree[queryName] = compileDescriptor(queryName, descriptor, config)
   }
 
+  // Compile global settings separately
+  const globalSettings = {...settings}
+  if (settings.onError) {
+    globalSettings.onError = compileFunctionOrChain('global', settings.onError, config)
+  }
+
   return {
     queries: queryTree,
     given,
     services,
-    debug
+    debug,
+    settings: globalSettings
   }
 }
 

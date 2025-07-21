@@ -176,6 +176,69 @@ describe('Error Handling Tests', () => {
     })
   })
 
+  describe('Global Error Handling', () => {
+    it('should ignore errors globally when ignoreErrors is true', async () => {
+      const config = {
+        services: {error: errorService},
+        settings: {ignoreErrors: true},
+        queries: {
+          failedQuery: ['error', 'fail', {}]
+        }
+      }
+
+      const result = await query(config)
+      assert.strictEqual(result.failedQuery, undefined)
+    })
+
+    it('should call global onError handler', async () => {
+      let errorLogged = false
+
+      const logService = {
+        logError: async ({on}) => {
+          errorLogged = true
+          return {globallyLogged: true, error: on.message}
+        }
+      }
+
+      const config = {
+        services: {error: errorService, log: logService},
+        settings: {onError: ['log', 'logError', {on: '@'}]},
+        queries: {
+          failedQuery: ['error', 'fail', {}]
+        }
+      }
+
+      await assert.rejects(query(config), /Service failed/)
+      assert.strictEqual(errorLogged, true)
+    })
+
+    it('should call global onError and ignore errors when both are set', async () => {
+      let errorLogged = false
+
+      const logService = {
+        logError: async ({on}) => {
+          errorLogged = true
+          return {globallyLogged: true, error: on.message}
+        }
+      }
+
+      const config = {
+        services: {error: errorService, log: logService},
+        settings: {
+          ignoreErrors: true,
+          onError: ['log', 'logError', {on: '@'}]
+        },
+        queries: {
+          failedQuery: ['error', 'fail', {}]
+        }
+      }
+
+      const result = await query(config)
+      assert.strictEqual(result.failedQuery, undefined)
+      assert.strictEqual(errorLogged, true)
+    })
+  })
+
   describe('Error Context', () => {
     it('should provide complete error context to handlers', async () => {
       let capturedContext = null
