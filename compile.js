@@ -58,7 +58,7 @@ const getDeps = (args) => {
 // they are placed in their own `settings` key on the compiled service definition
 const compileSettings = (queryName, args, argtypes, config) => {
   const reserveArgs = _.pick(args, RESERVE_ARGS)
-  const settingsArgs = _.pickBy(args, (a, k) => argtypes[k] === 'settings') // get args with their argtypes set to 'settings'
+  const settingsArgs = _.pickBy(args, (a, k) => argtypes[k]?.type === 'settings') // get args with their argtypes set to 'settings'
 
   // Only exclude global-level error handling from service settings merging
   const configSettingsForServices = config.settings ? _.omit(config.settings, ['onError', 'ignoreErrors']) : {}
@@ -93,12 +93,12 @@ const compileArgs = (queryName, serviceName, args, argtypes, config, settings) =
   for (const [key, value] of Object.entries(args)) {
 
     // compile object to function template
-    if (argtypes[key] === 'function' && typeof value === 'object' && !Array.isArray(value)) {
+    if (argtypes[key]?.type === 'function' && typeof value === 'object' && !Array.isArray(value)) {
       const fn = compileServiceFunction(queryName, ['util', 'template', value], config)
       compiled[key] = fn.service
 
     // compile service to function
-    } else if (argtypes[key] === 'function' && Array.isArray(value)) {
+    } else if (argtypes[key]?.type === 'function' && Array.isArray(value)) {
       compiled[key] = compileFunctionOrChain(queryName, value, config)
 
     } else if (RESERVE_ARGS.includes(key)) {
@@ -111,7 +111,7 @@ const compileArgs = (queryName, serviceName, args, argtypes, config, settings) =
 
   for (const [key, type] of Object.entries(argtypes)) {
     // inject settings if requested
-    if (type === 'settings') {
+    if (type?.type === 'settings') {
       compiled[key] = _.defaults(args[key], settings)
     }
   }

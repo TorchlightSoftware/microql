@@ -121,7 +121,7 @@ describe('Retry Tests', () => {
 
       // Add settings argtype so settings get injected
       services.aware.check._argtypes = {
-        settings: 'settings'
+        settings: {type: 'settings'}
       }
 
       const result = await query({

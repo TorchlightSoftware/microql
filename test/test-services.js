@@ -14,7 +14,7 @@ export const math = {
   subtract: async ({a, b}) => a - b,
   add: async ({a, b}) => a + b
 }
-math.reduce._argtypes = {fn: 'function'}
+math.reduce._argtypes = {fn: {type: 'function'}}
 
 // Simple test service for basic operations
 export const test = {
@@ -41,4 +41,4 @@ export const data = {
     return items.filter(predicate)
   }
 }
-data.filter._argtypes = {predicate: 'function'}
+data.filter._argtypes = {predicate: {type: 'function'}}

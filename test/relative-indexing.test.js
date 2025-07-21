@@ -137,7 +137,7 @@ describe('Relative Indexing Context Tests', () => {
       sequence: async ({on}) => Array.from({length: on}, (v, k) => k + 1),
       sum: async ({on}) => on.reduce((l, r) => l + r)
     }
-    math.reduce._argtypes = {fn: 'function'}
+    math.reduce._argtypes = {fn: {type: 'function'}}
 
     const services = {util, math}
 

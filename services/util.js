@@ -304,23 +304,23 @@ const util = {
 
 // Argument type metadata for MicroQL function compilation
 util.map._argtypes = {
-  fn: 'function'
+  fn: {type: 'function'}
 }
 
 util.filter._argtypes = {
-  predicate: 'function'
+  predicate: {type: 'function'}
 }
 
 util.flatMap._argtypes = {
-  fn: 'function'
+  fn: {type: 'function'}
 }
 
 util.when._argtypes = {
-  test: 'function'
+  test: {type: 'function'}
 }
 
 util.print._argtypes = {
-  settings: 'settings'
+  settings: {type: 'settings'}
 }
 
 util.snapshot._argtypes = {
