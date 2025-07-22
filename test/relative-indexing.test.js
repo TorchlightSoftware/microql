@@ -48,7 +48,7 @@ describe('Relative Indexing Context Tests', () => {
       services,
       queries: {
         simple: ['$.given.items', 'util:map', {
-          fn: ['test', 'checkContext', {
+          service: ['test', 'checkContext', {
             level1: '@' // Should be the current item (1 or 2)
           }]
         }]
@@ -68,8 +68,8 @@ describe('Relative Indexing Context Tests', () => {
       services,
       queries: {
         nested: ['$.given.outer', 'util:flatMap', {
-          fn: ['@.inner', 'util:map', {
-            fn: ['test', 'checkContext', {
+          service: ['@.inner', 'util:map', {
+            service: ['test', 'checkContext', {
               level1: '@', // Should be inner item (current context)
               level2: '@@' // Should be outer item (parent context)
             }]
@@ -117,7 +117,7 @@ describe('Relative Indexing Context Tests', () => {
         services,
         queries: {
           invalid: ['$.given.items', 'util:map', {
-            fn: ['test', 'checkContext', {level1: '@@@@'}] // too many levels
+            service: ['test', 'checkContext', {level1: '@@@@'}] // too many levels
           }]
         }
       })
@@ -133,11 +133,11 @@ describe('Relative Indexing Context Tests', () => {
     const math = {
       add1: async ({on}) => on + 1,
       times10: async ({on}) => on * 10,
-      reduce: async ({on, fn}) => on.reduce(async (l, r) => fn([await l, r])),
+      reduce: async ({on, service}) => on.reduce(async (l, r) => service([await l, r])),
       sequence: async ({on}) => Array.from({length: on}, (v, k) => k + 1),
       sum: async ({on}) => on.reduce((l, r) => l + r)
     }
-    math.reduce._argtypes = {fn: {type: 'function'}}
+    math.reduce._argtypes = {service: {type: 'service'}}
 
     const services = {util, math}
 
@@ -154,13 +154,13 @@ describe('Relative Indexing Context Tests', () => {
           ['@', 'math:add1'], // 3
           // MapB
           ['$.given.array', 'util:map', {
-            fn: [
+            service: [
               // ChainC
               ['@@', 'math:times10'], // 10, 20, 30
               ['@', 'math:add1'], // 11, 21, 31
               ['@', 'math:sequence'], // [1..11], [1..21], [1..31]
               // MapD
-              ['@', 'math:reduce', {fn: ['@', 'math:sum']}], // sum([1..11]), sum([1..21]), sum([1..31])
+              ['@', 'math:reduce', {service: ['@', 'math:sum']}], // sum([1..11]), sum([1..21]), sum([1..31])
               ['@', 'util:template', { // I wasn't able to test from the fourth context layer, but this should be good enough
                 ChainA: '@', // 3
                 MapB: '@@', // 1, 2, 3

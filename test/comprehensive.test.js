@@ -66,8 +66,8 @@ describe('MicroQL Comprehensive Tests', () => {
         given: {items: ['apple', 'banana', 'cherry']},
         services: {
           transform: {
-            async filter({on, predicate}) {
-              return on.filter((item) => item.includes(predicate))
+            async filter({on, fn}) {
+              return on.filter((item) => item.includes(fn))
             },
             async upper({on}) {
               return on.map((item) => item.toUpperCase())
@@ -78,7 +78,7 @@ describe('MicroQL Comprehensive Tests', () => {
           }
         },
         queries: {
-          filtered: ['$.given.items', 'transform:filter', {predicate: 'a'}],
+          filtered: ['$.given.items', 'transform:filter', {fn: 'a'}],
           uppercased: ['$.filtered', 'transform:upper', {}],
           count: ['$.uppercased', 'transform:count', {}]
         }
@@ -173,7 +173,7 @@ describe('MicroQL Comprehensive Tests', () => {
       })
 
       const duration = Date.now() - start
-      assert(duration < 30, `Should execute in parallel (took ${duration}ms)`)
+      assert(duration < 30, `Should execute in parallel (took ${duration}ms, expected <30ms)`)
       assert.strictEqual(result.query1, 'A')
       assert.strictEqual(result.query2, 'B')
       assert.strictEqual(result.query3, 'C')
@@ -295,7 +295,7 @@ describe('MicroQL Comprehensive Tests', () => {
       })
 
       const duration = Date.now() - start
-      assert(duration < 100, `Should complete quickly (took ${duration}ms)`)
+      assert(duration < 40, `Should complete quickly (took ${duration}ms, expected <40ms)`)
 
       // Verify all queries completed correctly
       for (let i = 0; i < 50; i++) {

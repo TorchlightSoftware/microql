@@ -47,37 +47,37 @@ async function shouldSkipSnapshot(timestamp, out) {
  */
 const util = {
   /**
-   * Transform each item in a collection using a function
+   * Transform each item in a collection using a service
    */
-  async map({on, fn}) {
+  async map({on, service}) {
     validateType(on, 'array', 'on')
 
-    if (fn && typeof fn === 'function') {
-      return Promise.all(on.map(fn))
+    if (service && typeof service === 'function') {
+      return Promise.all(on.map(service))
     }
 
-    throw new Error('fn must be provided for map operation')
+    throw new Error('service must be provided for map operation')
   },
 
   /**
-   * Filter collection based on a predicate function
+   * Filter collection based on a service
    */
-  async filter({on, predicate}) {
+  async filter({on, service}) {
     validateType(on, 'array', 'on')
 
-    if (!predicate || typeof predicate !== 'function') {
-      throw new Error('Predicate function is required for filter operation')
+    if (!service || typeof service !== 'function') {
+      throw new Error('Service is required for filter operation')
     }
 
-    const keepResults = await Promise.all(on.map(predicate))
+    const keepResults = await Promise.all(on.map(service))
     return on.filter((_, index) => keepResults[index])
   },
 
   /**
    * Map and then flatten the results
    */
-  async flatMap({on, fn}) {
-    const results = await util.map({on, fn})
+  async flatMap({on, service}) {
+    const results = await util.map({on, service})
     return results.flat()
   },
 
@@ -302,21 +302,21 @@ const util = {
   }
 }
 
-// Argument type metadata for MicroQL function compilation
+// Argument type metadata for MicroQL service compilation
 util.map._argtypes = {
-  fn: {type: 'function'}
+  service: {type: 'service'}
 }
 
 util.filter._argtypes = {
-  predicate: {type: 'function'}
+  service: {type: 'service'}
 }
 
 util.flatMap._argtypes = {
-  fn: {type: 'function'}
+  service: {type: 'service'}
 }
 
 util.when._argtypes = {
-  test: {type: 'function'}
+  test: {type: 'service'}
 }
 
 util.print._argtypes = {

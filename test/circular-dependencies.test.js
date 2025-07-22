@@ -91,7 +91,7 @@ describe('Circular Dependency Detection Tests', () => {
             // Complex chain with map that depends on result
             deepNested: [
               ['$.given.array', 'util:map', {
-                fn: [
+                service: [
                   ['@', 'math:times10'],
                   ['$.result', 'math:add'] // Circular dependency on result
                 ]
@@ -113,7 +113,7 @@ describe('Circular Dependency Detection Tests', () => {
           queries: {
             processedData: [
               ['$.given.numbers', 'util:map', {
-                fn: ['$.multiplier', 'math:multiply'] // Depends on multiplier
+                service: ['$.multiplier', 'math:multiply'] // Depends on multiplier
               }]
             ],
             multiplier: ['$.processedData', 'math:sum'], // Depends on processedData
@@ -131,7 +131,7 @@ describe('Circular Dependency Detection Tests', () => {
           services,
           queries: {
             filtered: ['$.given.items', 'data:filter', {
-              predicate: ['$.validator', 'test:identity'] // Depends on validator
+              service: ['$.validator', 'test:identity'] // Depends on validator
             }],
             validator: ['test', 'identity', {value: '$.filtered'}] // Depends on filtered
           }
@@ -198,11 +198,11 @@ describe('Circular Dependency Detection Tests', () => {
               ['$.given.input', 'math:add1'],
               ['@', 'math:add1'],
               ['$.given.array', 'util:map', {
-                fn: [
+                service: [
                   ['$.cyclicDep', 'math:times10'], // Depends on cyclicDep
                   ['@', 'math:add1'],
                   ['@', 'math:sequence'],
-                  ['@', 'math:reduce', {fn: ['@', 'math:sum']}]
+                  ['@', 'math:reduce', {service: ['@', 'math:sum']}]
                 ]
               }]
             ],

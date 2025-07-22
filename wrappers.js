@@ -21,8 +21,8 @@ const withArgs = (fn) => {
         return resolved
       }
 
-      // Set up a function prepared to receive context from the calling service
-      // {type: 'function'} args are now just responsible for calling with (ctx)
+      // Set up a service prepared to receive context from the calling service
+      // {type: 'service'} args are now just responsible for calling with (ctx)
       if (typeof value === 'function') {
         return (ctx) => {
           return value(queryResults, contextStack.extend(ctx))

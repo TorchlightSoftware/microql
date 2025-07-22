@@ -157,7 +157,7 @@ describe('Chain Sequential Execution Tests', () => {
               'map',
               {
                 on: '$.given.numbers',
-                fn: ['math', 'double', {value: '@'}]
+                service: ['math', 'double', {value: '@'}]
               }
             ],
             // Step 2: use result in static operation
@@ -187,7 +187,7 @@ describe('Chain Sequential Execution Tests', () => {
               'map',
               {
                 on: '$.given.items',
-                fn: {itemId: '@.id', itemName: '@.name'}
+                service: {itemId: '@.id', itemName: '@.name'}
               }
             ],
             // Step 2: use result in static operation

@@ -61,7 +61,7 @@ describe('Bare $ Resolution Tests', () => {
       given: {data: [1, 2, 3]},
       services: {util},
       queries: {
-        processed: ['$.given.data', 'util:map', {fn: {value: '@'}}],
+        processed: ['$.given.data', 'util:map', {service: {value: '@'}}],
         // Use method syntax to capture current state after processed completes
         // $ semantic: "can see present state of all queries" but "depends on none"
         // Since result depends on processed, processed will be completed when $ is resolved

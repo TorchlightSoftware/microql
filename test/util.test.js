@@ -59,7 +59,7 @@ describe('Util Service Tests', () => {
     it('should map with function', async () => {
       const result = await util.map({
         on: testData.people,
-        fn: async (person) => ({
+        service: async (person) => ({
           fullName: person.name,
           yearsOld: person.age,
           team: person.department
@@ -140,7 +140,7 @@ describe('Util Service Tests', () => {
             'map',
             {
               on: '$.given.people',
-              fn: {
+              service: {
                 name: '@.name',
                 info: '@.department'
               }
@@ -168,7 +168,7 @@ describe('Util Service Tests', () => {
             'map',
             {
               on: '$.given.people',
-              fn: ['data', 'formatName', {person: '@'}]
+              service: ['data', 'formatName', {person: '@'}]
             }
           ]
         },
@@ -178,7 +178,7 @@ describe('Util Service Tests', () => {
       assert.deepStrictEqual(result, ['ALICE', 'BOB', 'CHARLIE', 'DIANA'])
     })
 
-    it('should handle util.filter with predicate', async () => {
+    it('should handle util.filter with fn', async () => {
       const result = await query({
         given: {people: testData.people},
         services: mockServices,
@@ -188,7 +188,7 @@ describe('Util Service Tests', () => {
             'filter',
             {
               on: '$.given.people',
-              predicate: ['data', 'isEngineer', {person: '@'}]
+              service: ['data', 'isEngineer', {person: '@'}]
             }
           ]
         },
@@ -211,7 +211,7 @@ describe('Util Service Tests', () => {
             'flatMap',
             {
               on: '$.given.products',
-              fn: ['data', 'getCategories', {product: '@'}]
+              service: ['data', 'getCategories', {product: '@'}]
             }
           ]
         },
@@ -263,7 +263,7 @@ describe('Util Service Tests', () => {
             '$.given.items',
             'util:map',
             {
-              fn: {original: '@.id', processed: true}
+              service: {original: '@.id', processed: true}
             }
           ]
         },
@@ -291,7 +291,7 @@ describe('Util Service Tests', () => {
             'map',
             {
               on: '$.given.orders',
-              fn: [
+              service: [
                 'data',
                 'calculateTotal',
                 {
@@ -308,7 +308,7 @@ describe('Util Service Tests', () => {
             'filter',
             {
               on: '$.orderTotals',
-              predicate: ['util', 'gt', {l: '@', r: 30}]
+              service: ['util', 'gt', {l: '@', r: 30}]
             }
           ],
 
@@ -543,9 +543,9 @@ describe('Util Service Tests', () => {
         settings: {debug: false},
         queries: {
           result: [
-            ['util', 'map', {on: '$.given.data', fn: {doubled: '@'}}],
+            ['util', 'map', {on: '$.given.data', service: {doubled: '@'}}],
             ['@', 'util:snapshot', {out: testSnapshotPath}],
-            ['@', 'util:map', {fn: {tripled: '@.doubled'}}]
+            ['@', 'util:map', {service: {tripled: '@.doubled'}}]
           ]
         }
       }

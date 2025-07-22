@@ -73,14 +73,14 @@ const compileSettings = (queryName, args, argtypes, config) => {
 
   // compile onError if we have it
   if (settings.onError && Array.isArray(settings.onError) && settings.onError.length > 0) {
-    settings.onError = compileFunctionOrChain(queryName, settings.onError, config)
+    settings.onError = compileServiceOrChain(queryName, settings.onError, config)
   }
 
   return settings
 }
 
-// any time we expect a function, it could instead be a chain
-const compileFunctionOrChain = (queryName, value, config) => {
+// any time we expect a service, it could instead be a chain
+const compileServiceOrChain = (queryName, value, config) => {
   const makeFn = (descriptor) => compileServiceFunction(queryName, descriptor, config).service
 
   // is it a chain?
@@ -99,14 +99,18 @@ const compileArgs = (queryName, serviceName, args, argtypes, config, settings) =
 
   for (const [key, value] of Object.entries(args)) {
 
-    // compile object to function template
-    if (argtypes[key]?.type === 'function' && typeof value === 'object' && !Array.isArray(value)) {
+    // compile object to service template
+    if (argtypes[key]?.type === 'service' && typeof value === 'object' && !Array.isArray(value)) {
       const fn = compileServiceFunction(queryName, ['util', 'template', value], config)
       compiled[key] = fn.service
 
-    // compile service to function
-    } else if (argtypes[key]?.type === 'function' && Array.isArray(value)) {
-      compiled[key] = compileFunctionOrChain(queryName, value, config)
+    // compile service descriptor
+    } else if (argtypes[key]?.type === 'service' && Array.isArray(value)) {
+      compiled[key] = compileServiceOrChain(queryName, value, config)
+
+    // reject raw JavaScript functions
+    } else if (argtypes[key]?.type === 'service' && typeof value === 'function') {
+      throw new Error(`Raw JavaScript functions are not supported in MicroQL. Use service descriptors instead of raw functions for argument '${key}' in ${serviceName}:${queryName}. Example: ['serviceName', 'methodName', {arg: '@'}]`)
 
     } else if (RESERVE_ARGS.includes(key)) {
       // exclude reserve args
@@ -216,7 +220,7 @@ export function compile(config) {
   // Compile global settings separately
   const globalSettings = {...settings}
   if (settings.onError) {
-    globalSettings.onError = compileFunctionOrChain('global', settings.onError, config)
+    globalSettings.onError = compileServiceOrChain('global', settings.onError, config)
   }
 
   return {
