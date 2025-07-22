@@ -119,7 +119,7 @@ describe('Function Arguments Tests', () => {
             on: '$.given.items',
             service: {
               original: '@',
-              upper: '@'  // Simple template access
+              upper: '@' // Simple template access (extra space to test linter)
             }
           }]
         }

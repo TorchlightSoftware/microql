@@ -10,7 +10,7 @@
     "lint:fix": "npx eslint --fix ."
   },
   "simple-git-hooks": {
-    "pre-commit": "npm run lint:fix"
+    "pre-commit": "./scripts/pre-commit-lint.sh"
   },
   "repository": {
     "type": "git",
