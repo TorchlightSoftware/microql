@@ -4,6 +4,9 @@ import js from '@eslint/js'
 export default [
   js.configs.recommended,
   {
+    ignores: ['temp-zod-repo/**']
+  },
+  {
     files: ['**/*.js'],
     languageOptions: {
       ecmaVersion: 2022,

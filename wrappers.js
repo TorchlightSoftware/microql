@@ -4,6 +4,7 @@ import {getServiceColor} from './common.js'
 import {inspect} from 'util'
 
 import utilService from './services/util.js'
+import {validate} from './validation.js'
 
 const withArgs = (fn) => {
   return async function (args = {}) {
@@ -159,8 +160,29 @@ const withErrorHandling = (fn) => {
   }
 }
 
+const withValidation = (fn) => {
+  return async function (args) {
+    const {validators} = this
+
+    // Run prechecks
+    if (validators.precheck && validators.precheck.length > 0) {
+      validate(validators.precheck, args, 'precheck')
+    }
+
+    // Execute the actual service function
+    const result = await fn.call(this, args)
+
+    // Run postchecks
+    if (validators.postcheck && validators.postcheck.length > 0) {
+      validate(validators.postcheck, result, 'postcheck')
+    }
+
+    return result
+  }
+}
+
 const applyWrappers = (def, config) => {
-  const {queryName, serviceName, action, args, settings} = def
+  const {queryName, serviceName, action, args, settings, validators} = def
 
   const service = config.services[serviceName]
 
@@ -179,6 +201,11 @@ const applyWrappers = (def, config) => {
 
   wrappers.push(withErrorHandling)
 
+  // Add validation wrapper if validators are defined
+  if (validators && (validators.precheck?.length > 0 || validators.postcheck?.length > 0)) {
+    wrappers.push(withValidation)
+  }
+
   if (settings.retry > 0) {
     wrappers.push(withRetry)
   }
@@ -194,7 +221,7 @@ const applyWrappers = (def, config) => {
   // give all wrappers access to the full calling context so they don't have to fish for it
   // allow the contextStack to be passed at execution time
   return (queryResults, contextStack) =>
-    wrapped.call({queryName, serviceName, action, settings, queryResults, contextStack}, args)
+    wrapped.call({queryName, serviceName, action, settings, validators, queryResults, contextStack}, args)
 }
 
 export default applyWrappers

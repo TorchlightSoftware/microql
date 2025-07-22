@@ -54,6 +54,13 @@ const getDeps = (args) => {
   return deps
 }
 
+const compileValidators = (args, validators) => {
+  return {
+    precheck: [args.precheck, validators.precheck].filter(Boolean),
+    postcheck: [validators.postcheck, args.postcheck].filter(Boolean)
+  }
+}
+
 // settings are merged from query level settings and service level settings
 // they are placed in their own `settings` key on the compiled service definition
 const compileSettings = (queryName, args, argtypes, config) => {
@@ -123,21 +130,24 @@ const compileArgs = (queryName, serviceName, args, argtypes, config, settings) =
 function compileServiceFunction(queryName, descriptor, config) {
   const [serviceName, action, args] = transformMethodSyntax(descriptor)
 
+  const service = config.services[serviceName]
   // Validate service exists and has the required method
-  if (!config.services[serviceName]) {
+  if (!service) {
     throw new Error(`Service '${serviceName}' not found`)
   }
 
-  if (typeof config.services[serviceName] === 'object') {
-    if (!config.services[serviceName][action] || typeof config.services[serviceName][action] !== 'function') {
+  const serviceCall = service[action]
+  if (typeof service === 'object') {
+    if (!serviceCall || typeof serviceCall !== 'function') {
       throw new Error(`Method '${action}' not found on service '${serviceName}'`)
     }
   } else {
     throw new Error(`Service '${serviceName}' must be an object with methods in the form: async (args) => result`)
   }
-  const argtypes = config.services[serviceName][action]._argtypes || {}
+  const argtypes = serviceCall._argtypes || {}
   const settings = compileSettings(queryName, args, argtypes, config)
   const compiledArgs = compileArgs(queryName, serviceName, args, argtypes, config, settings)
+  const validators = compileValidators(args, serviceCall._validators || {})
 
   // Compile function arguments based on _argtypes
   const serviceDef = {
@@ -145,6 +155,7 @@ function compileServiceFunction(queryName, descriptor, config) {
     queryName,
     serviceName,
     action,
+    validators,
     settings,
     args: compiledArgs,
     dependencies: getDeps(args)
