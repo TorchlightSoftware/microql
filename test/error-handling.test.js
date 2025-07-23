@@ -37,7 +37,7 @@ describe('Error Handling Tests', () => {
     it('should call onError handler when service fails', async () => {
       const config = {
         services: {error: errorService, log: logService},
-        settings: {debug: true},
+        settings: {debug: false},
         queries: {
           result: ['error:fail', {onError: ['log:logError', {on: '@'}]}]
         }

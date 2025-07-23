@@ -83,20 +83,25 @@ const withTimeout = (fn) => {
   return async function (args) {
     //console.log('withTimeout this:', this)
     const {timeout} = this.settings
+    let timeoutId
 
     const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => {
+      timeoutId = setTimeout(() => {
         reject(new Error(`Timed out after ${timeout}ms`))
       }, timeout)
     })
 
-    return Promise.race([fn.call(this, args), timeoutPromise])
+    try {
+      return await Promise.race([fn.call(this, args), timeoutPromise])
+    } finally {
+      clearTimeout(timeoutId)
+    }
   }
 }
 
 const withRetry = (fn) => {
   return async function (args) {
-    //console.log('withRetry this:', this)
+    const {queryName, serviceName, action} = this
     const retry = this.settings.retry || 0
 
     let lastError
@@ -109,7 +114,7 @@ const withRetry = (fn) => {
 
         if (attempt <= retry) {
           console.error(
-            `Failed (attempt ${attempt}/${retry + 1}), retrying...`
+            `[${queryName} - ${serviceName}:${action}] Failed (attempt ${attempt}/${retry + 1}), retrying...`
           )
         }
       }
@@ -151,7 +156,6 @@ const withErrorHandling = (fn) => {
 
       // Re-throw original error
       if (!settings.ignoreErrors) {
-        console.log('throwing error with augmented properties:', error)
         throw error
       }
 

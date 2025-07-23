@@ -5,7 +5,7 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "node --test --test-reporter=tap test/*.test.js 2>&1 | npx tap-mocha-reporter spec",
+    "test": "node --test test/*.test.js",
     "lint": "npx eslint .",
     "lint:fix": "npx eslint --fix ."
   },
@@ -39,8 +39,7 @@
   "devDependencies": {
     "@stylistic/eslint-plugin": "^5.2.0",
     "eslint": "^9.31.0",
-    "simple-git-hooks": "^2.13.0",
-    "tap-mocha-reporter": "^5.0.4"
+    "simple-git-hooks": "^2.13.0"
   },
   "dependencies": {
     "lodash": "^4.17.10",
