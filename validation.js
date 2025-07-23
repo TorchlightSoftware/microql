@@ -13,26 +13,21 @@ import {z} from 'zod'
  * @param {*} value - Value to validate (args for precheck, result for postcheck)
  * @param {string} order - 'precheck' or 'postcheck' for error reporting
  */
-export function validate(schemas, value, order = 'validation') {
-  if (!schemas || schemas.length === 0) return
+export function validate(schema, value, order = 'validation') {
+  if (!schema) return
 
-  // Process each schema descriptor (service-level and user-level)
-  for (const schemaDescriptor of schemas) {
-    if (!schemaDescriptor) continue
+  const zodSchema = parseSchema(schema)
+  const result = zodSchema.safeParse(value)
 
-    const zodSchema = parseSchema(schemaDescriptor)
-    const result = zodSchema.safeParse(value)
+  if (!result.success) {
+    // Convert Zod errors to MicroQL error format
+    const errors = result.error?.issues || []
+    const errorMessages = errors.map(err => {
+      const path = err.path && err.path.length > 0 ? err.path.join('.') : 'value'
+      return `- ${path}: ${err.message}`
+    })
 
-    if (!result.success) {
-      // Convert Zod errors to MicroQL error format
-      const errors = result.error?.issues || []
-      const errorMessages = errors.map(err => {
-        const path = err.path && err.path.length > 0 ? err.path.join('.') : 'value'
-        return `- ${path}: ${err.message}`
-      })
-
-      throw new Error(`${capitalizeFirst(order)} validation failed:\n${errorMessages.join('\n')}`)
-    }
+    throw new Error(`${capitalizeFirst(order)} validation failed:\n${errorMessages.join('\n')}`)
   }
 }
 
@@ -57,7 +52,7 @@ export function parseSchema(descriptor) {
     return parsePrimitiveType(descriptor)
   }
 
-  throw new Error(`Invalid schema descriptor: ${JSON.stringify(descriptor)}`)
+  throw new Error(`Invalid schema descriptor: ${JSON.stringify(descriptor)}. Schema descriptors must be arrays like ['string'], objects like {name: ['string']}, or primitive type strings like 'string'. See validation documentation for examples.`)
 }
 
 /**
@@ -123,7 +118,7 @@ function parsePrimitiveType(type) {
     case 'null':
       return z.null()
     default:
-      throw new Error(`Unknown primitive type: ${type}`)
+      throw new Error(`Unknown primitive type: '${type}'. Valid primitive types are: string, number, boolean, date, any, unknown, void, undefined, null. For complex types, use wrapper functions like ['array', elementSchema] or ['object', shape].`)
   }
 }
 
@@ -140,7 +135,7 @@ function isWrapperFunction(type) {
 function parseWrapperFunction(wrapperType, args) {
   switch (wrapperType) {
     case 'array': {
-      const [elementSchema, options = {}] = args
+      const [elementSchema = 'any', options = {}] = args
       let arraySchema = z.array(parseSchema(elementSchema))
 
       // Apply array-specific modifiers
@@ -152,7 +147,7 @@ function parseWrapperFunction(wrapperType, args) {
     }
 
     case 'object': {
-      const [shape] = args
+      const [shape = {}] = args // Default to empty shape (any object)
       return parseObjectSchema(shape)
     }
 

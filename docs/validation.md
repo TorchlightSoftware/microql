@@ -104,8 +104,13 @@ MicroQL uses a JSON-based syntax that gets transformed into Zod schemas. There a
 
 ```javascript
 // Arrays
-['array', ['string']]
-['array', ['number'], {min: 2, max: 10}]
+['array', ['string']]        // Array of strings
+['array', ['number'], {min: 2, max: 10}]  // Array of numbers with constraints
+['array']                    // Array of any type (shorthand for ['array', ['any']])
+
+// Objects
+['object', {name: ['string'], age: ['number']}]  // Object with specific shape
+['object']                   // Any object (shorthand for ['object', {}])
 
 // Unions
 ['union', [['string'], ['number']]]

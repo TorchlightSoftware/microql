@@ -114,28 +114,28 @@ describe('Validation System Tests', () => {
 
   describe('Validation Function', () => {
     it('should validate successfully with valid data', () => {
-      const schemas = [['string', 'email']]
+      const schema = ['string', 'email']
       const validEmail = 'test@example.com'
 
       // Should not throw
-      validate(schemas, validEmail, 'precheck')
+      validate(schema, validEmail, 'precheck')
     })
 
     it('should throw validation error with invalid data', () => {
-      const schemas = [['string', 'email']]
+      const schema = ['string', 'email']
       const invalidEmail = 'not-an-email'
 
       assert.throws(() => {
-        validate(schemas, invalidEmail, 'precheck')
+        validate(schema, invalidEmail, 'precheck')
       }, /Precheck validation failed/)
     })
 
     it('should validate complex object schema', () => {
-      const schemas = [{
+      const schema = {
         name: ['string'],
         age: ['number', 'positive', 'integer'],
         email: ['string', 'email']
-      }]
+      }
 
       const validUser = {
         name: 'John Doe',
@@ -150,11 +150,11 @@ describe('Validation System Tests', () => {
       }
 
       // Should not throw
-      validate(schemas, validUser, 'precheck')
+      validate(schema, validUser, 'precheck')
 
       // Should throw
       assert.throws(() => {
-        validate(schemas, invalidUser, 'precheck')
+        validate(schema, invalidUser, 'precheck')
       }, /Precheck validation failed/)
     })
   })

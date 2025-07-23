@@ -12,18 +12,6 @@ import {ANSI_COLORS} from '../common.js'
  */
 const COLOR_NAMES = ['green', 'yellow', 'blue', 'magenta', 'cyan', 'white']
 
-// TODO: get rid of this, it's garbage
-const validateType = (value, expectedType, name) => {
-  if (expectedType === 'array' && !Array.isArray(value)) {
-    throw new Error(`${name}: expected array, got ${typeof value}`)
-  }
-  if (
-    expectedType === 'object' &&
-    (!value || typeof value !== 'object' || Array.isArray(value))
-  ) {
-    throw new Error(`${name}: expected object, got ${typeof value}`)
-  }
-}
 
 // Check if we should skip based on timestamp
 async function shouldSkipSnapshot(timestamp, out) {
@@ -50,8 +38,6 @@ const util = {
    * Transform each item in a collection using a service
    */
   async map({on, service}) {
-    validateType(on, 'array', 'on')
-
     if (service && typeof service === 'function') {
       return Promise.all(on.map(service))
     }
@@ -63,8 +49,6 @@ const util = {
    * Filter collection based on a service
    */
   async filter({on, service}) {
-    validateType(on, 'array', 'on')
-
     if (!service || typeof service !== 'function') {
       throw new Error('Service is required for filter operation')
     }
@@ -85,10 +69,6 @@ const util = {
    * Concatenate multiple arrays into a single array
    */
   async concat({args}) {
-    if (!Array.isArray(args)) {
-      throw new Error('Args must be an array of arrays')
-    }
-
     return [].concat(...args)
   },
 
@@ -138,14 +118,6 @@ const util = {
    * Pick specific fields from an object (similar to lodash pick)
    */
   async pick({on, fields}) {
-    if (!on || typeof on !== 'object' || Array.isArray(on)) {
-      throw new Error('`on` must be an object')
-    }
-
-    if (!Array.isArray(fields)) {
-      throw new Error('`fields` must be an array of field names')
-    }
-
     const result = {}
     for (const field of fields) {
       if (Object.hasOwn(on, field)) {
@@ -161,9 +133,6 @@ const util = {
    * Uses query-level inspect settings for consistent formatting
    */
   async print({on, settings, color}) {
-    if (settings && typeof settings !== 'object')
-      throw new Error('`settings` if provided must be an object')
-
     // Format timestamp if enabled
     const timestamp = settings?.ts ? `[${new Date().toISOString()}] ` : ''
 
@@ -223,9 +192,6 @@ const util = {
    * This allows capturing current execution state at any point.
    */
   async snapshot({on, capture, out}) {
-    if (!out) {
-      throw new Error('snapshot requires "out" argument specifying file path')
-    }
     capture ??= on
 
     // Skip logic: if we have a restore timestamp and file exists with same timestamp
@@ -251,18 +217,6 @@ const util = {
    * Record a failure to disk with error context from MicroQL
    */
   async recordFailure({on, location}) {
-    if (!location) {
-      throw new Error(
-        'recordFailure requires "location" argument specifying directory path'
-      )
-    }
-
-    if (!on || typeof on !== 'object') {
-      throw new Error(
-        'recordFailure expects error context from MicroQL onError'
-      )
-    }
-
     // Ensure directory exists
     await fs.ensureDir(location)
 
@@ -334,6 +288,51 @@ util.snapshot._argtypes = {
 }
 
 util.template._argtypes = {on: {argOrder: 0}}
+
+// Validation schemas for each service method
+util.pick._validators = {
+  precheck: {
+    on: ['object'],
+    fields: ['array', ['string']]
+  }
+}
+
+util.concat._validators = {
+  precheck: {
+    args: ['array']
+  }
+}
+
+util.snapshot._validators = {
+  precheck: {
+    out: ['string']
+  }
+}
+
+util.recordFailure._validators = {
+  precheck: {
+    on: ['object'],
+    location: ['string']
+  }
+}
+
+util.map._validators = {
+  precheck: {
+    on: ['array']
+  }
+}
+
+util.filter._validators = {
+  precheck: {
+    on: ['array']
+  }
+}
+
+util.flatMap._validators = {
+  precheck: {
+    on: ['array']
+  }
+}
 
 export default util
 export {COLOR_NAMES}
