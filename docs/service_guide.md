@@ -93,9 +93,9 @@ const result = await query({
   given: {numbers: [1, 2, 3, 4, 5]},
   services: {math: mathService},
   queries: {
-    sum: ['math', 'add', {a: 10, b: 20}],
-    product: ['math', 'multiply', {values: '$.given.numbers'}],
-    stats: ['math', 'statistics', {numbers: '$.given.numbers'}]
+    sum: ['math:add', {a: 10, b: 20}],
+    product: ['math:multiply', {values: '$.given.numbers'}],
+    stats: ['math:statistics', {numbers: '$.given.numbers'}]
   }
 })
 ```
@@ -140,9 +140,9 @@ transformService.transform._argtypes = {
 
 // Usage
 const queries = {
-  result: ['transform', 'transform', {
+  result: ['transform:transform', {
     data: '$.given.items',
-    transformer: ['util', 'template', {name: '@.name', upper: '@.name.toUpperCase()'}]
+    transformer: ['util:template', {name: '@.name', upper: '@.name.toUpperCase()'}]
   }]
 }
 ```
@@ -237,9 +237,9 @@ const userService = {
 
 ```javascript
 const queries = {
-  user: ['users', 'getUser', {
+  user: ['users:getUser', {
     id: '$.given.userId',
-    onError: ['users', 'getDefaultUser'],  // Fallback on error
+    onError: ['users:getDefaultUser'],     // Fallback on error
     retry: 3,                              // Retry 3 times
     timeout: 5000                          // 5 second timeout
   }]
@@ -286,8 +286,8 @@ describe('User Service Integration', () => {
       given: {userData: {name: 'John', email: 'john@example.com', age: 25}},
       services: {users: userService},
       queries: {
-        created: ['users', 'createUser', {userData: '$.given.userData'}],
-        retrieved: ['users', 'getUser', {id: '$.created.id'}]
+        created: ['users:createUser', {userData: '$.given.userData'}],
+        retrieved: ['users:getUser', {id: '$.created.id'}]
       }
     })
     
@@ -435,23 +435,23 @@ import {util} from 'microql/services'
 
 const queries = {
   // Array operations
-  filtered: ['util', 'filter', {on: '$.data', fn: item => item.active}],
-  mapped: ['util', 'map', {on: '$.filtered', fn: item => item.name}],
-  flattened: ['util', 'flatMap', {on: '$.nested', fn: item => item.children}],
+  filtered: ['util:filter', {on: '$.data', fn: item => item.active}],
+  mapped: ['util:map', {on: '$.filtered', fn: item => item.name}],
+  flattened: ['util:flatMap', {on: '$.nested', fn: item => item.children}],
   
   // Object operations
-  picked: ['util', 'pick', {on: '$.user', fields: ['name', 'email']}],
+  picked: ['util:pick', {on: '$.user', fields: ['name', 'email']}],
   
   // Conditional logic
-  result: ['util', 'when', {
+  result: ['util:when', {
     condition: '$.user.isAdmin',
     then: 'admin_data',
     else: 'regular_data'
   }],
   
   // Utilities
-  length: ['util', 'length', {on: '$.items'}],
-  exists: ['util', 'exists', {on: '$.optionalField'}]
+  length: ['util:length', {on: '$.items'}],
+  exists: ['util:exists', {on: '$.optionalField'}]
 }
 ```
 

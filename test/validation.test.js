@@ -180,7 +180,7 @@ describe('Validation System Tests', () => {
       const config = {
         services: {testService},
         queries: {
-          test: ['testService', 'validateInput', {value: 10}]
+          test: ['testService:validateInput', {value: 10}]
         }
       }
 
@@ -207,7 +207,7 @@ describe('Validation System Tests', () => {
       const config = {
         services: {testService},
         queries: {
-          test: ['testService', 'validateInput', {value: -5}]
+          test: ['testService:validateInput', {value: -5}]
         }
       }
 
@@ -241,7 +241,7 @@ describe('Validation System Tests', () => {
       const config = {
         services: {testService},
         queries: {
-          test: ['testService', 'processData', {input: 'hello'}]
+          test: ['testService:processData', {input: 'hello'}]
         }
       }
 
@@ -269,7 +269,7 @@ describe('Validation System Tests', () => {
       const config = {
         services: {testService},
         queries: {
-          test: ['testService', 'processNumber', {
+          test: ['testService:processNumber', {
             num: 15,
             precheck: {
               num: ['number', {min: 10, max: 20}]
@@ -300,7 +300,7 @@ describe('Validation System Tests', () => {
       const config = {
         services: {testService},
         queries: {
-          test: ['testService', 'processNumber', {
+          test: ['testService:processNumber', {
             num: 25, // Outside user's range
             precheck: {
               num: ['number', {min: 10, max: 20}]
@@ -335,7 +335,7 @@ describe('Validation System Tests', () => {
       const config = {
         services: {testService},
         queries: {
-          test: ['testService', 'processArray', {
+          test: ['testService:processArray', {
             items: ['hello', 'world'],
             precheck: {
               items: ['array', ['string'], {min: 2, max: 5}]
@@ -381,7 +381,7 @@ describe('Validation System Tests', () => {
       const config = {
         services: {testService},
         queries: {
-          newUser: ['testService', 'createUser', {
+          newUser: ['testService:createUser', {
             userData: {
               name: 'John Doe',
               email: 'john@example.com',
@@ -433,7 +433,7 @@ describe('Validation System Tests', () => {
       const config = {
         services: {testService},
         queries: {
-          result: ['testService', 'transform', {input: 'test'}]
+          result: ['testService:transform', {input: 'test'}]
         }
       }
 
@@ -468,8 +468,8 @@ describe('Validation System Tests', () => {
         services: {testService},
         queries: {
           chain: [
-            ['testService', 'step1', {value: 45}], // Returns 55
-            ['testService', 'step2', {value: '@'}] // Should fail validation
+            ['testService:step1', {value: 45}], // Returns 55
+            ['testService:step2', {value: '@'}] // Should fail validation
           ]
         }
       }
@@ -505,7 +505,7 @@ describe('Validation System Tests', () => {
       const config1 = {
         services: {testService},
         queries: {
-          profile: ['testService', 'createProfile', {name: 'Alice'}]
+          profile: ['testService:createProfile', {name: 'Alice'}]
         }
       }
 
@@ -516,7 +516,7 @@ describe('Validation System Tests', () => {
       const config2 = {
         services: {testService},
         queries: {
-          profile: ['testService', 'createProfile', {
+          profile: ['testService:createProfile', {
             name: 'Bob',
             bio: 'Developer',
             age: 30
@@ -554,7 +554,7 @@ describe('Validation System Tests', () => {
       const config = {
         services: {settingsService},
         queries: {
-          result: ['settingsService', 'updateTheme', {theme: 'dark'}]
+          result: ['settingsService:updateTheme', {theme: 'dark'}]
         }
       }
 
@@ -565,7 +565,7 @@ describe('Validation System Tests', () => {
       const invalidConfig = {
         services: {settingsService},
         queries: {
-          result: ['settingsService', 'updateTheme', {theme: 'blue'}]
+          result: ['settingsService:updateTheme', {theme: 'blue'}]
         }
       }
 
@@ -594,7 +594,7 @@ describe('Validation System Tests', () => {
       const config = {
         services: {userService},
         queries: {
-          result: ['userService', 'validateUsername', {username: 'valid_user123'}]
+          result: ['userService:validateUsername', {username: 'valid_user123'}]
         }
       }
 
@@ -605,7 +605,7 @@ describe('Validation System Tests', () => {
       const invalidConfig = {
         services: {userService},
         queries: {
-          result: ['userService', 'validateUsername', {username: 'no-dashes'}]
+          result: ['userService:validateUsername', {username: 'no-dashes'}]
         }
       }
 
@@ -641,7 +641,7 @@ describe('Validation System Tests', () => {
       const config = {
         services: {eventService},
         queries: {
-          result: ['eventService', 'scheduleEvent', {eventDate: futureDate}]
+          result: ['eventService:scheduleEvent', {eventDate: futureDate}]
         }
       }
 
@@ -655,7 +655,7 @@ describe('Validation System Tests', () => {
       const invalidConfig = {
         services: {eventService},
         queries: {
-          result: ['eventService', 'scheduleEvent', {eventDate: pastDate}]
+          result: ['eventService:scheduleEvent', {eventDate: pastDate}]
         }
       }
 

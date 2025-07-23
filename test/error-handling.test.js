@@ -39,7 +39,7 @@ describe('Error Handling Tests', () => {
         services: {error: errorService, log: logService},
         settings: {debug: true},
         queries: {
-          result: ['error', 'fail', {onError: ['log', 'logError', {on: '@'}]}]
+          result: ['error:fail', {onError: ['log:logError', {on: '@'}]}]
         }
       }
 
@@ -59,8 +59,8 @@ describe('Error Handling Tests', () => {
       const config = {
         services: {error: errorService},
         queries: {
-          failedQuery: ['error', 'fail', {ignoreErrors: true}],
-          successQuery: ['error', 'succeed', {}]
+          failedQuery: ['error:fail', {ignoreErrors: true}],
+          successQuery: ['error:succeed', {}]
         },
         select: ['failedQuery', 'successQuery']
       }
@@ -83,8 +83,8 @@ describe('Error Handling Tests', () => {
       const config = {
         services: {error: errorService, customLog},
         queries: {
-          result: ['error', 'fail', {
-            onError: ['customLog', 'track', {on: '@'}],
+          result: ['error:fail', {
+            onError: ['customLog:track', {on: '@'}],
             ignoreErrors: true
           }]
         }
@@ -101,9 +101,9 @@ describe('Error Handling Tests', () => {
       const config = {
         services: {error: errorService, log: logService},
         queries: {
-          willFail: ['error', 'fail', {}]
+          willFail: ['error:fail', {}]
         },
-        onError: ['log', 'logQueryError', {on: '@'}]
+        onError: ['log:logQueryError', {on: '@'}]
       }
 
       await assert.rejects(() => query(config), /Service failed/)
@@ -121,8 +121,8 @@ describe('Error Handling Tests', () => {
         services: {chain: chainService},
         queries: {
           chained: [
-            ['chain', 'step1', {}],
-            ['chain', 'step2', {ignoreErrors: true}]
+            ['chain:step1', {}],
+            ['chain:step2', {ignoreErrors: true}]
           ]
         }
       }
@@ -145,11 +145,15 @@ describe('Error Handling Tests', () => {
         }
       }
 
+      // Add argOrder metadata for method syntax
+      logService.addContext._argtypes = {on: {argOrder: 0}}
+      logService.logError._argtypes = {on: {argOrder: 0}}
+
       const config = {
         services: {error: errorService, log: logService},
         settings: {debug: false},
         queries: {
-          result: ['error', 'fail', {
+          result: ['error:fail', {
             onError: [
               // when processing an error in a chain, you actually need to use @@ to refer to the original error
               // ...because @ refers to the current chain context, and will be null within the first operation on the chain
@@ -182,7 +186,7 @@ describe('Error Handling Tests', () => {
         services: {error: errorService},
         settings: {ignoreErrors: true},
         queries: {
-          failedQuery: ['error', 'fail', {}]
+          failedQuery: ['error:fail', {}]
         }
       }
 
@@ -202,9 +206,9 @@ describe('Error Handling Tests', () => {
 
       const config = {
         services: {error: errorService, log: logService},
-        settings: {onError: ['log', 'logError', {on: '@'}]},
+        settings: {onError: ['log:logError', {on: '@'}]},
         queries: {
-          failedQuery: ['error', 'fail', {}]
+          failedQuery: ['error:fail', {}]
         }
       }
 
@@ -226,10 +230,10 @@ describe('Error Handling Tests', () => {
         services: {error: errorService, log: logService},
         settings: {
           ignoreErrors: true,
-          onError: ['log', 'logError', {on: '@'}]
+          onError: ['log:logError', {on: '@'}]
         },
         queries: {
-          failedQuery: ['error', 'fail', {}]
+          failedQuery: ['error:fail', {}]
         }
       }
 
@@ -254,9 +258,9 @@ describe('Error Handling Tests', () => {
         services: {error: errorService, capture: captureService},
         settings: {debug: false},
         queries: {
-          testQuery: ['error', 'fail', {
+          testQuery: ['error:fail', {
             someArg: 'value',
-            onError: ['capture', 'capture', {on: '@'}],
+            onError: ['capture:capture', {on: '@'}],
             ignoreErrors: true
           }]
         }

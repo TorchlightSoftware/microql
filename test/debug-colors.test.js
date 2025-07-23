@@ -59,9 +59,9 @@ describe('Debug Color Tests', () => {
         }
       },
       queries: {
-        testA: ['serviceA', 'test', {}],
-        testB: ['serviceB', 'test', {}],
-        testC: ['serviceC', 'test', {}]
+        testA: ['serviceA:test', {}],
+        testB: ['serviceB:test', {}],
+        testC: ['serviceC:test', {}]
       }
     })
 
@@ -98,9 +98,9 @@ describe('Debug Color Tests', () => {
         }
       },
       queries: {
-        q1: ['consistentService', 'action1', {}],
-        q2: ['differentService', 'action', {}],
-        q3: ['consistentService', 'action2', {}]
+        q1: ['consistentService:action1', {}],
+        q2: ['differentService:action', {}],
+        q3: ['consistentService:action2', {}]
       }
     })
 
@@ -136,7 +136,7 @@ describe('Debug Color Tests', () => {
         }
       },
       queries: {
-        test: ['testService', 'method', {}]
+        test: ['testService:method', {}]
       }
     })
 

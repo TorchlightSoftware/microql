@@ -30,11 +30,11 @@ describe('Chain Sequential Execution Tests', () => {
         queries: {
           result: [
             // Step 1: uses given data (has $ dependency)
-            ['tracker', 'step1', {value: '$.given.start'}],
+            ['tracker:step1', {value: '$.given.start'}],
             // Step 2: uses static value (NO @ or $ dependency)
-            ['tracker', 'step2', {value: 5}],
+            ['tracker:step2', {value: 5}],
             // Step 3: uses @ dependency from previous step
-            ['tracker', 'step3', {value: '@'}]
+            ['tracker:step3', {value: '@'}]
           ]
         }
       })
@@ -70,15 +70,15 @@ describe('Chain Sequential Execution Tests', () => {
         queries: {
           result: [
             // Step 1: uses given data
-            ['calc', 'add', {a: '$.given.base', b: 5}], // 10 + 5 = 15
+            ['calc:add', {a: '$.given.base', b: 5}], // 10 + 5 = 15
             // Step 2: no path dependencies (static values)
-            ['calc', 'multiply', {a: 2, b: 3}], // 2 * 3 = 6
+            ['calc:multiply', {a: 2, b: 3}], // 2 * 3 = 6
             // Step 3: uses previous chain result
-            ['calc', 'add', {a: '@', b: 1}], // 6 + 1 = 7
+            ['calc:add', {a: '@', b: 1}], // 6 + 1 = 7
             // Step 4: uses constant (no dependencies)
-            ['calc', 'constant', {value: 100}], // 100
+            ['calc:constant', {value: 100}], // 100
             // Step 5: uses previous result
-            ['calc', 'add', {a: '@', b: 0}] // 100 + 0 = 100
+            ['calc:add', {a: '@', b: 0}] // 100 + 0 = 100
           ]
         }
       })
@@ -116,10 +116,10 @@ describe('Chain Sequential Execution Tests', () => {
         queries: {
           result: [
             // All steps use static values, no path dependencies
-            ['math', 'getValue', {n: 5}], // 10
-            ['math', 'getValue', {n: 3}], // 6 (ignores previous @)
-            ['math', 'process', {data: 100}], // 101 (ignores previous @)
-            ['math', 'getValue', {n: 1}] // 2 (ignores previous @)
+            ['math:getValue', {n: 5}], // 10
+            ['math:getValue', {n: 3}], // 6 (ignores previous @)
+            ['math:process', {data: 100}], // 101 (ignores previous @)
+            ['math:getValue', {n: 1}] // 2 (ignores previous @)
           ]
         }
       })
@@ -153,15 +153,14 @@ describe('Chain Sequential Execution Tests', () => {
           result: [
             // Step 1: map with service function
             [
-              'util',
-              'map',
+              'util:map',
               {
                 on: '$.given.numbers',
-                service: ['math', 'double', {value: '@'}]
+                service: ['math:double', {value: '@'}]
               }
             ],
             // Step 2: use result in static operation
-            ['util', 'length', {value: '@'}]
+            ['util:length', {value: '@'}]
           ]
         }
       })
@@ -183,15 +182,14 @@ describe('Chain Sequential Execution Tests', () => {
           result: [
             // Step 1: map with template
             [
-              'util',
-              'map',
+              'util:map',
               {
                 on: '$.given.items',
                 service: {itemId: '@.id', itemName: '@.name'}
               }
             ],
             // Step 2: use result in static operation
-            ['util', 'length', {value: '@'}]
+            ['util:length', {value: '@'}]
           ]
         }
       })
@@ -226,9 +224,9 @@ describe('Chain Sequential Execution Tests', () => {
           },
           queries: {
             result: [
-              ['test', 'step1', {value: '$.given.start'}],
-              ['test', 'step2', {value: 5}], // This will fail
-              ['test', 'step3', {value: '@'}] // This should never execute
+              ['test:step1', {value: '$.given.start'}],
+              ['test:step2', {value: 5}], // This will fail
+              ['test:step3', {value: '@'}] // This should never execute
             ]
           }
         }),

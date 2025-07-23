@@ -28,8 +28,8 @@ MicroQL and GraphQL solve different problems despite both being query languages.
 **MicroQL**: **Automatic** - infers dependencies from `$` and `@` references
 ```javascript
 queries: {
-  profile: ['users', 'getProfile', {id: '$.given.userId'}],
-  auditLog: ['audit', 'log', {user: '$.profile'}]  // Auto-detects dependency on profile
+  profile: ['users:getProfile', {id: '$.given.userId'}],
+  auditLog: ['audit:log', {user: '$.profile'}]  // Auto-detects dependency on profile
 }
 ```
 
@@ -56,20 +56,20 @@ const result = await query({
   services: {users, notifications, audit},
   queries: {
     // These run in parallel (no dependencies)
-    user: ['users', 'getProfile', {id: '$.given.userId'}],
-    preferences: ['users', 'getPreferences', {id: '$.given.userId'}],
+    user: ['users:getProfile', {id: '$.given.userId'}],
+    preferences: ['users:getPreferences', {id: '$.given.userId'}],
     
     // This waits for user data (has dependency)
-    notification: ['notifications', 'send', {
+    notification: ['notifications:send', {
       to: '$.user.email',
       message: 'Welcome $.user.name!'
     }],
     
     // Sequential chain with @ context passing
     pipeline: [
-      ['data', 'extract', {source: '$.given.data'}],
-      ['data', 'transform', {input: '@'}],        // @ = previous step result
-      ['data', 'validate', {processed: '@'}]
+      ['data:extract', {source: '$.given.data'}],
+      ['data:transform', {input: '@'}],        // @ = previous step result
+      ['data:validate', {processed: '@'}]
     ]
   }
 })
@@ -158,9 +158,9 @@ const resolvers = {
 **Parallel Execution**: Independent queries run simultaneously
 ```javascript
 queries: {
-  user: ['users', 'get', {id: '$.userId'}],
-  orders: ['orders', 'getByUser', {userId: '$.userId'}],
-  preferences: ['prefs', 'get', {userId: '$.userId'}]
+  user: ['users:get', {id: '$.userId'}],
+  orders: ['orders:getByUser', {userId: '$.userId'}],
+  preferences: ['prefs:get', {userId: '$.userId'}]
   // All three execute in parallel
 }
 ```
@@ -169,10 +169,10 @@ queries: {
 ```javascript
 queries: {
   pipeline: [
-    ['parser', 'parseCSV', {data: '$.csvData'}],
-    ['validator', 'check', {rows: '@'}],          // @ = parsed data
-    ['transformer', 'enrich', {data: '@'}],       // @ = validated data
-    ['storage', 'save', {records: '@'}]           // @ = enriched data
+    ['parser:parseCSV', {data: '$.csvData'}],
+    ['validator:check', {rows: '@'}],          // @ = parsed data
+    ['transformer:enrich', {data: '@'}],       // @ = validated data
+    ['storage:save', {records: '@'}]           // @ = enriched data
   ]
 }
 ```
@@ -180,8 +180,8 @@ queries: {
 **Method Syntax**: Functional composition
 ```javascript
 queries: {
-  result: ['$.data', 'transform:filter', {service: ['data', 'isActive', {item: '@'}]}],
-  upper: ['$.result', 'transform:map', {service: ['string', 'toUpperCase', {text: '@'}]}]
+  result: ['$.data', 'transform:filter', {service: ['data:isActive', {item: '@'}]}],
+  upper: ['$.result', 'transform:map', {service: ['string:toUpperCase', {text: '@'}]}]
 }
 ```
 
@@ -208,9 +208,9 @@ query {
 
 ```javascript
 queries: {
-  user: ['users', 'getUser', {
+  user: ['users:getUser', {
     id: '$.userId',
-    onError: ['fallback', 'getDefaultUser'],    // Service-level fallback
+    onError: ['fallback:getDefaultUser'],      // Service-level fallback
     retry: 3,                                   // Built-in retry
     timeout: 5000,                             // Built-in timeout
     ignoreErrors: false                        // Continue on error
@@ -219,7 +219,7 @@ queries: {
 
 // Global error handling
 settings: {
-  onError: ['logger', 'logError']              // Global error handler
+  onError: ['logger:logError']                 // Global error handler
 }
 ```
 
@@ -317,8 +317,8 @@ const result = await query({
   given: {userId: 'user123'},
   services: {users, audit},
   queries: {
-    profile: ['users', 'getProfile', {id: '$.given.userId'}],
-    logged: ['audit', 'log', {action: 'profile_access', user: '$.profile'}]
+    profile: ['users:getProfile', {id: '$.given.userId'}],
+    logged: ['audit:log', {action: 'profile_access', user: '$.profile'}]
   }
 })
 ```

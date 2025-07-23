@@ -14,7 +14,7 @@ const ANSI_COLORS = {
 const COLOR_NAMES = Object.keys(ANSI_COLORS).filter(c => !['red', 'reset'].includes(c))
 
 const DEP_REGEX = /\$\.(\w+)/
-const METHOD_REGEX = /^(\w+):(\w+)$/
+const SERVICE_REGEX = /^(\w+):(\w+)$/
 const AT_REGEX = /^(@+)((\.)(.*))?$/
 const BARE_DOLLAR_REGEX = /^\$$/
 
@@ -30,4 +30,4 @@ const getServiceColor = (serviceName) => {
 
 const RESERVE_ARGS = ['timeout', 'retry', 'onError', 'ignoreErrors', 'precheck', 'postcheck']
 
-export {ANSI_COLORS, DEP_REGEX, METHOD_REGEX, AT_REGEX, BARE_DOLLAR_REGEX, getServiceColor, RESERVE_ARGS}
+export {ANSI_COLORS, DEP_REGEX, SERVICE_REGEX, AT_REGEX, BARE_DOLLAR_REGEX, getServiceColor, RESERVE_ARGS}

@@ -48,7 +48,7 @@ describe('Relative Indexing Context Tests', () => {
       services,
       queries: {
         simple: ['$.given.items', 'util:map', {
-          service: ['test', 'checkContext', {
+          service: ['test:checkContext', {
             level1: '@' // Should be the current item (1 or 2)
           }]
         }]
@@ -68,8 +68,9 @@ describe('Relative Indexing Context Tests', () => {
       services,
       queries: {
         nested: ['$.given.outer', 'util:flatMap', {
-          service: ['@.inner', 'util:map', {
-            service: ['test', 'checkContext', {
+          service: ['util:map', {
+            on: '@.inner',
+            service: ['test:checkContext', {
               level1: '@', // Should be inner item (current context)
               level2: '@@' // Should be outer item (parent context)
             }]
@@ -95,6 +96,11 @@ describe('Relative Indexing Context Tests', () => {
       final: ({on}) => (on)
     }
 
+    // Add argOrder metadata for method syntax
+    chainService.step1._argtypes = {on: {argOrder: 0}}
+    chainService.step2._argtypes = {on: {argOrder: 0}}
+    chainService.final._argtypes = {on: {argOrder: 0}}
+
     const result = await query({
       given: {input: 'input'},
       services: {util, chain: chainService},
@@ -117,7 +123,7 @@ describe('Relative Indexing Context Tests', () => {
         services,
         queries: {
           invalid: ['$.given.items', 'util:map', {
-            service: ['test', 'checkContext', {level1: '@@@@'}] // too many levels
+            service: ['test:checkContext', {level1: '@@@@'}] // too many levels
           }]
         }
       })
@@ -137,7 +143,11 @@ describe('Relative Indexing Context Tests', () => {
       sequence: async ({on}) => Array.from({length: on}, (v, k) => k + 1),
       sum: async ({on}) => on.reduce((l, r) => l + r)
     }
-    math.reduce._argtypes = {service: {type: 'service'}}
+    math.add1._argtypes = {on: {argOrder: 0}}
+    math.times10._argtypes = {on: {argOrder: 0}}
+    math.reduce._argtypes = {on: {argOrder: 0}, service: {type: 'service'}}
+    math.sequence._argtypes = {on: {argOrder: 0}}
+    math.sum._argtypes = {on: {argOrder: 0}}
 
     const services = {util, math}
 
@@ -160,7 +170,7 @@ describe('Relative Indexing Context Tests', () => {
               ['@', 'math:add1'], // 11, 21, 31
               ['@', 'math:sequence'], // [1..11], [1..21], [1..31]
               // MapD
-              ['@', 'math:reduce', {service: ['@', 'math:sum']}], // sum([1..11]), sum([1..21]), sum([1..31])
+              ['math:reduce', {on: '@', service: ['math:sum', {on: '@'}]}], // sum([1..11]), sum([1..21]), sum([1..31])
               ['@', 'util:template', { // I wasn't able to test from the fourth context layer, but this should be good enough
                 ChainA: '@', // 3
                 MapB: '@@', // 1, 2, 3

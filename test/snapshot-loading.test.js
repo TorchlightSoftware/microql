@@ -26,11 +26,10 @@ describe('Snapshot Loading Tests', () => {
       services: {util},
       queries: {
         step1: [
-          'util',
-          'when',
+          'util:when',
           {test: true, then: 'completed', or: 'failed'}
         ],
-        step2: ['util', 'pick', {on: '$.given', fields: ['value']}],
+        step2: ['util:pick', {on: '$.given', fields: ['value']}],
         // Save snapshot using util:snapshot service
         save: [
           '$.step2',
@@ -54,10 +53,10 @@ describe('Snapshot Loading Tests', () => {
       given: {value: 'test-data'},
       services: {util},
       queries: {
-        step1: ['util', 'when', {test: true, then: 'completed', or: 'failed'}],
-        step2: ['util', 'pick', {on: '$.given', fields: ['value']}],
+        step1: ['util:when', {test: true, then: 'completed', or: 'failed'}],
+        step2: ['util:pick', {on: '$.given', fields: ['value']}],
         // Add a new query that should execute
-        step3: ['util', 'template', {fromSnapshot: '$.step1', newData: 'fresh'}]
+        step3: ['util:template', {fromSnapshot: '$.step1', newData: 'fresh'}]
       }
     })
 
@@ -79,7 +78,7 @@ describe('Snapshot Loading Tests', () => {
       snapshot: nonExistentPath,
       services: {util},
       queries: {
-        test: ['util', 'when', {test: true, then: 'success', or: 'failure'}]
+        test: ['util:when', {test: true, then: 'success', or: 'failure'}]
       }
     })
 
@@ -91,9 +90,9 @@ describe('Snapshot Loading Tests', () => {
       given: {data: 'test'},
       services: {util},
       queries: {
-        result1: ['util', 'template', {processed: '$.given.data'}],
-        result2: ['util', 'when', {test: true, then: 'done', or: 'failed'}],
-        save: ['util', 'snapshot', {capture: '$', out: testSnapshotPath}]
+        result1: ['util:template', {processed: '$.given.data'}],
+        result2: ['util:when', {test: true, then: 'done', or: 'failed'}],
+        save: ['util:snapshot', {capture: '$', out: testSnapshotPath}]
       }
     }
 
@@ -117,8 +116,8 @@ describe('Snapshot Loading Tests', () => {
       given: {value: 'initial'},
       services: {util},
       queries: {
-        data: ['util', 'template', {value: '$.given.value'}],
-        save: ['util', 'snapshot', {capture: '$', out: testSnapshotPath}]
+        data: ['util:template', {value: '$.given.value'}],
+        save: ['util:snapshot', {capture: '$', out: testSnapshotPath}]
       }
     }
 

@@ -13,8 +13,8 @@ describe('Circular Dependency Detection Tests', () => {
         query({
           services,
           queries: {
-            a: ['test', 'identity', {value: '$.b'}],
-            b: ['test', 'identity', {value: '$.a'}]
+            a: ['test:identity', {value: '$.b'}],
+            b: ['test:identity', {value: '$.a'}]
           }
         }),
         /Circular dependency detected at compile time: a, b/
@@ -26,7 +26,7 @@ describe('Circular Dependency Detection Tests', () => {
         query({
           services,
           queries: {
-            a: ['test', 'identity', {value: '$.a'}]
+            a: ['test:identity', {value: '$.a'}]
           }
         }),
         /Circular dependency detected at compile time: a/
@@ -38,9 +38,9 @@ describe('Circular Dependency Detection Tests', () => {
         query({
           services,
           queries: {
-            a: ['test', 'identity', {value: '$.c'}],
-            b: ['test', 'identity', {value: '$.a'}],
-            c: ['test', 'identity', {value: '$.b'}]
+            a: ['test:identity', {value: '$.c'}],
+            b: ['test:identity', {value: '$.a'}],
+            c: ['test:identity', {value: '$.b'}]
           }
         }),
         /Circular dependency detected at compile time: a, b, c/
@@ -52,9 +52,9 @@ describe('Circular Dependency Detection Tests', () => {
         query({
           services,
           queries: {
-            a: ['test', 'combine', {a: '$.b', b: '$.c'}],
-            b: ['test', 'identity', {value: '$.c'}],
-            c: ['test', 'identity', {value: '$.a'}]
+            a: ['test:combine', {a: '$.b', b: '$.c'}],
+            b: ['test:identity', {value: '$.c'}],
+            c: ['test:identity', {value: '$.a'}]
           }
         }),
         /Circular dependency detected at compile time: a, b, c/
@@ -75,7 +75,7 @@ describe('Circular Dependency Detection Tests', () => {
               ['$.external', 'math:add'] // Depends on external
             ],
             // External query depends on result of chain
-            external: ['test', 'identity', {value: '$.chainA'}]
+            external: ['test:identity', {value: '$.chainA'}]
           }
         }),
         /Circular dependency detected at compile time: chainA, external/
@@ -98,7 +98,7 @@ describe('Circular Dependency Detection Tests', () => {
               }]
             ],
             // Result depends on the nested computation
-            result: ['test', 'identity', {value: '$.deepNested'}]
+            result: ['test:identity', {value: '$.deepNested'}]
           }
         }),
         /Circular dependency detected at compile time: deepNested, result/
@@ -117,7 +117,7 @@ describe('Circular Dependency Detection Tests', () => {
               }]
             ],
             multiplier: ['$.processedData', 'math:sum'], // Depends on processedData
-            finalResult: ['test', 'identity', {value: '$.processedData'}]
+            finalResult: ['test:identity', {value: '$.processedData'}]
           }
         }),
         /Circular dependency detected at compile time: processedData, multiplier, finalResult/
@@ -133,7 +133,7 @@ describe('Circular Dependency Detection Tests', () => {
             filtered: ['$.given.items', 'data:filter', {
               service: ['$.validator', 'test:identity'] // Depends on validator
             }],
-            validator: ['test', 'identity', {value: '$.filtered'}] // Depends on filtered
+            validator: ['test:identity', {value: '$.filtered'}] // Depends on filtered
           }
         }),
         /Circular dependency detected at compile time: filtered, validator/
@@ -157,7 +157,7 @@ describe('Circular Dependency Detection Tests', () => {
               ['@', 'math:add1']
             ],
             // Third query to make it more complex
-            levelThree: ['test', 'double', {value: '$.levelTwo'}]
+            levelThree: ['test:double', {value: '$.levelTwo'}]
           }
         }),
         /Circular dependency detected at compile time: levelOne, levelTwo/
@@ -173,14 +173,14 @@ describe('Circular Dependency Detection Tests', () => {
           services,
           queries: {
             // Valid independent query
-            validQuery: ['math', 'add1', {on: '$.given.input'}],
+            validQuery: ['math:add1', {on: '$.given.input'}],
 
             // Circular dependency pair
-            circular1: ['test', 'identity', {value: '$.circular2'}],
-            circular2: ['test', 'identity', {value: '$.circular1'}],
+            circular1: ['test:identity', {value: '$.circular2'}],
+            circular2: ['test:identity', {value: '$.circular1'}],
 
             // Another valid query that depends on valid query
-            anotherValid: ['math', 'times10', {on: '$.validQuery'}]
+            anotherValid: ['math:times10', {on: '$.validQuery'}]
           }
         }),
         /Circular dependency detected at compile time: circular1, circular2/
@@ -202,12 +202,12 @@ describe('Circular Dependency Detection Tests', () => {
                   ['$.cyclicDep', 'math:times10'], // Depends on cyclicDep
                   ['@', 'math:add1'],
                   ['@', 'math:sequence'],
-                  ['@', 'math:reduce', {service: ['@', 'math:sum']}]
+                  ['math:reduce', {on: '@', service: ['math:sum', {on: '@'}]}]
                 ]
               }]
             ],
             // Creates the cycle
-            cyclicDep: ['test', 'identity', {value: '$.chainWithCycle'}]
+            cyclicDep: ['test:identity', {value: '$.chainWithCycle'}]
           }
         }),
         /Circular dependency detected at compile time: chainWithCycle, cyclicDep/

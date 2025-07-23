@@ -37,8 +37,7 @@ describe('Settings Override Tests', () => {
       },
       queries: {
         result: [
-          'util',
-          'print',
+          'util:print',
           {
             on: '$.given',
             color: 'blue',
@@ -90,8 +89,7 @@ describe('Settings Override Tests', () => {
       },
       queries: {
         result: [
-          'util',
-          'print',
+          'util:print',
           {
             on: '$.given',
             ts: false,
@@ -131,8 +129,7 @@ describe('Settings Override Tests', () => {
       },
       queries: {
         result: [
-          'util',
-          'print',
+          'util:print',
           {
             on: '$.given',
             ts: false,
@@ -163,8 +160,7 @@ describe('Settings Override Tests', () => {
       },
       queries: {
         result: [
-          'util',
-          'print',
+          'util:print',
           {
             on: '$.given',
             ts: false,

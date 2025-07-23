@@ -24,8 +24,7 @@ describe('Retry Tests', () => {
         services,
         queries: {
           result: [
-            'flaky',
-            'process',
+            'flaky:process',
             {
               input: '$.given.value',
               retry: 3 // Will try up to 4 times total (1 initial + 3 retries)
@@ -57,8 +56,7 @@ describe('Retry Tests', () => {
           services,
           queries: {
             result: [
-              'broken',
-              'process',
+              'broken:process',
               {
                 input: '$.given.value',
                 retry: 2 // Will try 3 times total
@@ -91,8 +89,7 @@ describe('Retry Tests', () => {
         services,
         queries: {
           result: [
-            'stable',
-            'process',
+            'stable:process',
             {
               input: '$.given.value'
               // No retry specified
@@ -129,8 +126,7 @@ describe('Retry Tests', () => {
         services,
         queries: {
           result: [
-            'aware',
-            'check',
+            'aware:check',
             {
               input: '$.given.value',
               retry: 3,
@@ -167,15 +163,18 @@ describe('Retry Tests', () => {
         }
       }
 
+      // Add argOrder metadata for method syntax
+      services.chain.step1._argtypes = {on: {argOrder: 0}}
+      services.chain.step2._argtypes = {on: {argOrder: 0}}
+
       const result = await query({
         given: {value: 'test'},
         services,
         queries: {
           result: [
-            ['chain', 'step1', {input: '$.given.value'}],
+            ['chain:step1', {input: '$.given.value'}],
             [
-              'chain',
-              'step2',
+              'chain:step2',
               {
                 input: '$.given.value',
                 previous: '@',
@@ -208,6 +207,9 @@ describe('Retry Tests', () => {
           }
         }
       }
+
+      // Add argOrder metadata for method syntax
+      services.processor.transform._argtypes = {on: {argOrder: 0}}
 
       const result = await query({
         given: {

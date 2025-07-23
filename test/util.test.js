@@ -136,8 +136,7 @@ describe('Util Service Tests', () => {
         services: {util},
         queries: {
           summary: [
-            'util',
-            'map',
+            'util:map',
             {
               on: '$.given.people',
               service: {
@@ -164,11 +163,10 @@ describe('Util Service Tests', () => {
         services: mockServices,
         queries: {
           formatted: [
-            'util',
-            'map',
+            'util:map',
             {
               on: '$.given.people',
-              service: ['data', 'formatName', {person: '@'}]
+              service: ['data:formatName', {person: '@'}]
             }
           ]
         },
@@ -184,11 +182,10 @@ describe('Util Service Tests', () => {
         services: mockServices,
         queries: {
           engineers: [
-            'util',
-            'filter',
+            'util:filter',
             {
               on: '$.given.people',
-              service: ['data', 'isEngineer', {person: '@'}]
+              service: ['data:isEngineer', {person: '@'}]
             }
           ]
         },
@@ -207,11 +204,10 @@ describe('Util Service Tests', () => {
         services: mockServices,
         queries: {
           allCategories: [
-            'util',
-            'flatMap',
+            'util:flatMap',
             {
               on: '$.given.products',
-              service: ['data', 'getCategories', {product: '@'}]
+              service: ['data:getCategories', {product: '@'}]
             }
           ]
         },
@@ -239,10 +235,9 @@ describe('Util Service Tests', () => {
         },
         queries: {
           status: [
-            'util',
-            'when',
+            'util:when',
             {
-              test: ['age', 'isAdult', {person: '$.given.person'}],
+              test: ['age:isAdult', {person: '$.given.person'}],
               then: 'Adult',
               or: 'Minor'
             }
@@ -287,13 +282,11 @@ describe('Util Service Tests', () => {
         queries: {
           // Calculate total for each order
           orderTotals: [
-            'util',
-            'map',
+            'util:map',
             {
               on: '$.given.orders',
               service: [
-                'data',
-                'calculateTotal',
+                'data:calculateTotal',
                 {
                   items: '@.items',
                   products: testData.products
@@ -304,16 +297,15 @@ describe('Util Service Tests', () => {
 
           // Filter to orders over $30
           bigOrders: [
-            'util',
-            'filter',
+            'util:filter',
             {
               on: '$.orderTotals',
-              service: ['util', 'gt', {l: '@', r: 30}]
+              service: ['util:gt', {l: '@', r: 30}]
             }
           ],
 
           // Count big orders
-          bigOrderCount: ['util', 'length', {value: '$.bigOrders'}]
+          bigOrderCount: ['util:length', {value: '$.bigOrders'}]
         },
         select: 'bigOrderCount'
       })
@@ -346,8 +338,7 @@ describe('Util Service Tests', () => {
         services: {util},
         queries: {
           printed: [
-            'util',
-            'print',
+            'util:print',
             {
               on: 'Hello World',
               color: 'blue',
@@ -406,7 +397,7 @@ describe('Util Service Tests', () => {
           }
         },
         queries: {
-          printed: ['util', 'print', {on: '$.given.users', color: 'blue', ts: false}]
+          printed: ['util:print', {on: '$.given.users', color: 'blue', ts: false}]
         },
         select: 'printed'
       })
@@ -486,7 +477,7 @@ describe('Util Service Tests', () => {
         services: {util},
         settings: {debug: false},
         queries: {
-          doubled: ['util', 'when', {test: true, then: 84, or: 0}],
+          doubled: ['util:when', {test: true, then: 84, or: 0}],
           snapshot: ['$.doubled', 'util:snapshot', {capture: '$', out: testSnapshotPath}]
         }
       }
@@ -513,7 +504,7 @@ describe('Util Service Tests', () => {
         services: {util},
         settings: {debug: false},
         queries: {
-          step1: ['util', 'pick', {on: '$.given', fields: ['start']}],
+          step1: ['util:pick', {on: '$.given', fields: ['start']}],
           snapshot: [
             '$.step1',
             'util:snapshot',
@@ -543,9 +534,9 @@ describe('Util Service Tests', () => {
         settings: {debug: false},
         queries: {
           result: [
-            ['util', 'map', {on: '$.given.data', service: {doubled: '@'}}],
-            ['@', 'util:snapshot', {out: testSnapshotPath}],
-            ['@', 'util:map', {service: {tripled: '@.doubled'}}]
+            ['util:map', {on: '$.given.data', service: {doubled: '@'}}],
+            ['util:snapshot', {on: '@', out: testSnapshotPath}],
+            ['util:map', {on: '@', service: {tripled: '@.doubled'}}]
           ]
         }
       }

@@ -50,7 +50,7 @@ userService.createUser._validators = {
 const config = {
   services: { userService },
   queries: {
-    newUser: ['userService', 'createUser', {
+    newUser: ['userService:createUser', {
       userData: {
         name: 'John Doe',
         email: 'john@example.com',
@@ -152,7 +152,7 @@ Add validation constraints at the query level:
 const config = {
   services: { myService },
   queries: {
-    process: ['myService', 'processData', {
+    process: ['myService:processData', {
       input: 'hello world',
       options: { format: 'uppercase', limit: 100 },
       // Additional validation
@@ -277,11 +277,11 @@ const config = {
   services: { transformer },
   queries: {
     pipeline: [
-      ['transformer', 'step1', {
+      ['transformer:step1', {
         value: 10,
         precheck: { value: ['number', {min: 0, max: 100}] }
       }],
-      ['transformer', 'step2', {
+      ['transformer:step2', {
         value: '@',
         precheck: { value: ['number', {max: 200}] }
       }]

@@ -9,7 +9,7 @@ import _ from 'lodash'
 import lodashDeep from 'lodash-deep'
 _.mixin(lodashDeep)
 
-import {DEP_REGEX, METHOD_REGEX, RESERVE_ARGS} from './common.js'
+import {DEP_REGEX, SERVICE_REGEX, RESERVE_ARGS} from './common.js'
 import applyWrappers from './wrappers.js'
 
 // Detects if a descriptor is a chain (nested arrays)
@@ -19,29 +19,32 @@ const isChain = (descriptor) => {
     _.every(descriptor, d => Array.isArray(d))
 }
 
-// Detects if a descriptor uses method syntax
+// Detects if a descriptor uses method syntax: ['target', 'service:action', args]
 const hasMethodSyntax = (descriptor) => {
   return Array.isArray(descriptor) &&
          descriptor.length >= 2 &&
          typeof descriptor[1] === 'string' &&
-         METHOD_REGEX.test(descriptor[1])
+         SERVICE_REGEX.test(descriptor[1])
 }
 
-// Transforms method syntax to standard form
-const transformMethodSyntax = (descriptor) => {
-  if (!hasMethodSyntax(descriptor)) {
-    return descriptor
+// Transforms method syntax ['target', 'service:action', args] to standard service call ['service:action', {on: target, ...args}]
+const parseServiceDescriptor = (descriptor) => {
+  // check for method descriptor
+  if (hasMethodSyntax(descriptor)) {
+    const [arg0, serviceMethod, args = {}] = descriptor
+    const [__, serviceName, action] = serviceMethod.match(SERVICE_REGEX)
+    return [serviceName, action, args, arg0]
+
+  } else {
+    // assume normal service descriptor
+    const [serviceAction, args = {}] = descriptor
+    const match = serviceAction?.match(SERVICE_REGEX)
+    if (!match) {
+      throw new Error(`Invalid service descriptor. Expected ['service:action', {...}] format. Got: ${JSON.stringify(descriptor)}`)
+    }
+    const [, serviceName, action] = match
+    return [serviceName, action, args]
   }
-
-  const [target, serviceMethod, args = {}] = descriptor
-  const match = serviceMethod.match(METHOD_REGEX)
-  const [, serviceName, method] = match
-
-  // Transform to standard form: [service, method, { ...args, on: target }]
-  const serviceCall = [serviceName, method, {...args, on: target}]
-
-  //console.log('transformMethodSyntax transformed:', descriptor, 'to:', serviceCall)
-  return serviceCall
 }
 
 // Extracts dependencies from query arguments
@@ -101,7 +104,7 @@ const compileArgs = (queryName, serviceName, args, argtypes, config, settings) =
 
     // compile object to service template
     if (argtypes[key]?.type === 'service' && typeof value === 'object' && !Array.isArray(value)) {
-      const fn = compileServiceFunction(queryName, ['util', 'template', value], config)
+      const fn = compileServiceFunction(queryName, ['util:template', value], config)
       compiled[key] = fn.service
 
     // compile service descriptor
@@ -110,7 +113,7 @@ const compileArgs = (queryName, serviceName, args, argtypes, config, settings) =
 
     // reject raw JavaScript functions
     } else if (argtypes[key]?.type === 'service' && typeof value === 'function') {
-      throw new Error(`Raw JavaScript functions are not supported in MicroQL. Use service descriptors instead of raw functions for argument '${key}' in ${serviceName}:${queryName}. Example: ['serviceName', 'methodName', {arg: '@'}]`)
+      throw new Error(`Raw JavaScript functions are not supported in MicroQL. Use service descriptors instead of raw functions for argument '${key}' in ${serviceName}:${queryName}. Example: ['serviceName:methodName', {arg: '@'}]`)
 
     } else if (RESERVE_ARGS.includes(key)) {
       // exclude reserve args
@@ -130,9 +133,22 @@ const compileArgs = (queryName, serviceName, args, argtypes, config, settings) =
   return compiled
 }
 
-// turn a descriptor like ['@', 'util:print', {color: 'green'}] into [a compiled function, recursive dependencies]
+// check to see if the service has an argOrder: 0 defined
+// and merge arg0 if we have it
+function mergeArgs(args, arg0, argtypes = {}, serviceName, action) {
+  if (!arg0) {
+    return
+  }
+  const [argOrder0] = Object.entries(argtypes).find(([, typeinfo]) => typeinfo.argOrder === 0) || []
+  if (!argOrder0)
+    throw new Error(`Method syntax was used for ${serviceName}:${action} but no {argOrder: 0} was defined.`)
+  args[argOrder0] = arg0
+}
+
+// Compiles a service descriptor like ['util:print', {color: 'green'}] or ['@', 'util:print', {color: 'green'}]
+// into [a compiled function, recursive dependencies]
 function compileServiceFunction(queryName, descriptor, config) {
-  const [serviceName, action, args] = transformMethodSyntax(descriptor)
+  const [serviceName, action, args, arg0] = parseServiceDescriptor(descriptor)
 
   const service = config.services[serviceName]
   // Validate service exists and has the required method
@@ -149,6 +165,8 @@ function compileServiceFunction(queryName, descriptor, config) {
     throw new Error(`Service '${serviceName}' must be an object with methods in the form: async (args) => result`)
   }
   const argtypes = serviceCall._argtypes || {}
+  mergeArgs(args, arg0, argtypes, serviceName, action)
+
   const settings = compileSettings(queryName, args, argtypes, config)
   const compiledArgs = compileArgs(queryName, serviceName, args, argtypes, config, settings)
   const validators = compileValidators(args, serviceCall._validators || {})

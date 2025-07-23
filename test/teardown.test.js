@@ -20,7 +20,7 @@ describe('TearDown Tests', () => {
     await query({
       services: {mockService},
       queries: {
-        test: ['mockService', 'testAction', {}]
+        test: ['mockService:testAction', {}]
       }
     })
 
@@ -39,7 +39,7 @@ describe('TearDown Tests', () => {
     const result = await query({
       services: {serviceWithoutTearDown},
       queries: {
-        test: ['serviceWithoutTearDown', 'testAction', {}]
+        test: ['serviceWithoutTearDown:testAction', {}]
       }
     })
 
@@ -70,8 +70,8 @@ describe('TearDown Tests', () => {
     await query({
       services: {service1, service2},
       queries: {
-        test1: ['service1', 'action', {}],
-        test2: ['service2', 'action', {}]
+        test1: ['service1:action', {}],
+        test2: ['service2:action', {}]
       }
     })
 
@@ -107,7 +107,7 @@ describe('TearDown Tests', () => {
       await query({
         services: {serviceWithError},
         queries: {
-          test: ['serviceWithError', 'failingAction', {}]
+          test: ['serviceWithError:failingAction', {}]
         }
       })
       assert.fail('Query should have thrown an error')
@@ -144,7 +144,7 @@ describe('TearDown Tests', () => {
     await query({
       services: {usedService, unusedService},
       queries: {
-        test: ['usedService', 'action', {}]
+        test: ['usedService:action', {}]
       }
     })
 
@@ -171,7 +171,7 @@ describe('TearDown Tests', () => {
     const result = await query({
       services: {serviceWithBadTearDown},
       queries: {
-        test: ['serviceWithBadTearDown', 'action', {}]
+        test: ['serviceWithBadTearDown:action', {}]
       }
     })
 

@@ -28,7 +28,7 @@ describe('Service This Binding Tests', () => {
       given: {value: 'test-input'},
       services: {testService},
       queries: {
-        result: ['testService', 'testMethod', {input: '$.given.value'}]
+        result: ['testService:testMethod', {input: '$.given.value'}]
       },
       select: 'result'
     })
@@ -58,9 +58,9 @@ describe('Service This Binding Tests', () => {
     const result = await query({
       services: {counterService},
       queries: {
-        first: ['counterService', 'increment', {by: 5}],
-        second: ['counterService', 'increment', {by: 3}],
-        final: ['counterService', 'getCount', {}]
+        first: ['counterService:increment', {by: 5}],
+        second: ['counterService:increment', {by: 3}],
+        final: ['counterService:getCount', {}]
       },
       select: ['first', 'second', 'final']
     })

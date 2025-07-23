@@ -9,18 +9,17 @@ describe('Bare $ Resolution Tests', () => {
       given: {value: 'test'},
       services: {util},
       queries: {
-        step1: ['util', 'pick', {on: '$.given', fields: ['value']}],
+        step1: ['util:pick', {on: '$.given', fields: ['value']}],
         step2: [
-          'util',
-          'when',
+          'util:when',
           {test: true, then: 'completed', or: 'failed'}
         ],
         // Create dependency on step1 and step2, then capture state
         // $ semantic: "can see present state of all queries" but "depends on none"
         // Since captureState depends on step1 and step2, they will be completed when $ is resolved
         captureState: [
-          ['util', 'template', {step1: '$.step1', step2: '$.step2'}],
-          ['util', 'template', {allQueries: '$', context: '@'}]
+          ['util:template', {step1: '$.step1', step2: '$.step2'}],
+          ['util:template', {allQueries: '$', context: '@'}]
         ]
       },
       select: 'captureState'
@@ -43,8 +42,8 @@ describe('Bare $ Resolution Tests', () => {
     const result = await query({
       services: {util},
       queries: {
-        immediate: ['util', 'template', '$'], // Should execute immediately, capture empty state
-        delayed: ['util', 'when', {test: true, then: 'done', or: 'failed'}]
+        immediate: ['util:template', '$'], // Should execute immediately, capture empty state
+        delayed: ['util:when', {test: true, then: 'done', or: 'failed'}]
       },
       select: ['immediate', 'delayed']
     })

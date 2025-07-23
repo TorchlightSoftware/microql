@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import {DEP_REGEX, METHOD_REGEX, AT_REGEX, BARE_DOLLAR_REGEX} from '../common.js'
+import {DEP_REGEX, SERVICE_REGEX, AT_REGEX, BARE_DOLLAR_REGEX} from '../common.js'
 
 describe('Common Regex Tests', () => {
   describe('DEP_REGEX - matches dollar dependency patterns', () => {
@@ -48,8 +48,8 @@ describe('Common Regex Tests', () => {
     })
   })
 
-  describe('METHOD_REGEX - matches method syntax', () => {
-    it('should match valid method syntax patterns', () => {
+  describe('SERVICE_REGEX - matches service call format', () => {
+    it('should match valid service call patterns', () => {
       // Valid matches
       const validCases = [
         ['service:method', 'service:method', 'service', 'method'],
@@ -61,7 +61,7 @@ describe('Common Regex Tests', () => {
       ]
 
       validCases.forEach(([input, expectedMatch, expectedService, expectedMethod]) => {
-        const match = input.match(METHOD_REGEX)
+        const match = input.match(SERVICE_REGEX)
         assert(match, `Should match: ${input}`)
         assert.equal(match[0], expectedMatch)
         assert.equal(match[1], expectedService)
@@ -86,7 +86,7 @@ describe('Common Regex Tests', () => {
       ]
 
       invalidCases.forEach(input => {
-        const match = input.match(METHOD_REGEX)
+        const match = input.match(SERVICE_REGEX)
         assert.equal(match, null, `Should not match: ${input}`)
       })
     })
@@ -155,23 +155,23 @@ describe('Common Regex Tests', () => {
     it('should handle edge cases correctly', () => {
       // Testing empty strings
       assert.equal(''.match(DEP_REGEX), null)
-      assert.equal(''.match(METHOD_REGEX), null)
+      assert.equal(''.match(SERVICE_REGEX), null)
       assert.equal(''.match(AT_REGEX), null)
       assert.equal(''.match(BARE_DOLLAR_REGEX), null)
 
       // Testing whitespace handling
       assert.equal(' $.foo'.match(DEP_REGEX)?.[0], '$.foo')
       assert.equal('$.foo '.match(DEP_REGEX)?.[0], '$.foo')
-      assert.equal(' service:method'.match(METHOD_REGEX), null) // METHOD_REGEX uses ^ and $ anchors
-      assert.equal('service:method '.match(METHOD_REGEX), null) // METHOD_REGEX uses ^ and $ anchors
+      assert.equal(' service:method'.match(SERVICE_REGEX), null) // SERVICE_REGEX uses ^ and $ anchors
+      assert.equal('service:method '.match(SERVICE_REGEX), null) // SERVICE_REGEX uses ^ and $ anchors
       assert.equal(' @.prop'.match(AT_REGEX), null) // AT_REGEX uses ^ anchor
       assert.equal('@.prop '.match(AT_REGEX)?.[0], '@.prop ') // AT_REGEX captures trailing space in group 4
 
       // Testing partial matches within larger strings
       assert.equal('prefix$.foo'.match(DEP_REGEX)?.[0], '$.foo')
       assert.equal('$.foo suffix'.match(DEP_REGEX)?.[0], '$.foo')
-      assert.equal('prefixservice:method'.match(METHOD_REGEX)?.[0], 'prefixservice:method') // Valid because 'prefixservice' is a word
-      assert.equal('service:methodsuffix'.match(METHOD_REGEX)?.[0], 'service:methodsuffix') // Valid because 'methodsuffix' is a word
+      assert.equal('prefixservice:method'.match(SERVICE_REGEX)?.[0], 'prefixservice:method') // Valid because 'prefixservice' is a word
+      assert.equal('service:methodsuffix'.match(SERVICE_REGEX)?.[0], 'service:methodsuffix') // Valid because 'methodsuffix' is a word
       assert.equal('prefix@.prop'.match(AT_REGEX), null)
       assert.equal('@.prop suffix'.match(AT_REGEX)?.[0], '@.prop suffix') // AT_REGEX doesn't use $ anchor
     })
@@ -183,9 +183,9 @@ describe('Common Regex Tests', () => {
       assert.equal('$.émoji'.match(DEP_REGEX), null)
       assert.equal('$.🚀'.match(DEP_REGEX), null)
 
-      // METHOD_REGEX only allows word characters
-      assert.equal('sérviçe:method'.match(METHOD_REGEX), null)
-      assert.equal('service:méthød'.match(METHOD_REGEX), null)
+      // SERVICE_REGEX only allows word characters
+      assert.equal('sérviçe:method'.match(SERVICE_REGEX), null)
+      assert.equal('service:méthød'.match(SERVICE_REGEX), null)
 
       // AT_REGEX captures anything after @. (with new capture group structure)
       assert.equal('@.émoji'.match(AT_REGEX)?.[4], 'émoji')

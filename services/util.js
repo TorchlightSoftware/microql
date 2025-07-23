@@ -304,14 +304,17 @@ const util = {
 
 // Argument type metadata for MicroQL service compilation
 util.map._argtypes = {
+  on: {argOrder: 0},
   service: {type: 'service'}
 }
 
 util.filter._argtypes = {
+  on: {argOrder: 0},
   service: {type: 'service'}
 }
 
 util.flatMap._argtypes = {
+  on: {argOrder: 0},
   service: {type: 'service'}
 }
 
@@ -320,15 +323,17 @@ util.when._argtypes = {
 }
 
 util.print._argtypes = {
+  on: {argOrder: 0},
   settings: {type: 'settings'}
 }
 
 util.snapshot._argtypes = {
+  on: {argOrder: 0}
   // capture argument will be resolved by MicroQL context ($ references)
   // out argument is a simple string path
 }
 
-util.template._argtypes = {}
+util.template._argtypes = {on: {argOrder: 0}}
 
 export default util
 export {COLOR_NAMES}

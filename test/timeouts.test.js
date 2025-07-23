@@ -19,7 +19,7 @@ describe('Timeout Tests', () => {
           fast: createDelayService(50, 'fast')
         },
         queries: {
-          result: ['fast', 'delay', {input: '$.given.value'}]
+          result: ['fast:delay', {input: '$.given.value'}]
         }
       })
 
@@ -37,7 +37,7 @@ describe('Timeout Tests', () => {
             timeout: 100
           },
           queries: {
-            result: ['slow', 'delay', {input: '$.given.value'}]
+            result: ['slow:delay', {input: '$.given.value'}]
           }
         }),
         /result - slow:delay.*Timed out after 100ms/
@@ -54,7 +54,7 @@ describe('Timeout Tests', () => {
           timeout: 100
         },
         queries: {
-          result: ['fast', 'delay', {input: '$.given.value'}]
+          result: ['fast:delay', {input: '$.given.value'}]
         }
       })
 
@@ -73,7 +73,7 @@ describe('Timeout Tests', () => {
           timeout: 100
         },
         queries: {
-          result: ['slow', 'delay', {input: '$.given.value', timeout: 200}]
+          result: ['slow:delay', {input: '$.given.value', timeout: 200}]
         }
       })
 
@@ -91,7 +91,7 @@ describe('Timeout Tests', () => {
             timeout: 1000
           },
           queries: {
-            result: ['slow', 'delay', {input: '$.given.value', timeout: 100}]
+            result: ['slow:delay', {input: '$.given.value', timeout: 100}]
           }
         }),
         /result - slow:delay.*Timed out after 100ms/
@@ -112,9 +112,9 @@ describe('Timeout Tests', () => {
           timeout: 100
         },
         queries: {
-          fastResult: ['fast', 'delay', {input: '$.given.value'}],
-          mediumResult: ['medium', 'delay', {input: '$.given.value'}],
-          slowResult: ['slow', 'delay', {input: '$.given.value', timeout: 200}]
+          fastResult: ['fast:delay', {input: '$.given.value'}],
+          mediumResult: ['medium:delay', {input: '$.given.value'}],
+          slowResult: ['slow:delay', {input: '$.given.value', timeout: 200}]
         }
       })
 
@@ -135,8 +135,8 @@ describe('Timeout Tests', () => {
         },
         queries: {
           chained: [
-            ['step1', 'delay', {input: '$.given.value'}],
-            ['step2', 'delay', {input: '@'}]
+            ['step1:delay', {input: '$.given.value'}],
+            ['step2:delay', {input: '@'}]
           ]
         }
       })
@@ -157,8 +157,8 @@ describe('Timeout Tests', () => {
           },
           queries: {
             chained: [
-              ['step1', 'delay', {input: '$.given.value'}],
-              ['step2', 'delay', {input: '@'}]
+              ['step1:delay', {input: '$.given.value'}],
+              ['step2:delay', {input: '@'}]
             ]
           }
         }),

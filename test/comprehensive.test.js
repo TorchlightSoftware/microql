@@ -20,8 +20,8 @@ describe('MicroQL Comprehensive Tests', () => {
           }
         },
         queries: {
-          profile: ['users', 'getProfile', {id: '$.given.userId'}],
-          auditLog: ['audit', 'log', {user: '$.profile'}]
+          profile: ['users:getProfile', {id: '$.given.userId'}],
+          auditLog: ['audit:log', {user: '$.profile'}]
         }
       })
 
@@ -50,9 +50,9 @@ describe('MicroQL Comprehensive Tests', () => {
           }
         },
         queries: {
-          total: ['math', 'sum', {values: '$.given.numbers'}],
-          avg: ['math', 'average', {values: '$.given.numbers'}],
-          maximum: ['math', 'max', {values: '$.given.numbers'}]
+          total: ['math:sum', {values: '$.given.numbers'}],
+          avg: ['math:average', {values: '$.given.numbers'}],
+          maximum: ['math:max', {values: '$.given.numbers'}]
         }
       })
 
@@ -62,21 +62,28 @@ describe('MicroQL Comprehensive Tests', () => {
     })
 
     it('should handle method syntax with data transformation', async () => {
+      const services = {
+        transform: {
+          async filter({on, fn}) {
+            return on.filter((item) => item.includes(fn))
+          },
+          async upper({on}) {
+            return on.map((item) => item.toUpperCase())
+          },
+          async count({on}) {
+            return on.length
+          }
+        }
+      }
+
+      // Add argOrder metadata for method syntax
+      services.transform.filter._argtypes = {on: {argOrder: 0}}
+      services.transform.upper._argtypes = {on: {argOrder: 0}}
+      services.transform.count._argtypes = {on: {argOrder: 0}}
+
       const result = await query({
         given: {items: ['apple', 'banana', 'cherry']},
-        services: {
-          transform: {
-            async filter({on, fn}) {
-              return on.filter((item) => item.includes(fn))
-            },
-            async upper({on}) {
-              return on.map((item) => item.toUpperCase())
-            },
-            async count({on}) {
-              return on.length
-            }
-          }
-        },
+        services,
         queries: {
           filtered: ['$.given.items', 'transform:filter', {fn: 'a'}],
           uppercased: ['$.filtered', 'transform:upper', {}],
@@ -104,8 +111,8 @@ describe('MicroQL Comprehensive Tests', () => {
         },
         queries: {
           result: [
-            ['text', 'extractNumbers', {input: '$.given.text'}],
-            ['text', 'sum', {numbers: '@'}]
+            ['text:extractNumbers', {input: '$.given.text'}],
+            ['text:sum', {numbers: '@'}]
           ]
         }
       })
@@ -133,10 +140,9 @@ describe('MicroQL Comprehensive Tests', () => {
           }
         },
         queries: {
-          parsed: ['parser', 'parseKeyValue', {data: '$.given.userData'}],
+          parsed: ['parser:parseKeyValue', {data: '$.given.userData'}],
           greeting: [
-            'parser',
-            'formatGreeting',
+            'parser:formatGreeting',
             {
               name: '$.parsed.name',
               city: '$.parsed.city'
@@ -166,9 +172,9 @@ describe('MicroQL Comprehensive Tests', () => {
           }
         },
         queries: {
-          query1: ['async', 'delay', {ms: '$.given.delay', value: 'A'}],
-          query2: ['async', 'delay', {ms: '$.given.delay', value: 'B'}],
-          query3: ['async', 'delay', {ms: '$.given.delay', value: 'C'}]
+          query1: ['async:delay', {ms: '$.given.delay', value: 'A'}],
+          query2: ['async:delay', {ms: '$.given.delay', value: 'B'}],
+          query3: ['async:delay', {ms: '$.given.delay', value: 'C'}]
         }
       })
 
@@ -193,9 +199,9 @@ describe('MicroQL Comprehensive Tests', () => {
           }
         },
         queries: {
-          sum: ['calc', 'add', {a: '$.given.x', b: '$.given.y'}],
-          product: ['calc', 'multiply', {a: '$.given.x', b: '$.given.y'}],
-          unused: ['calc', 'add', {a: 1, b: 2}]
+          sum: ['calc:add', {a: '$.given.x', b: '$.given.y'}],
+          product: ['calc:multiply', {a: '$.given.x', b: '$.given.y'}],
+          unused: ['calc:add', {a: 1, b: 2}]
         },
         select: ['sum', 'product']
       })
@@ -211,7 +217,7 @@ describe('MicroQL Comprehensive Tests', () => {
           given: {x: 1},
           services: {},
           queries: {
-            result: ['nonexistent', 'action', {value: '$.given.x'}]
+            result: ['nonexistent:action', {value: '$.given.x'}]
           }
         }),
         /Service 'nonexistent' not found/
@@ -230,7 +236,7 @@ describe('MicroQL Comprehensive Tests', () => {
             }
           },
           queries: {
-            result: ['test', 'invalidMethod', {value: '$.given.x'}]
+            result: ['test:invalidMethod', {value: '$.given.x'}]
           }
         }),
         /Method 'invalidMethod' not found on service 'test'/
@@ -249,7 +255,7 @@ describe('MicroQL Comprehensive Tests', () => {
             }
           },
           queries: {
-            result: ['test', 'increment', {value: '$.nonexistent'}]
+            result: ['test:increment', {value: '$.nonexistent'}]
           }
         }),
         /Circular dependency detected at compile time: result/
@@ -264,7 +270,7 @@ describe('MicroQL Comprehensive Tests', () => {
             invalid: 'not a function or object'
           },
           queries: {
-            result: ['invalid', 'action', {value: '$.given.data'}]
+            result: ['invalid:action', {value: '$.given.data'}]
           }
         }),
         /Service 'invalid' must be an object with methods in the form: async \(args\) => result/
@@ -289,7 +295,7 @@ describe('MicroQL Comprehensive Tests', () => {
         queries: Object.fromEntries(
           Array.from({length: 50}, (_, i) => [
             `query${i}`,
-            ['worker', 'process', {id: i}]
+            ['worker:process', {id: i}]
           ])
         )
       })
@@ -321,15 +327,13 @@ describe('MicroQL Comprehensive Tests', () => {
           }
         },
         queries: {
-          numberSum: ['arrayProcessor', 'sum', {numbers: [1, 2, 3, 4, 5]}],
+          numberSum: ['arrayProcessor:sum', {numbers: [1, 2, 3, 4, 5]}],
           textJoin: [
-            'arrayProcessor',
-            'concatenate',
+            'arrayProcessor:concatenate',
             {strings: ['hello', 'world', 'test']}
           ],
           itemCount: [
-            'arrayProcessor',
-            'count',
+            'arrayProcessor:count',
             {items: ['a', 'b', 'c', 'd']}
           ]
         }
@@ -352,8 +356,7 @@ describe('MicroQL Comprehensive Tests', () => {
         },
         queries: {
           result: [
-            'calculator',
-            'multiplyAndSum',
+            'calculator:multiplyAndSum',
             {
               numbers: [10, 20, 30],
               factor: '$.given.multiplier'
@@ -381,8 +384,7 @@ describe('MicroQL Comprehensive Tests', () => {
         },
         queries: {
           processed: [
-            'dataProcessor',
-            'processNestedData',
+            'dataProcessor:processNestedData',
             {
               config: {
                 items: [
@@ -429,16 +431,16 @@ describe('MicroQL Comprehensive Tests', () => {
         },
         queries: {
           merged: [
-            '$.given.baseNumbers',
             'arrayOps:merge',
             {
+              on: '$.given.baseNumbers',
               additional: [4, 5, 6]
             }
           ],
           transformed: [
-            '$.merged',
             'arrayOps:transform',
             {
+              on: '$.merged',
               operations: ['double', 'add10']
             }
           ]

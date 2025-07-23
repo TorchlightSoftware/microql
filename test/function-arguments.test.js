@@ -11,7 +11,7 @@ describe('Function Arguments Tests', () => {
           given: {items: ['apple', 'banana', 'cherry']},
           services: {util},
           queries: {
-            filtered: ['util', 'filter', {
+            filtered: ['util:filter', {
               on: '$.given.items',
               service: item => item.includes('a') // Raw function - should fail
             }]
@@ -32,7 +32,7 @@ describe('Function Arguments Tests', () => {
           given: {items: [1, 2, 3]},
           services: {util},
           queries: {
-            mapped: ['util', 'map', {
+            mapped: ['util:map', {
               on: '$.given.items',
               service: x => x * 2 // Raw function - should fail
             }]
@@ -85,9 +85,9 @@ describe('Function Arguments Tests', () => {
         given: {items: ['apple', 'banana', 'cherry']},
         services: testServices,
         queries: {
-          filtered: ['util', 'filter', {
+          filtered: ['util:filter', {
             on: '$.given.items',
-            service: ['string', 'includesLetter', {text: '@', letter: 'a'}]
+            service: ['string:includesLetter', {text: '@', letter: 'a'}]
           }]
         }
       })
@@ -100,9 +100,9 @@ describe('Function Arguments Tests', () => {
         given: {items: ['apple', 'banana']},
         services: testServices,
         queries: {
-          mapped: ['util', 'map', {
+          mapped: ['util:map', {
             on: '$.given.items',
-            service: ['string', 'toUpper', {text: '@'}]
+            service: ['string:toUpper', {text: '@'}]
           }]
         }
       })
@@ -115,7 +115,7 @@ describe('Function Arguments Tests', () => {
         given: {items: ['apple', 'banana']},
         services: testServices,
         queries: {
-          mapped: ['util', 'map', {
+          mapped: ['util:map', {
             on: '$.given.items',
             service: {
               original: '@',

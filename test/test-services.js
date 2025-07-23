@@ -14,7 +14,14 @@ export const math = {
   subtract: async ({a, b}) => a - b,
   add: async ({a, b}) => a + b
 }
-math.reduce._argtypes = {service: {type: 'service'}}
+// Add argOrder metadata for method syntax support
+math.add1._argtypes = {on: {argOrder: 0}}
+math.times10._argtypes = {on: {argOrder: 0}}
+math.reduce._argtypes = {on: {argOrder: 0}, service: {type: 'service'}}
+math.sequence._argtypes = {on: {argOrder: 0}}
+math.sum._argtypes = {on: {argOrder: 0}}
+math.add._argtypes = {on: {argOrder: 0}}
+math.multiply._argtypes = {on: {argOrder: 0}}
 
 // Simple test service for basic operations
 export const test = {
@@ -23,6 +30,7 @@ export const test = {
   async double({value}) { return value * 2 },
   async combine({a, b}) { return `${a}-${b}` }
 }
+test.identity._argtypes = {value: {argOrder: 0}}
 
 // Data manipulation service
 export const data = {
@@ -37,8 +45,8 @@ export const data = {
   async merge({arrays}) {
     return arrays.flat()
   },
-  async filter({items, service}) {
-    return items.filter(service)
+  async filter({on, service}) {
+    return on.filter(service)
   }
 }
-data.filter._argtypes = {service: {type: 'service'}}
+data.filter._argtypes = {on: {argOrder: 0}, service: {type: 'service'}}
