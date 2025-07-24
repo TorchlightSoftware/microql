@@ -110,6 +110,16 @@ describe('Validation System Tests', () => {
       assert.strictEqual(futureDateSchema.safeParse(futureDate).success, true)
       assert.strictEqual(futureDateSchema.safeParse(pastDate).success, false)
     })
+
+    it('should parse tuple types with natural syntax', () => {
+      const tupleSchema = parseSchema(['tuple', ['string'], ['number']])
+
+      assert.strictEqual(tupleSchema.safeParse(['hello', 42]).success, true)
+      assert.strictEqual(tupleSchema.safeParse(['hello', 'world']).success, false) // second element should be number
+      assert.strictEqual(tupleSchema.safeParse([42, 'hello']).success, false) // first element should be string
+      assert.strictEqual(tupleSchema.safeParse(['hello']).success, false) // missing second element
+      assert.strictEqual(tupleSchema.safeParse(['hello', 42, 'extra']).success, false) // too many elements
+    })
   })
 
   describe('Validation Function', () => {
@@ -127,7 +137,7 @@ describe('Validation System Tests', () => {
 
       assert.throws(() => {
         validate(schema, invalidEmail, 'precheck')
-      }, /Precheck validation failed/)
+      }, /precheck validation failed/)
     })
 
     it('should validate complex object schema', () => {
@@ -155,7 +165,7 @@ describe('Validation System Tests', () => {
       // Should throw
       assert.throws(() => {
         validate(schema, invalidUser, 'precheck')
-      }, /Precheck validation failed/)
+      }, /precheck validation failed/)
     })
   })
 
@@ -214,7 +224,7 @@ describe('Validation System Tests', () => {
       // Should fail with negative value
       await assert.rejects(
         query(config),
-        /Precheck validation failed/
+        /precheck validation failed/
       )
     })
 
@@ -311,7 +321,7 @@ describe('Validation System Tests', () => {
 
       await assert.rejects(
         query(config),
-        /Precheck validation failed/
+        /precheck validation failed/
       )
     })
 
@@ -476,7 +486,7 @@ describe('Validation System Tests', () => {
 
       await assert.rejects(
         query(config),
-        /Precheck validation failed/
+        /precheck validation failed/
       )
     })
 
@@ -571,7 +581,7 @@ describe('Validation System Tests', () => {
 
       await assert.rejects(
         query(invalidConfig),
-        /Precheck validation failed/
+        /precheck validation failed/
       )
     })
 
@@ -611,7 +621,7 @@ describe('Validation System Tests', () => {
 
       await assert.rejects(
         query(invalidConfig),
-        /Precheck validation failed/
+        /precheck validation failed/
       )
     })
 
@@ -661,7 +671,7 @@ describe('Validation System Tests', () => {
 
       await assert.rejects(
         query(invalidConfig),
-        /Precheck validation failed/
+        /precheck validation failed/
       )
     })
   })

@@ -169,17 +169,13 @@ const withValidation = (fn) => {
     const {validators} = this
 
     // Run prechecks
-    if (validators.precheck && validators.precheck.length > 0) {
-      validators.precheck.map(v => validate(v, args, 'precheck'))
-    }
+    validators.precheck.map(v => validate(v, args, 'precheck'))
 
     // Execute the actual service function
     const result = await fn.call(this, args)
 
     // Run postchecks
-    if (validators.postcheck && validators.postcheck.length > 0) {
-      validators.postcheck.map(v => validate(v, result, 'postcheck'))
-    }
+    validators.postcheck.map(v => validate(v, result, 'postcheck'))
 
     return result
   }

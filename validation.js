@@ -1,17 +1,20 @@
 /**
- * @fileoverview Validation System for MicroQL
+ * @fileoverview Simplified Validation System for MicroQL
  *
- * Provides Zod-based validation for precheck/postcheck contract-driven design.
- * Transforms JSON schema descriptors into Zod schemas and executes validation.
+ * Clean, dynamic approach that follows MicroQL patterns:
+ * - Try direct Zod access first
+ * - Strict error messages for unknown types
+ * - Let Zod handle complexity
+ * - Functional composition over loops
  */
 
 import {z} from 'zod'
 
+const PRIMITIVE_TYPES = ['string', 'number', 'boolean', 'date', 'any', 'unknown', 'void', 'undefined', 'null']
+const WRAPPER_TYPES = ['array', 'object', 'union', 'enum', 'nullable', 'optional', 'tuple', 'function']
+
 /**
  * Main validation function called by withValidation wrapper
- * @param {*} schemas - Array of schema descriptors to validate against
- * @param {*} value - Value to validate (args for precheck, result for postcheck)
- * @param {string} order - 'precheck' or 'postcheck' for error reporting
  */
 export function validate(schema, value, order = 'validation') {
   if (!schema) return
@@ -27,241 +30,141 @@ export function validate(schema, value, order = 'validation') {
       return `- ${path}: ${err.message}`
     })
 
-    throw new Error(`${capitalizeFirst(order)} validation failed:\n${errorMessages.join('\n')}`)
+    throw new Error(`${order} validation failed:\n${errorMessages.join('\n')}`)
   }
 }
 
 /**
- * Parse a schema descriptor into a Zod schema
- * @param {*} descriptor - Schema descriptor to parse
- * @returns {z.ZodSchema} Compiled Zod schema
+ * Parse schema descriptor into Zod schema
  */
 export function parseSchema(descriptor) {
-  // Handle array syntax: ['string', 'email', 'optional']
-  if (Array.isArray(descriptor)) {
-    return parseArraySchema(descriptor)
+  // If already a Zod schema, return it immediately
+  if (descriptor instanceof z.ZodType) {
+    return descriptor
   }
 
-  // Handle object syntax: {name: ['string'], age: ['number']}
-  if (typeof descriptor === 'object' && descriptor !== null) {
-    return parseObjectSchema(descriptor)
-  }
-
-  // Handle primitive type strings
+  // String: direct type lookup
   if (typeof descriptor === 'string') {
-    return parsePrimitiveType(descriptor)
+    if (!z[descriptor] || typeof z[descriptor] !== 'function') {
+      throw new Error(`Unknown primitive type: '${descriptor}'. Valid types: ${PRIMITIVE_TYPES.join(', ')}`)
+    }
+    return z[descriptor]()
   }
 
-  throw new Error(`Invalid schema descriptor: ${JSON.stringify(descriptor)}. Schema descriptors must be arrays like ['string'], objects like {name: ['string']}, or primitive type strings like 'string'. See validation documentation for examples.`)
-}
+  // Array: [type, ...args]
+  if (Array.isArray(descriptor)) {
+    const [type, ...args] = descriptor
 
-/**
- * Parse array-based schema: ['string', 'email', 'optional']
- */
-function parseArraySchema(descriptor) {
-  if (descriptor.length === 0) {
-    throw new Error('Empty schema array')
-  }
-
-  const [baseType, ...modifiers] = descriptor
-
-  // Handle wrapper functions that take inner schemas
-  if (isWrapperFunction(baseType)) {
-    return parseWrapperFunction(baseType, modifiers)
-  }
-
-  // Handle regular type with chainable modifiers
-  let schema = parsePrimitiveType(baseType)
-
-  // Apply modifiers in order
-  for (const modifier of modifiers) {
-    schema = applyModifier(schema, modifier)
-  }
-
-  return schema
-}
-
-/**
- * Parse object-based schema: {name: ['string'], age: ['number']}
- */
-function parseObjectSchema(descriptor) {
-  const shape = {}
-
-  for (const [key, subDescriptor] of Object.entries(descriptor)) {
-    shape[key] = parseSchema(subDescriptor)
-  }
-
-  return z.object(shape)
-}
-
-/**
- * Parse primitive types into base Zod schemas
- */
-function parsePrimitiveType(type) {
-  switch (type) {
-    case 'string':
-      return z.string()
-    case 'number':
-      return z.number()
-    case 'boolean':
-      return z.boolean()
-    case 'date':
-      return z.date()
-    case 'any':
-      return z.any()
-    case 'unknown':
-      return z.unknown()
-    case 'void':
-      return z.void()
-    case 'undefined':
-      return z.undefined()
-    case 'null':
-      return z.null()
-    default:
-      throw new Error(`Unknown primitive type: '${type}'. Valid primitive types are: string, number, boolean, date, any, unknown, void, undefined, null. For complex types, use wrapper functions like ['array', elementSchema] or ['object', shape].`)
-  }
-}
-
-/**
- * Check if a type requires wrapper function syntax
- */
-function isWrapperFunction(type) {
-  return ['array', 'object', 'union', 'nullable', 'optional', 'enum'].includes(type)
-}
-
-/**
- * Parse wrapper functions: ['array', ['string'], {min: 5}]
- */
-function parseWrapperFunction(wrapperType, args) {
-  switch (wrapperType) {
-    case 'array': {
-      const [elementSchema = 'any', options = {}] = args
+    // Special cases that need arguments
+    if (type === 'array') {
+      const elementSchema = args[0] || 'any'
+      const options = args[1]
       let arraySchema = z.array(parseSchema(elementSchema))
 
-      // Apply array-specific modifiers
-      if (options.min !== undefined) arraySchema = arraySchema.min(options.min)
-      if (options.max !== undefined) arraySchema = arraySchema.max(options.max)
-      if (options.length !== undefined) arraySchema = arraySchema.length(options.length)
+      // Apply array constraints
+      if (options && typeof options === 'object') {
+        if (options.min !== undefined) arraySchema = arraySchema.min(options.min)
+        if (options.max !== undefined) arraySchema = arraySchema.max(options.max)
+        if (options.length !== undefined) arraySchema = arraySchema.length(options.length)
+      }
 
       return arraySchema
     }
 
-    case 'object': {
-      const [shape = {}] = args // Default to empty shape (any object)
-      return parseObjectSchema(shape)
+    if (type === 'object') {
+      const shape = args[0] || {}
+      return z.object(transformObjectShape(shape))
     }
 
-    case 'union': {
-      const unionSchemas = args.map(parseSchema)
-      return z.union(unionSchemas)
+    if (type === 'function') {
+      return z.any()
     }
 
-    case 'nullable': {
-      const [innerSchema] = args
-      return z.nullable(parseSchema(innerSchema))
+    if (type === 'union') {
+      const schemas = args[0] || []
+      return z.union(schemas.map(parseSchema))
     }
 
-    case 'optional': {
-      const [innerSchema] = args
-      return z.optional(parseSchema(innerSchema))
-    }
-
-    case 'enum': {
-      const [values] = args
+    if (type === 'enum') {
+      const values = args[0] || []
       if (!Array.isArray(values) || values.length === 0) {
         throw new Error('Enum must have an array of values')
       }
       return z.enum(values)
     }
 
-    default:
-      throw new Error(`Unknown wrapper function: ${wrapperType}`)
-  }
-}
-
-/**
- * Apply chainable modifiers to a schema
- */
-function applyModifier(schema, modifier) {
-  // Handle object modifiers with parameters
-  if (typeof modifier === 'object' && modifier !== null) {
-    for (const [key, value] of Object.entries(modifier)) {
-      schema = applyNamedModifier(schema, key, value)
+    if (type === 'nullable') {
+      const innerSchema = args[0] || 'any'
+      return z.nullable(parseSchema(innerSchema))
     }
-    return schema
-  }
 
-  // Handle string modifiers
-  if (typeof modifier === 'string') {
-    return applyNamedModifier(schema, modifier)
-  }
-
-  // Handle regex patterns
-  if (modifier instanceof RegExp) {
-    if (schema instanceof z.ZodString) {
-      return schema.regex(modifier)
+    if (type === 'optional') {
+      const innerSchema = args[0] || 'any'
+      return z.optional(parseSchema(innerSchema))
     }
-    throw new Error('Regex modifiers can only be applied to string schemas')
+
+    if (type === 'tuple') {
+      const elements = args
+      return z.tuple(elements.map(parseSchema))
+    }
+
+    // Try dynamic access with modifiers (functional composition)
+    if (z[type] && typeof z[type] === 'function') {
+      return applyModifiers(z[type](), args)
+    }
+
+    // Unknown type - strict failure
+    throw new Error(`Unknown primitive type: '${type}'. Valid types: ${[...PRIMITIVE_TYPES, ...WRAPPER_TYPES].join(', ')}`)
   }
 
-  throw new Error(`Invalid modifier: ${JSON.stringify(modifier)}`)
+  // Object: shape definition
+  if (typeof descriptor === 'object' && descriptor !== null) {
+    return z.object(transformObjectShape(descriptor))
+  }
+
+  throw new Error(`Invalid schema descriptor: ${JSON.stringify(descriptor)}. Schema descriptors must be strings, arrays, or objects`)
 }
 
 /**
- * Apply named modifiers to schemas
+ * Apply modifiers to a schema using functional composition
  */
-function applyNamedModifier(schema, name, value) {
-  switch (name) {
-    // String modifiers
-    case 'email':
-      return schema.email()
-    case 'url':
-      return schema.url()
-    case 'uuid':
-      return schema.uuid()
-    case 'min':
-      return schema.min(value)
-    case 'max':
-      return schema.max(value)
-    case 'length':
-      return schema.length(value)
-    case 'regex':
-      if (schema instanceof z.ZodString) {
-        return schema.regex(value)
+function applyModifiers(schema, modifiers) {
+  return modifiers.reduce((currentSchema, modifier) => {
+    if (typeof modifier === 'string') {
+      // Handle special modifier name mappings
+      const methodName = getZodMethodName(modifier)
+      if (currentSchema[methodName]) {
+        return currentSchema[methodName]()
       }
-      throw new Error('Regex modifier can only be applied to string schemas')
+    } else if (typeof modifier === 'object' && modifier !== null) {
+      // Apply object modifiers like {min: 10, max: 20}
+      return Object.entries(modifier).reduce((s, [key, value]) => {
+        return s[key] ? s[key](value) : s
+      }, currentSchema)
+    } else if (modifier instanceof RegExp && currentSchema.regex) {
+      return currentSchema.regex(modifier)
+    }
+    return currentSchema
+  }, schema)
+}
 
-    // Number modifiers
-    case 'positive':
-      return schema.positive()
-    case 'negative':
-      return schema.negative()
-    case 'int':
-    case 'integer':
-      return schema.int()
-    case 'finite':
-      return schema.finite()
-
-    // Common modifiers
-    case 'optional':
-      return schema.optional()
-    case 'nullable':
-      return schema.nullable()
-    case 'default':
-      return schema.default(value)
-
-    default:
-      // Try to call the method dynamically if it exists
-      if (typeof schema[name] === 'function') {
-        return value !== undefined ? schema[name](value) : schema[name]()
-      }
-      throw new Error(`Unknown modifier: ${name}`)
+/**
+ * Map modifier names to Zod method names
+ */
+function getZodMethodName(modifier) {
+  switch (modifier) {
+    case 'integer': return 'int'
+    default: return modifier
   }
 }
 
 /**
- * Utility function to capitalize first letter
+ * Transform object shape for Zod
  */
-function capitalizeFirst(str) {
-  return str.charAt(0).toUpperCase() + str.slice(1)
+function transformObjectShape(shape) {
+  const result = {}
+  for (const [key, subDescriptor] of Object.entries(shape)) {
+    result[key] = parseSchema(subDescriptor)
+  }
+  return result
 }

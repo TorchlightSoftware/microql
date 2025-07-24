@@ -368,7 +368,7 @@ describe('Validation Edge Cases and Error Handling', () => {
 
       await assert.rejects(
         query(config),
-        /Precheck validation failed/
+        /precheck validation failed/
       )
     })
 
@@ -399,7 +399,7 @@ describe('Validation Edge Cases and Error Handling', () => {
 
       await assert.rejects(
         query(config),
-        /Precheck validation failed/
+        /precheck validation failed/
       )
     })
   })

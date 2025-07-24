@@ -6,14 +6,6 @@ MicroQL is a declarative JSON-based query language for composing and orchestrati
 
 If you're a programmer and you want to achieve the low risk/high productivity of something like Zapier or n8n, but without all the baggage that those services come with, use MicroQL.  You may 1) make yourself more productive, 2) enable a non-coder on the team to be able to compose queries, enabling a division of labor where you and other coders can focus on building out new services, or working on something else entirely.
 
-## How is this different from GraphQL?
-
-GraphQL is primarily developed for field extraction, whereas MicroQL was designed for service orchestration.  You can do service orchestration with GraphQL but it requires that you put a lot more leg work into resolvers and that you manually think about dependency resolution.  MicroQL infers dependency resolution and parallelism from the paths that are referenced.  MicroQL also doesn't invent a completely new syntax - it's mostly a subset of JSON.  We found ways to do that without being pedantic and verbose.
-
-The MicroQL codebase is also small (<1000 lines), dependencies `lodash` and `zod`.
-
-[See here for a more detailed comparison](docs/comparison-graphql.md).
-
 ## Core Concepts
 
 ### Basic Service Orchestration
@@ -323,6 +315,27 @@ const result = await query({
 ```bash
 npm test
 ```
+
+## Questions
+
+### How is this different from GraphQL?
+
+GraphQL is primarily developed for field extraction, whereas MicroQL was designed for service orchestration.  You can do service orchestration with GraphQL but it requires that you put a lot more leg work into resolvers and that you manually think about dependency resolution.  MicroQL infers dependency resolution and parallelism from the paths that are referenced.  MicroQL also doesn't invent a completely new syntax - it's mostly a subset of JSON.  We found ways to do that without being pedantic and verbose.
+
+The MicroQL codebase is also small (<1000 lines), dependencies `lodash` and `zod`.
+
+[See here for a more detailed comparison](docs/comparison-graphql.md).
+
+
+### Why isn't this library written in TypeScript?
+
+I think the problem that most people are trying to solve with TypeScript would be better solved with input validations.  That is: you can type for internal consistency all you like, but as soon as you incorporate something outside your domain, your static type analysis fails.  MicroQL is literally for composing things outside of your domain.
+
+Secondly, Javascript compilation layers became a Tower of Babel over ten years ago.  Your main tool is literally called `babel`.  Do you really need all that?  Maybe all you need is JSON.  Try it out.
+
+### Is it fast?
+
+It's faster than n8n, slower than native Javascript.  Performance optimization should be considered in its infancy - particularly I have not tried this with any long running processes to ensure that there are no memory leaks.
 
 ## License
 

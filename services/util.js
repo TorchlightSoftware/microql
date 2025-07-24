@@ -289,49 +289,114 @@ util.snapshot._argtypes = {
 
 util.template._argtypes = {on: {argOrder: 0}}
 
-// Validation schemas for each service method
-util.pick._validators = {
-  precheck: {
-    on: ['object'],
-    fields: ['array', ['string']]
-  }
-}
-
-util.concat._validators = {
-  precheck: {
-    args: ['array']
-  }
-}
-
-util.snapshot._validators = {
-  precheck: {
-    out: ['string']
-  }
-}
-
-util.recordFailure._validators = {
-  precheck: {
-    on: ['object'],
-    location: ['string']
-  }
-}
-
+// Enhanced validation schemas for each service method
 util.map._validators = {
   precheck: {
-    on: ['array']
+    on: ['array'],
+    service: ['any'] // Compiled by MicroQL's _argtypes system
   }
 }
 
 util.filter._validators = {
   precheck: {
-    on: ['array']
+    on: ['array'],
+    service: ['any'] // Compiled by MicroQL's _argtypes system
   }
 }
 
 util.flatMap._validators = {
   precheck: {
-    on: ['array']
+    on: ['array'],
+    service: ['any'] // Compiled by MicroQL's _argtypes system
   }
+}
+
+util.concat._validators = {
+  precheck: {
+    args: ['array', ['array'], {min: 1}]
+  }
+}
+
+util.when._validators = {
+  precheck: {
+    test: ['any'], // test can be any value (truthy/falsy)
+    then: ['any'],
+    or: ['any']
+  }
+}
+
+util.eq._validators = {
+  precheck: {
+    l: ['any'],
+    r: ['any']
+  }
+}
+
+util.gt._validators = {
+  precheck: {
+    l: ['number'],
+    r: ['number']
+  }
+}
+
+util.lt._validators = {
+  precheck: {
+    l: ['number'],
+    r: ['number']
+  }
+}
+
+util.exists._validators = {
+  precheck: {
+    value: ['any']
+  }
+}
+
+util.length._validators = {
+  precheck: {
+    value: ['any'] // Accepts strings and arrays, returns 0 for other types
+  }
+}
+
+util.pick._validators = {
+  precheck: {
+    on: ['object'],
+    fields: ['array', ['string'], {min: 1}]
+  }
+}
+
+util.print._validators = {
+  precheck: {
+    on: ['any'],
+    settings: ['any', 'optional'], // Settings object structure varies
+    color: ['string', 'optional']
+  }
+}
+
+util.snapshot._validators = {
+  precheck: {
+    on: ['any'],
+    capture: ['any', 'optional'],
+    out: ['string', {min: 1, regex: /^[^<>:"|?*\x00-\x1f]+$/}] // Basic path validation
+  }
+}
+
+util.recordFailure._validators = {
+  precheck: {
+    on: {
+      error: ['string'],
+      serviceName: ['string'],
+      action: ['string'],
+      queryName: ['string'],
+      args: ['any']
+    },
+    location: ['string', {min: 1, regex: /^[^<>:"|?*\x00-\x1f]+$/}] // Basic path validation
+  }
+}
+
+util.template._validators = {
+  // template accepts any arguments and returns them as-is
+  precheck: {} // No validation needed - template is designed to accept any structure
 }
 
 export default util

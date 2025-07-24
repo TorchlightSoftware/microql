@@ -4,33 +4,57 @@ MicroQL provides a powerful validation system based on [Zod](https://zod.dev/) t
 
 ## Table of Contents
 
-- [Basic Usage](#basic-usage)
+- [User and Service Validations](#user-and-service-validations)
 - [Schema Syntax](#schema-syntax)
-- [Service-Level Validation](#service-level-validation)
-- [User-Level Validation](#user-level-validation)
-- [Precheck vs Postcheck](#precheck-vs-postcheck)
 - [Error Messages](#error-messages)
 - [Examples](#examples)
 
-## Basic Usage
+## User and Service Validations
 
 Validation in MicroQL can be defined at two levels:
 
-1. **Service-level validation**: Defined on service methods to enforce contracts
-2. **User-level validation**: Defined in queries to add additional constraints
+1. **User-level validation**: Query writers can add validations to enforce their expectations
+2. **Service-level validation**: Service writers can add validations in leiu of imperative conditional input validation
 
-### Quick Example
+## Validation Execution Order
+
+- **Precheck**: On `args` before execution: [User Validations, Service Validations]
+- **Postcheck**: On `results` after execution: [Service Validations, User Validations]
+
+Basically user validations "wrap" service validations which "wrap" the service in question.
+
+### Some Examples
 
 ```javascript
-// Service with validation
+// Query with user-level validation
+const config = {
+  services: { userService },
+  queries: {
+    newUser: ['userService:createUser', {
+      userData: {
+        name: 'John Doe',
+        email: 'john@example.com',
+        age: 25
+      },
+
+      // Validation for `createUser`
+      precheck: {
+        userData: {
+          age: ['number', {min: 18, max: 65}]
+        }
+      }
+    }]
+  }
+}
+
+// Service definition
 const userService = {
   async createUser(args) {
-    // Create user logic
     return { id: 123, ...args.userData }
   }
 }
 
-// Add service-level validation
+// Service-level validation - precheck and postcheck
 userService.createUser._validators = {
   precheck: {
     userData: {
@@ -46,30 +70,11 @@ userService.createUser._validators = {
   }
 }
 
-// Query with additional user-level validation
-const config = {
-  services: { userService },
-  queries: {
-    newUser: ['userService:createUser', {
-      userData: {
-        name: 'John Doe',
-        email: 'john@example.com',
-        age: 25
-      },
-      // Additional validation at query level
-      precheck: {
-        userData: {
-          age: ['number', {min: 18, max: 65}]
-        }
-      }
-    }]
-  }
-}
 ```
 
 ## Schema Syntax
 
-MicroQL uses a JSON-based syntax that gets transformed into Zod schemas. There are three main forms:
+MicroQL validators use a JSON-based syntax that gets transformed into Zod schemas. There are three main forms:
 
 ### 1. Array Syntax (Most Common)
 
@@ -100,7 +105,7 @@ MicroQL uses a JSON-based syntax that gets transformed into Zod schemas. There a
 }
 ```
 
-### 3. Wrapper Functions
+### 3. Wrapper Types
 
 ```javascript
 // Arrays
@@ -120,75 +125,56 @@ MicroQL uses a JSON-based syntax that gets transformed into Zod schemas. There a
 
 // Optional wrapper
 ['optional', ['number']]
+
+// Enums
+['enum', ['red', 'green', 'blue']]  // Must be one of the specified values
+
+// Tuples
+['tuple', [['string'], ['number']]]  // Fixed-length array with typed elements
 ```
 
-## Service-Level Validation
+### Natural Syntax Shortcuts
 
-Define validation on service methods using the `_validators` property:
+The validation system supports convenient shortcuts:
 
 ```javascript
-const myService = {
-  async processData(args) {
-    // Service logic
-    return result
-  }
-}
+// These are equivalent:
+['array']           ↔ ['array', ['any']]
+['object']          ↔ ['object', {}]
+['nullable']        ↔ ['nullable', ['any']]
+['optional']        ↔ ['optional', ['any']]
+```
 
-myService.processData._validators = {
+### Service Arguments Convention
+
+Use 'any' for service arguments that accept other services (like `util.map`, `util.filter`):
+
+```javascript
+// Example from util.js
+util.map._validators = {
   precheck: {
-    input: ['string', {min: 1}],
-    options: {
-      format: ['string', 'optional'],
-      limit: ['number', 'positive', 'optional']
-    }
-  },
-  postcheck: {
-    result: ['string'],
-    count: ['number', 'positive']
+    on: ['array'],
+    service: ['any'] // Service arguments are compiled by MicroQL - don't need special validation
   }
 }
 ```
-
-## User-Level Validation
-
-Add validation constraints at the query level:
-
-```javascript
-const config = {
-  services: { myService },
-  queries: {
-    process: ['myService:processData', {
-      input: 'hello world',
-      options: { format: 'uppercase', limit: 100 },
-      // Additional validation
-      precheck: {
-        options: {
-          limit: ['number', {max: 50}] // More restrictive than service
-        }
-      }
-    }]
-  }
-}
-```
-
-## Precheck vs Postcheck
-
-- **Precheck**: Validates service arguments before execution
-- **Postcheck**: Validates service results after execution
-
-Both service-level and user-level validations are combined, with user-level validations adding to (not replacing) service-level validations.
 
 ## Error Messages
 
-Validation errors provide clear, detailed messages:
+Validation errors provide clear, detailed messages with full context:
 
 ```
-Precheck validation failed:
+// [<queryName> - <serviceName>:<action>]
+[newUser - userService:createUser] precheck validation failed:
 - userData.age: Too small: expected number to be >=18
 - userData.email: Invalid email
 ```
 
+MicroQL also adds the properties `queryName`, `serviceName`, and `action` to all error messages for programmatic decision making.
+
 ## Examples
+
+Examples are mixed from User and Service validations.  The format is the same, `User` / `Service` and `precheck` / `postcheck`.  So any of the examples here can be used anywhere a validator is expected.
 
 ### Basic String Validation
 
@@ -339,37 +325,6 @@ eventService.schedule._validators = {
 }
 ```
 
-## Available Validators
+## Conclusions
 
-### String Validators
-- `email` - Valid email address
-- `url` - Valid URL
-- `uuid` - Valid UUID
-- `min: n` - Minimum length
-- `max: n` - Maximum length
-- `length: n` - Exact length
-- `regex: /pattern/` - Match regular expression
-
-### Number Validators
-- `positive` - Greater than 0
-- `negative` - Less than 0
-- `integer` / `int` - Integer value
-- `finite` - Finite number (not Infinity)
-- `min: n` - Minimum value
-- `max: n` - Maximum value
-
-### Array Validators
-- `min: n` - Minimum length
-- `max: n` - Maximum length
-- `length: n` - Exact length
-
-### Common Modifiers
-- `optional` - Value can be undefined
-- `nullable` - Value can be null
-- `default: value` - Default value if undefined
-
-### Special Types
-- `enum` - Enumerated values
-- `date` - Date objects with optional min/max constraints
-- `any` - Any value (no validation)
-- `unknown` - Unknown value (safer than any)
+In general we try to map closely to the `zod` API and do minimal processing.  But in a few places we don't mind letting go of "syntax regularity" in order to support less verbosity and a more intuitive API.
