@@ -4,29 +4,29 @@ MicroQL provides a powerful validation system based on [Zod](https://zod.dev/) t
 
 ## Table of Contents
 
-- [User and Service Validations](#user-and-service-validations)
+- [Query and Service Validations](#query-and-service-validations)
 - [Schema Syntax](#schema-syntax)
 - [Error Messages](#error-messages)
 - [Examples](#examples)
 
-## User and Service Validations
+## Query and Service Validations
 
 Validation in MicroQL can be defined at two levels:
 
-1. **User-level validation**: Query writers can add validations to enforce their expectations
+1. **Query-level validation**: Query writers can add validations to enforce their expectations
 2. **Service-level validation**: Service writers can add validations in leiu of imperative conditional input validation
 
 ## Validation Execution Order
 
-- **Precheck**: On `args` before execution: [User Validations, Service Validations]
-- **Postcheck**: On `results` after execution: [Service Validations, User Validations]
+- **Precheck**: On `args` before execution: [Query Validations, Service Validations]
+- **Postcheck**: On `results` after execution: [Service Validations, Query Validations]
 
-Basically user validations "wrap" service validations which "wrap" the service in question.
+Basically query validations "wrap" service validations which "wrap" the service in question.
 
 ### Some Examples
 
 ```javascript
-// Query with user-level validation
+// Query with service validation
 const config = {
   services: { userService },
   queries: {
@@ -174,7 +174,7 @@ MicroQL also adds the properties `queryName`, `serviceName`, and `action` to all
 
 ## Examples
 
-Examples are mixed from User and Service validations.  The format is the same, `User` / `Service` and `precheck` / `postcheck`.  So any of the examples here can be used anywhere a validator is expected.
+Examples are mixed from Query and Service validations.  The format is the same, `Query` / `Service` and `precheck` / `postcheck`.  So any of the examples here can be used anywhere a validator is expected.
 
 ### Basic String Validation
 

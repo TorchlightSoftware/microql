@@ -11,6 +11,7 @@ _.mixin(lodashDeep)
 
 import {DEP_REGEX, SERVICE_REGEX, RESERVE_ARGS} from './common.js'
 import applyWrappers from './wrappers.js'
+import {parseSchema} from './validation.js'
 
 // Detects if a descriptor is a chain (nested arrays)
 const isChain = (descriptor) => {
@@ -57,11 +58,27 @@ const getDeps = (args) => {
   return deps
 }
 
-const compileValidators = (args, validators) => {
-  return {
-    precheck: [args.precheck, validators.precheck].filter(Boolean),
-    postcheck: [validators.postcheck, args.postcheck].filter(Boolean)
+function parseSchemaWithErrorContext(designation, order, schema) {
+  if (!schema) return
+  try {
+    return parseSchema(schema)
+  } catch (error) {
+    error.message = `${designation} ${order} schema parse error:\n${error.message}`
+    throw error
   }
+}
+
+// weave the schema compilation with proper context for error reporting
+const compileValidators = (args, validators) => {
+  const order = {
+    precheck: {query: args.precheck, service: validators.precheck},
+    postcheck: {service: validators.postcheck, query: args.postcheck}
+  }
+  for (const o in order) {
+    for (const d in order[o])
+      order[o][d] = parseSchemaWithErrorContext(d, o, order[o][d])
+  }
+  return order
 }
 
 // settings are merged from query level settings and service level settings
@@ -164,29 +181,35 @@ function compileServiceFunction(queryName, descriptor, config) {
   } else {
     throw new Error(`Service '${serviceName}' must be an object with methods in the form: async (args) => result`)
   }
-  const argtypes = serviceCall._argtypes || {}
-  mergeArgs(args, arg0, argtypes, serviceName, action)
 
-  const settings = compileSettings(queryName, args, argtypes, config)
-  const compiledArgs = compileArgs(queryName, serviceName, args, argtypes, config, settings)
-  const validators = compileValidators(args, serviceCall._validators || {})
+  try {
+    const argtypes = serviceCall._argtypes || {}
+    mergeArgs(args, arg0, argtypes, serviceName, action)
+    const settings = compileSettings(queryName, args, argtypes, config)
+    const compiledArgs = compileArgs(queryName, serviceName, args, argtypes, config, settings)
+    const validators = compileValidators(args, serviceCall._validators || {}, queryName, serviceName, action)
 
-  // Compile function arguments based on _argtypes
-  const serviceDef = {
-    type: 'service',
-    queryName,
-    serviceName,
-    action,
-    validators,
-    settings,
-    args: compiledArgs,
-    dependencies: getDeps(args)
+    // Compile function arguments based on _argtypes
+    const serviceDef = {
+      type: 'service',
+      queryName,
+      serviceName,
+      action,
+      validators,
+      settings,
+      args: compiledArgs,
+      dependencies: getDeps(args)
+    }
+
+    // prepare the service with arg resolution, debugging, error handling, timeout, retry
+    serviceDef.service = applyWrappers(serviceDef, config)
+
+    return serviceDef
+
+  } catch (error) {
+    error.message = `[${queryName} - ${serviceName}:${action}] ${error.message}`
+    throw error
   }
-
-  // prepare the service with arg resolution, debugging, error handling, timeout, retry
-  serviceDef.service = applyWrappers(serviceDef, config)
-
-  return serviceDef
 }
 
 function compileDescriptor(queryName, descriptor, config) {

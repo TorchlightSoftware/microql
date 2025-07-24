@@ -13,29 +13,78 @@ import {z} from 'zod'
 const PRIMITIVE_TYPES = ['string', 'number', 'boolean', 'date', 'any', 'unknown', 'void', 'undefined', 'null']
 const WRAPPER_TYPES = ['array', 'object', 'union', 'enum', 'nullable', 'optional', 'tuple', 'function']
 
+// Zod enums for validation
+const AllTypesEnum = z.enum([...PRIMITIVE_TYPES, ...WRAPPER_TYPES])
+
+// Recursive schema for validator descriptors
+const DescriptorSchema = z.lazy(() => z.union([
+  // String format: primitive or wrapper type names
+  AllTypesEnum,
+
+  // Array format: [type, ...modifiers]
+  z.array(z.union([
+    z.string(), // type names and string modifiers
+    z.object({}).passthrough(), // constraint objects like {min: 5}
+    z.instanceof(RegExp), // regex patterns
+    z.array(z.any()).min(0), // empty arrays or arrays with any content (for enum values, etc.)
+    DescriptorSchema // nested descriptors
+  ])).min(1).refine(arr => {
+    // First element must be a string and a valid type name
+    return typeof arr[0] === 'string' && [...PRIMITIVE_TYPES, ...WRAPPER_TYPES].includes(arr[0])
+  }, {
+    message: 'Array descriptors must start with a valid type name'
+  }),
+
+  // Object format: shape definitions
+  z.record(z.string(), DescriptorSchema)
+]))
+
+/**
+ * Format Zod error messages into MicroQL error format
+ */
+function formatError(zodError) {
+  const errors = zodError?.issues || []
+  const errorMessages = errors.map(err => {
+    const path = err.path && err.path.length > 0 ? err.path.join('.') : 'value'
+
+    // Improve union error messages by finding the most helpful branch error
+    let message = err.message
+    if (err.code === 'invalid_union' && err.errors) {
+      for (const errorGroup of err.errors) {
+        for (const subError of errorGroup) {
+          if (subError.message && subError.message !== 'Invalid input') {
+            message = subError.message
+            break
+          }
+        }
+        if (message !== 'Invalid input') break
+      }
+    }
+
+    return `- ${path}: ${message}`
+  })
+
+  return errorMessages.join('\n')
+}
+
 /**
  * Main validation function called by withValidation wrapper
  */
-export function validate(schema, value, order = 'validation') {
+export function validate(schema, value) {
   if (!schema) return
 
   const zodSchema = parseSchema(schema)
   const result = zodSchema.safeParse(value)
 
   if (!result.success) {
-    // Convert Zod errors to MicroQL error format
-    const errors = result.error?.issues || []
-    const errorMessages = errors.map(err => {
-      const path = err.path && err.path.length > 0 ? err.path.join('.') : 'value'
-      return `- ${path}: ${err.message}`
-    })
-
-    throw new Error(`${order} validation failed:\n${errorMessages.join('\n')}`)
+    throw new Error(formatError(result.error))
   }
 }
 
 /**
- * Parse schema descriptor into Zod schema
+ * parseSchema is called during compile, and then implicitly by validate()
+ * during withValidations() wrapper execution.
+ * The second time it just returns the already-parsed schema.
  */
 export function parseSchema(descriptor) {
   // If already a Zod schema, return it immediately
@@ -43,11 +92,11 @@ export function parseSchema(descriptor) {
     return descriptor
   }
 
+  // Validate descriptor format itself to ensure it's of valid form
+  validate(DescriptorSchema, descriptor)
+
   // String: direct type lookup
   if (typeof descriptor === 'string') {
-    if (!z[descriptor] || typeof z[descriptor] !== 'function') {
-      throw new Error(`Unknown primitive type: '${descriptor}'. Valid types: ${PRIMITIVE_TYPES.join(', ')}`)
-    }
     return z[descriptor]()
   }
 
@@ -112,22 +161,14 @@ export function parseSchema(descriptor) {
     if (z[type] && typeof z[type] === 'function') {
       return applyModifiers(z[type](), args)
     }
-
-    // Unknown type - strict failure
-    throw new Error(`Unknown primitive type: '${type}'. Valid types: ${[...PRIMITIVE_TYPES, ...WRAPPER_TYPES].join(', ')}`)
   }
 
   // Object: shape definition
   if (typeof descriptor === 'object' && descriptor !== null) {
     return z.object(transformObjectShape(descriptor))
   }
-
-  throw new Error(`Invalid schema descriptor: ${JSON.stringify(descriptor)}. Schema descriptors must be strings, arrays, or objects`)
 }
 
-/**
- * Apply modifiers to a schema using functional composition
- */
 function applyModifiers(schema, modifiers) {
   return modifiers.reduce((currentSchema, modifier) => {
     if (typeof modifier === 'string') {

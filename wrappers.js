@@ -8,10 +8,7 @@ import {validate} from './validation.js'
 
 const withArgs = (fn) => {
   return async function (args = {}) {
-    //console.log('withArgs this:', this)
     let {queryResults, contextStack} = this
-    //let {queryName, serviceName, action} = this
-    //console.log(`withArgs for [${queryName} - ${serviceName}:${action}] received:`, args, 'stack:', contextStack.stack)
 
     const resolveArg = (value) => {
 
@@ -22,7 +19,6 @@ const withArgs = (fn) => {
       }
 
       // Set up a service prepared to receive context from the calling service
-      // {type: 'service'} args are now just responsible for calling with (ctx)
       if (typeof value === 'function') {
         return (ctx) => {
           return value(queryResults, contextStack.extend(ctx))
@@ -49,14 +45,12 @@ const withArgs = (fn) => {
     const resolvedArgs = _.cloneDeepWith(args, resolveArg)
     this.settings.onError = resolveArg(this.settings.onError)
 
-    //console.log(`withArgs for [${queryName} - ${serviceName}:${action}] resolved as:`, resolvedArgs)
     return await fn.call(this, resolvedArgs)
   }
 }
 
 const withDebug = (fn) => {
   return async function (args) {
-    //console.log('withDebug this:', this)
     const {queryName, serviceName, action, settings} = this
     const startTime = Date.now()
     const [color, reset] = getServiceColor(serviceName)
@@ -81,7 +75,6 @@ const withDebug = (fn) => {
 
 const withTimeout = (fn) => {
   return async function (args) {
-    //console.log('withTimeout this:', this)
     const {timeout} = this.settings
     let timeoutId
 
@@ -126,7 +119,6 @@ const withRetry = (fn) => {
 
 const withErrorHandling = (fn) => {
   return async function (args) {
-    //console.log('withErrorHandling this:', this)
     const {queryName, serviceName, action, settings} = this
 
     try {
@@ -168,14 +160,27 @@ const withValidation = (fn) => {
   return async function (args) {
     const {validators} = this
 
+    function runValidator(args, order, designation) {
+      const schema = validators[order][designation]
+      if (!schema) return
+      try {
+        validate(schema, args)
+      } catch (error) {
+        error.message = `${designation} ${order} validation failed:\n${error.message}`
+        throw error
+      }
+    }
+
     // Run prechecks
-    validators.precheck.map(v => validate(v, args, 'precheck'))
+    runValidator(args, 'precheck', 'query')
+    runValidator(args, 'precheck', 'service')
 
     // Execute the actual service function
     const result = await fn.call(this, args)
 
     // Run postchecks
-    validators.postcheck.map(v => validate(v, result, 'postcheck'))
+    runValidator(result, 'postcheck', 'service')
+    runValidator(result, 'postcheck', 'query')
 
     return result
   }
@@ -202,7 +207,7 @@ const applyWrappers = (def, config) => {
   wrappers.push(withErrorHandling)
 
   // Add validation wrapper if validators are defined
-  if (validators && (validators.precheck?.length > 0 || validators.postcheck?.length > 0)) {
+  if (validators && (validators.precheck || validators.postcheck)) {
     wrappers.push(withValidation)
   }
 

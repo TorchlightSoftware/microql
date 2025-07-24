@@ -29,7 +29,7 @@ describe('Validation Edge Cases and Error Handling', () => {
 
       await assert.rejects(
         query(config),
-        /Invalid schema descriptor/
+        /Invalid option: expected one of/
       )
     })
 
@@ -54,7 +54,7 @@ describe('Validation Edge Cases and Error Handling', () => {
 
       await assert.rejects(
         query(config),
-        /Invalid schema descriptor/
+        /Invalid option: expected one of/
       )
     })
 
@@ -103,7 +103,7 @@ describe('Validation Edge Cases and Error Handling', () => {
 
       await assert.rejects(
         query(config),
-        /Unknown primitive type: 'invalidType'/
+        /Invalid option: expected one of/
       )
     })
 
@@ -128,7 +128,7 @@ describe('Validation Edge Cases and Error Handling', () => {
 
       await assert.rejects(
         query(config),
-        /Unknown primitive type: 'not-an-array-or-object'/
+        /Invalid option: expected one of/
       )
     })
 
@@ -153,7 +153,7 @@ describe('Validation Edge Cases and Error Handling', () => {
 
       await assert.rejects(
         query(config),
-        /Unknown primitive type: 'unknownWrapper'/
+        /Invalid option: expected one of/
       )
     })
 
@@ -207,7 +207,7 @@ describe('Validation Edge Cases and Error Handling', () => {
 
       await assert.rejects(
         query(config),
-        /Unknown primitive type: 'invalid-syntax-here'/
+        /Invalid option: expected one of/
       )
     })
 
@@ -237,7 +237,7 @@ describe('Validation Edge Cases and Error Handling', () => {
 
       await assert.rejects(
         query(config),
-        /Unknown primitive type: 'not-a-real-type'/
+        /Invalid option: expected one of/
       )
     })
   })

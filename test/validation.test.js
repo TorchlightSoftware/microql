@@ -128,7 +128,7 @@ describe('Validation System Tests', () => {
       const validEmail = 'test@example.com'
 
       // Should not throw
-      validate(schema, validEmail, 'precheck')
+      validate(schema, validEmail)
     })
 
     it('should throw validation error with invalid data', () => {
@@ -136,8 +136,8 @@ describe('Validation System Tests', () => {
       const invalidEmail = 'not-an-email'
 
       assert.throws(() => {
-        validate(schema, invalidEmail, 'precheck')
-      }, /precheck validation failed/)
+        validate(schema, invalidEmail)
+      }, /Invalid email address/)
     })
 
     it('should validate complex object schema', () => {
@@ -160,16 +160,45 @@ describe('Validation System Tests', () => {
       }
 
       // Should not throw
-      validate(schema, validUser, 'precheck')
+      validate(schema, validUser)
 
       // Should throw
       assert.throws(() => {
-        validate(schema, invalidUser, 'precheck')
-      }, /precheck validation failed/)
+        validate(schema, invalidUser)
+      }, /Invalid email address/)
     })
   })
 
   describe('Integration Tests - Service and User Level Validation', () => {
+    it('should fail compilation with invalid schema descriptor', async () => {
+      const query = (await import('../index.js')).default
+
+      const testService = {
+        async test(args) {
+          return args.value
+        }
+      }
+
+      // Invalid schema descriptor should cause compilation error
+      testService.test._validators = {
+        precheck: {
+          value: ['invalidType']
+        }
+      }
+
+      const config = {
+        services: {testService},
+        queries: {
+          result: ['testService:test', {value: 'hello'}]
+        }
+      }
+
+      await assert.rejects(
+        query(config),
+        new Error('[result - testService:test] service precheck schema parse error:\n- value: Invalid option: expected one of "string"|"number"|"boolean"|"date"|"any"|"unknown"|"void"|"undefined"|"null"|"array"|"object"|"union"|"enum"|"nullable"|"optional"|"tuple"|"function"')
+      )
+    })
+
     it('should validate with service-level precheck', async () => {
       const query = (await import('../index.js')).default
 
@@ -224,7 +253,7 @@ describe('Validation System Tests', () => {
       // Should fail with negative value
       await assert.rejects(
         query(config),
-        /precheck validation failed/
+        new Error('[test - testService:validateInput] service precheck validation failed:\n- value: Too small: expected number to be >0')
       )
     })
 
@@ -321,7 +350,7 @@ describe('Validation System Tests', () => {
 
       await assert.rejects(
         query(config),
-        /precheck validation failed/
+        new Error('[test - testService:processNumber] query precheck validation failed:\n- num: Too big: expected number to be <=20')
       )
     })
 
@@ -486,7 +515,7 @@ describe('Validation System Tests', () => {
 
       await assert.rejects(
         query(config),
-        /precheck validation failed/
+        new Error('[chain[1] - testService:step2] service precheck validation failed:\n- value: Too big: expected number to be <=50')
       )
     })
 
@@ -581,7 +610,7 @@ describe('Validation System Tests', () => {
 
       await assert.rejects(
         query(invalidConfig),
-        /precheck validation failed/
+        new Error('[result - settingsService:updateTheme] service precheck validation failed:\n- theme: Invalid option: expected one of "light"|"dark"|"auto"')
       )
     })
 
@@ -621,7 +650,7 @@ describe('Validation System Tests', () => {
 
       await assert.rejects(
         query(invalidConfig),
-        /precheck validation failed/
+        new Error('[result - userService:validateUsername] service precheck validation failed:\n- username: Invalid string: must match pattern /^[a-zA-Z0-9_]{3,20}$/')
       )
     })
 
