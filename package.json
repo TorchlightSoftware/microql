@@ -1,9 +1,9 @@
 {
   "name": "microql",
-  "version": "0.1.1",
+  "version": "0.5.0",
   "description": "A query language for composing microservices.",
   "type": "module",
-  "main": "index.js",
+  "main": "query.js",
   "scripts": {
     "test": "node --test test/*.test.js",
     "lint": "npx eslint .",

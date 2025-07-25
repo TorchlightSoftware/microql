@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query from '../index.js'
+import query from '../query.js'
 
 describe('Error Handling Tests', () => {
   // Test services

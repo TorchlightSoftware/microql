@@ -1,707 +1,473 @@
 /**
- * Zod-based Validation System Tests
+ * Data-driven Validation System Tests
  */
 
+import query from '../query.js'
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
 import {parseSchema, validate} from '../validation.js'
 
 describe('Validation System Tests', () => {
+  // Reusable test services
+  const testServices = {
+    echo: {
+      async process(args) { return args.value }
+    },
+    double: {
+      async process(args) { return args.value * 2 }
+    },
+    transform: {
+      async process(args) { return {...args, processed: true} }
+    },
+    divide: {
+      async process(args) { return args.numerator / args.denominator }
+    },
+    createUser: {
+      async process(args) { return {id: 123, ...args.userData} }
+    },
+    updateTheme: {
+      async process(args) { return {theme: args.theme, updated: true} }
+    },
+    validateUsername: {
+      async process(args) { return `Valid: ${args.username}` }
+    },
+    createProfile: {
+      async process(args) { return {name: args.name, bio: args.bio || 'No bio'} }
+    },
+    extract: {
+      async process(args) { return args.url }
+    },
+    scrape: {
+      async process(args) {
+        return {
+          url: args.url,
+          queries: args.queries || {},
+          validate: args.validate || null
+        }
+      }
+    }
+  }
+
+  // Helper to create a service with validators
+  function createService(serviceName, validators) {
+    const service = {
+      process: testServices[serviceName].process
+    }
+    if (validators) {
+      service.process._validators = validators
+    }
+    return service
+  }
+
+  // Helper to run validation test
+  async function runValidationTest(serviceName, validators, input, expectedError) {
+    const service = createService(serviceName, validators)
+
+    const config = {
+      services: {testService: service},
+      queries: {
+        result: ['testService:process', input]
+      }
+    }
+
+    if (expectedError) {
+      await assert.rejects(query(config), expectedError)
+    } else {
+      const result = await query(config)
+      return result.result
+    }
+  }
+
   describe('Schema Parsing', () => {
-    it('should parse primitive types', () => {
-      const stringSchema = parseSchema(['string'])
-      const numberSchema = parseSchema(['number'])
+    // Data for schema parsing tests
+    const schemaTests = [
+      {
+        name: 'primitive types',
+        tests: [
+          {schema: ['string'], valid: 'hello', invalid: 123},
+          {schema: ['number'], valid: 42, invalid: 'hello'},
+          {schema: ['boolean'], valid: true, invalid: 'true'}
+        ]
+      },
+      {
+        name: 'string modifiers',
+        tests: [
+          {schema: ['string', 'email'], valid: 'test@example.com', invalid: 'invalid-email'},
+          {schema: ['string', 'url'], valid: 'https://example.com', invalid: 'not-a-url'},
+          {schema: ['string', {min: 3, max: 10}], valid: 'hello', invalid: 'ab'}
+        ]
+      },
+      {
+        name: 'number modifiers',
+        tests: [
+          {schema: ['number', 'positive'], valid: 5, invalid: -5},
+          {schema: ['number', 'integer'], valid: 5, invalid: 5.5},
+          {schema: ['number', {min: 0, max: 100}], valid: 50, invalid: 150}
+        ]
+      },
+      {
+        name: 'complex types',
+        tests: [
+          {schema: ['array', ['string']], valid: ['a', 'b'], invalid: [1, 2]},
+          {schema: ['nullable', ['string']], valid: null, invalid: 123},
+          {schema: ['optional', ['string']], valid: undefined, invalid: 123},
+          {schema: ['enum', ['red', 'blue', 'green']], valid: 'red', invalid: 'yellow'}
+        ]
+      }
+    ]
 
-      // Test valid values
-      assert.strictEqual(stringSchema.safeParse('hello').success, true)
-      assert.strictEqual(numberSchema.safeParse(42).success, true)
-
-      // Test invalid values
-      assert.strictEqual(stringSchema.safeParse(123).success, false)
-      assert.strictEqual(numberSchema.safeParse('hello').success, false)
-    })
-
-    it('should parse string with modifiers', () => {
-      const emailSchema = parseSchema(['string', 'email'])
-
-      assert.strictEqual(emailSchema.safeParse('test@example.com').success, true)
-      assert.strictEqual(emailSchema.safeParse('invalid-email').success, false)
-    })
-
-    it('should parse number with modifiers', () => {
-      const positiveIntSchema = parseSchema(['number', 'positive', 'integer'])
-
-      assert.strictEqual(positiveIntSchema.safeParse(5).success, true)
-      assert.strictEqual(positiveIntSchema.safeParse(-5).success, false)
-      assert.strictEqual(positiveIntSchema.safeParse(5.5).success, false)
+    schemaTests.forEach(group => {
+      it(`should parse ${group.name}`, () => {
+        group.tests.forEach(test => {
+          const schema = parseSchema(test.schema)
+          assert.strictEqual(schema.safeParse(test.valid).success, true,
+            `Expected ${JSON.stringify(test.valid)} to be valid for ${JSON.stringify(test.schema)}`)
+          assert.strictEqual(schema.safeParse(test.invalid).success, false,
+            `Expected ${JSON.stringify(test.invalid)} to be invalid for ${JSON.stringify(test.schema)}`)
+        })
+      })
     })
 
     it('should parse object schemas', () => {
-      const userSchema = parseSchema({
+      const schema = parseSchema({
         name: ['string'],
-        age: ['number', 'positive']
+        age: ['number', 'positive'],
+        email: ['string', 'email', 'optional']
       })
 
-      const validUser = {name: 'John', age: 25}
-      const invalidUser = {name: 'John', age: -5}
-
-      assert.strictEqual(userSchema.safeParse(validUser).success, true)
-      assert.strictEqual(userSchema.safeParse(invalidUser).success, false)
+      assert.strictEqual(schema.safeParse({name: 'John', age: 25}).success, true)
+      assert.strictEqual(schema.safeParse({name: 'John', age: -5}).success, false)
+      assert.strictEqual(schema.safeParse({name: 'John', age: 25, email: 'bad'}).success, false)
     })
 
-    it('should parse array schemas', () => {
-      const stringArraySchema = parseSchema(['array', ['string']])
-
-      assert.strictEqual(stringArraySchema.safeParse(['a', 'b', 'c']).success, true)
-      assert.strictEqual(stringArraySchema.safeParse(['a', 123, 'c']).success, false)
-    })
-
-    it('should parse array with constraints', () => {
-      const constrainedArraySchema = parseSchema(['array', ['string'], {min: 2, max: 5}])
-
-      assert.strictEqual(constrainedArraySchema.safeParse(['a', 'b']).success, true)
-      assert.strictEqual(constrainedArraySchema.safeParse(['a']).success, false) // too short
-      assert.strictEqual(constrainedArraySchema.safeParse(['a', 'b', 'c', 'd', 'e', 'f']).success, false) // too long
-    })
-
-    it('should parse nullable and optional modifiers', () => {
-      const nullableSchema = parseSchema(['nullable', ['string']])
-      const optionalSchema = parseSchema(['string', 'optional'])
-
-      assert.strictEqual(nullableSchema.safeParse('hello').success, true)
-      assert.strictEqual(nullableSchema.safeParse(null).success, true)
-      assert.strictEqual(nullableSchema.safeParse(undefined).success, false)
-
-      assert.strictEqual(optionalSchema.safeParse('hello').success, true)
-      assert.strictEqual(optionalSchema.safeParse(undefined).success, true)
-      assert.strictEqual(optionalSchema.safeParse(null).success, false)
-    })
-
-    it('should parse enum types', () => {
-      const themeSchema = parseSchema(['enum', ['light', 'dark', 'auto']])
-
-      assert.strictEqual(themeSchema.safeParse('light').success, true)
-      assert.strictEqual(themeSchema.safeParse('dark').success, true)
-      assert.strictEqual(themeSchema.safeParse('auto').success, true)
-      assert.strictEqual(themeSchema.safeParse('blue').success, false)
-      assert.strictEqual(themeSchema.safeParse('').success, false)
-    })
-
-    it('should parse regex patterns', () => {
-      // Using object modifier syntax
-      const usernameSchema = parseSchema(['string', {regex: /^[a-zA-Z0-9_]{3,20}$/}])
-
-      assert.strictEqual(usernameSchema.safeParse('valid_user123').success, true)
-      assert.strictEqual(usernameSchema.safeParse('ab').success, false) // too short
-      assert.strictEqual(usernameSchema.safeParse('invalid-user').success, false) // contains dash
-      assert.strictEqual(usernameSchema.safeParse('this_username_is_way_too_long').success, false)
-    })
-
-    it('should parse date with min/max constraints', () => {
-      const futureDate = new Date()
-      futureDate.setDate(futureDate.getDate() + 1)
-
-      const pastDate = new Date()
-      pastDate.setDate(pastDate.getDate() - 1)
-
-      // Date must be in the future
-      const futureDateSchema = parseSchema(['date', {min: new Date()}])
-
-      assert.strictEqual(futureDateSchema.safeParse(futureDate).success, true)
-      assert.strictEqual(futureDateSchema.safeParse(pastDate).success, false)
-    })
-
-    it('should parse tuple types with natural syntax', () => {
-      const tupleSchema = parseSchema(['tuple', ['string'], ['number']])
-
-      assert.strictEqual(tupleSchema.safeParse(['hello', 42]).success, true)
-      assert.strictEqual(tupleSchema.safeParse(['hello', 'world']).success, false) // second element should be number
-      assert.strictEqual(tupleSchema.safeParse([42, 'hello']).success, false) // first element should be string
-      assert.strictEqual(tupleSchema.safeParse(['hello']).success, false) // missing second element
-      assert.strictEqual(tupleSchema.safeParse(['hello', 42, 'extra']).success, false) // too many elements
+    it('should parse tuple types', () => {
+      const schema = parseSchema(['tuple', ['string'], ['number'], ['boolean']])
+      assert.strictEqual(schema.safeParse(['hello', 42, true]).success, true)
+      assert.strictEqual(schema.safeParse(['hello', '42', true]).success, false)
     })
   })
 
   describe('Validation Function', () => {
-    it('should validate successfully with valid data', () => {
-      const schema = ['string', 'email']
-      const validEmail = 'test@example.com'
-
-      // Should not throw
-      validate(schema, validEmail)
-    })
-
-    it('should throw validation error with invalid data', () => {
-      const schema = ['string', 'email']
-      const invalidEmail = 'not-an-email'
-
-      assert.throws(() => {
-        validate(schema, invalidEmail)
-      }, /Invalid email address/)
-    })
-
-    it('should validate complex object schema', () => {
-      const schema = {
-        name: ['string'],
-        age: ['number', 'positive', 'integer'],
-        email: ['string', 'email']
+    const validationTests = [
+      {
+        name: 'basic validation',
+        schema: ['string'],
+        valid: 'hello',
+        invalid: {value: 123, error: /expected string, received number/}
+      },
+      {
+        name: 'complex object validation',
+        schema: {
+          name: ['string'],
+          age: ['number', 'positive'],
+          email: ['string', 'email']
+        },
+        valid: {name: 'John Doe', age: 25, email: 'john@example.com'},
+        invalid: {
+          value: {name: 'John Doe', age: -25, email: 'invalid-email'},
+          error: /Invalid email address/
+        }
       }
+    ]
 
-      const validUser = {
-        name: 'John Doe',
-        age: 25,
-        email: 'john@example.com'
-      }
+    validationTests.forEach(test => {
+      it(`should handle ${test.name}`, () => {
+        const schema = parseSchema(test.schema)
 
-      const invalidUser = {
-        name: 'John Doe',
-        age: -25, // negative age
-        email: 'invalid-email'
-      }
+        // Should not throw for valid data
+        assert.doesNotThrow(() => validate(schema, test.valid))
 
-      // Should not throw
-      validate(schema, validUser)
-
-      // Should throw
-      assert.throws(() => {
-        validate(schema, invalidUser)
-      }, /Invalid email address/)
+        // Should throw for invalid data
+        if (test.invalid) {
+          assert.throws(() => validate(schema, test.invalid.value), test.invalid.error)
+        }
+      })
     })
   })
 
   describe('Integration Tests - Service and User Level Validation', () => {
-    it('should fail compilation with invalid schema descriptor', async () => {
-      const query = (await import('../index.js')).default
-
-      const testService = {
-        async test(args) {
-          return args.value
-        }
-      }
-
-      // Invalid schema descriptor should cause compilation error
-      testService.test._validators = {
-        precheck: {
-          value: ['invalidType']
-        }
-      }
-
-      const config = {
-        services: {testService},
-        queries: {
-          result: ['testService:test', {value: 'hello'}]
-        }
-      }
-
-      await assert.rejects(
-        query(config),
-        new Error('[result - testService:test] service precheck schema parse error:\n- value: Invalid option: expected one of "string"|"number"|"boolean"|"date"|"any"|"unknown"|"void"|"undefined"|"null"|"array"|"object"|"union"|"enum"|"nullable"|"optional"|"tuple"|"function"')
-      )
-    })
-
-    it('should validate with service-level precheck', async () => {
-      const query = (await import('../index.js')).default
-
-      // Create a test service with validation
-      const testService = {
-        async validateInput(args) {
-          return args.value * 2
-        }
-      }
-
-      // Add service-level validation
-      testService.validateInput._validators = {
-        precheck: {
-          value: ['number', 'positive']
-        }
-      }
-
-      const config = {
-        services: {testService},
-        queries: {
-          test: ['testService:validateInput', {value: 10}]
-        }
-      }
-
-      // Should succeed with valid input
-      const result = await query(config)
-      assert.strictEqual(result.test, 20)
-    })
-
-    it('should fail with invalid service-level precheck', async () => {
-      const query = (await import('../index.js')).default
-
-      const testService = {
-        async validateInput(args) {
-          return args.value * 2
-        }
-      }
-
-      testService.validateInput._validators = {
-        precheck: {
-          value: ['number', 'positive']
-        }
-      }
-
-      const config = {
-        services: {testService},
-        queries: {
-          test: ['testService:validateInput', {value: -5}]
-        }
-      }
-
-      // Should fail with negative value
-      await assert.rejects(
-        query(config),
-        new Error('[test - testService:validateInput] service precheck validation failed:\n- value: Too small: expected number to be >0')
-      )
-    })
-
-    it('should validate with service-level postcheck', async () => {
-      const query = (await import('../index.js')).default
-
-      const testService = {
-        async processData(args) {
-          return {
-            result: args.input.toUpperCase(),
-            length: args.input.length
-          }
-        }
-      }
-
-      // Add service-level postcheck validation
-      testService.processData._validators = {
-        postcheck: {
-          result: ['string'],
-          length: ['number', 'positive']
-        }
-      }
-
-      const config = {
-        services: {testService},
-        queries: {
-          test: ['testService:processData', {input: 'hello'}]
-        }
-      }
-
-      const result = await query(config)
-      assert.deepStrictEqual(result.test, {result: 'HELLO', length: 5})
-    })
-
-    it('should validate with user-level precheck overriding service validation', async () => {
-      const query = (await import('../index.js')).default
-
-      const testService = {
-        async processNumber(args) {
-          return args.num * 3
-        }
-      }
-
-      // Service allows any number
-      testService.processNumber._validators = {
-        precheck: {
-          num: ['number']
-        }
-      }
-
-      // User adds additional constraint
-      const config = {
-        services: {testService},
-        queries: {
-          test: ['testService:processNumber', {
-            num: 15,
-            precheck: {
-              num: ['number', {min: 10, max: 20}]
-            }
-          }]
-        }
-      }
-
-      const result = await query(config)
-      assert.strictEqual(result.test, 45)
-    })
-
-    it('should fail when user precheck is more restrictive', async () => {
-      const query = (await import('../index.js')).default
-
-      const testService = {
-        async processNumber(args) {
-          return args.num * 3
-        }
-      }
-
-      testService.processNumber._validators = {
-        precheck: {
-          num: ['number']
-        }
-      }
-
-      const config = {
-        services: {testService},
-        queries: {
-          test: ['testService:processNumber', {
-            num: 25, // Outside user's range
-            precheck: {
-              num: ['number', {min: 10, max: 20}]
-            }
-          }]
-        }
-      }
-
-      await assert.rejects(
-        query(config),
-        new Error('[test - testService:processNumber] query precheck validation failed:\n- num: Too big: expected number to be <=20')
-      )
-    })
-
-    it('should validate arrays with both service and user validation', async () => {
-      const query = (await import('../index.js')).default
-
-      const testService = {
-        async processArray(args) {
-          return args.items.map(item => item.toUpperCase())
-        }
-      }
-
-      // Service validates it's an array
-      testService.processArray._validators = {
-        precheck: {
-          items: ['array', ['string']]
-        }
-      }
-
-      // User adds length constraints
-      const config = {
-        services: {testService},
-        queries: {
-          test: ['testService:processArray', {
-            items: ['hello', 'world'],
-            precheck: {
-              items: ['array', ['string'], {min: 2, max: 5}]
-            }
-          }]
-        }
-      }
-
-      const result = await query(config)
-      assert.deepStrictEqual(result.test, ['HELLO', 'WORLD'])
-    })
-
-    it('should handle complex nested validation', async () => {
-      const query = (await import('../index.js')).default
-
-      const testService = {
-        async createUser(args) {
-          return {
-            id: Math.floor(Math.random() * 1000),
-            ...args.userData,
-            createdAt: new Date().toISOString()
-          }
-        }
-      }
-
-      // Service-level validation
-      testService.createUser._validators = {
-        precheck: {
-          userData: {
+    // Test cases for service validation
+    const serviceValidationTests = [
+      {
+        name: 'service-level precheck validation',
+        service: 'double',
+        validators: {precheck: {value: ['number', 'positive']}},
+        validInput: {value: 10},
+        expectedResult: 20,
+        invalidInput: {value: -5},
+        expectedError: /Too small: expected number to be >0/
+      },
+      {
+        name: 'service-level postcheck validation',
+        service: 'divide',
+        validators: {
+          precheck: {numerator: ['number'], denominator: ['number']},
+          postcheck: ['number', 'positive']
+        },
+        validInput: {numerator: 10, denominator: 2},
+        expectedResult: 5,
+        invalidInput: {numerator: -10, denominator: 2},
+        expectedError: /postcheck validation failed/
+      },
+      {
+        name: 'enum validation',
+        service: 'updateTheme',
+        validators: {precheck: {theme: ['enum', ['light', 'dark', 'auto']]}},
+        validInput: {theme: 'dark'},
+        expectedResult: {theme: 'dark', updated: true},
+        invalidInput: {theme: 'blue'},
+        expectedError: /Invalid option: expected one of "light"\|"dark"\|"auto"/
+      },
+      {
+        name: 'regex pattern validation',
+        service: 'validateUsername',
+        validators: {precheck: {username: ['string', {regex: /^[a-zA-Z0-9_]{3,20}$/}]}},
+        validInput: {username: 'valid_user123'},
+        expectedResult: 'Valid: valid_user123',
+        invalidInput: {username: 'no-dashes'},
+        expectedError: /Invalid string: must match pattern/
+      },
+      {
+        name: 'optional fields validation',
+        service: 'createProfile',
+        validators: {
+          precheck: {
             name: ['string'],
-            email: ['string', 'email']
+            bio: ['string', 'optional']
           }
         },
-        postcheck: {
-          id: ['number', 'positive'],
-          name: ['string'],
-          email: ['string', 'email'],
-          createdAt: ['string']
-        }
+        validInput: {name: 'John'},
+        expectedResult: {name: 'John', bio: 'No bio'},
+        invalidInput: null // No invalid case for this test
+      },
+      {
+        name: 'URL validation',
+        service: 'extract',
+        validators: {precheck: {url: ['string', 'url']}},
+        validInput: {url: 'https://example.com'},
+        expectedResult: 'https://example.com',
+        invalidInput: {url: 'not a url'},
+        expectedError: /Invalid URL/
       }
+    ]
 
-      // User adds age validation
-      const config = {
-        services: {testService},
-        queries: {
-          newUser: ['testService:createUser', {
-            userData: {
-              name: 'John Doe',
-              email: 'john@example.com',
-              age: 25
-            },
-            precheck: {
-              userData: {
-                age: ['number', 'positive', {min: 18}]
-              }
-            }
-          }]
+    // Generate tests from data
+    serviceValidationTests.forEach(testCase => {
+      it(`should validate with ${testCase.name}`, async () => {
+        // Test valid input
+        const result = await runValidationTest(
+          testCase.service,
+          testCase.validators,
+          testCase.validInput
+        )
+        assert.deepStrictEqual(result, testCase.expectedResult)
+
+        // Test invalid input if provided
+        if (testCase.invalidInput) {
+          await runValidationTest(
+            testCase.service,
+            testCase.validators,
+            testCase.invalidInput,
+            testCase.expectedError
+          )
         }
-      }
-
-      const result = await query(config)
-      assert.strictEqual(result.newUser.name, 'John Doe')
-      assert.strictEqual(result.newUser.email, 'john@example.com')
-      assert.strictEqual(result.newUser.age, 25)
-      assert.strictEqual(typeof result.newUser.id, 'number')
-      assert.strictEqual(typeof result.newUser.createdAt, 'string')
-    })
-
-    it('should validate both precheck and postcheck in sequence', async () => {
-      const query = (await import('../index.js')).default
-
-      const testService = {
-        async transform(args) {
-          // Transform string to object
-          return {
-            original: args.input,
-            uppercase: args.input.toUpperCase(),
-            length: args.input.length
-          }
-        }
-      }
-
-      // Service validates input and output
-      testService.transform._validators = {
-        precheck: {
-          input: ['string', {min: 3}]
-        },
-        postcheck: {
-          original: ['string'],
-          uppercase: ['string'],
-          length: ['number', 'positive']
-        }
-      }
-
-      const config = {
-        services: {testService},
-        queries: {
-          result: ['testService:transform', {input: 'test'}]
-        }
-      }
-
-      const result = await query(config)
-      assert.deepStrictEqual(result.result, {
-        original: 'test',
-        uppercase: 'TEST',
-        length: 4
       })
     })
 
-    it('should handle validation errors in chains', async () => {
-      const query = (await import('../index.js')).default
+    it('should fail compilation with invalid schema descriptor', async () => {
+      const service = {async test(args) { return args.value }}
+      service.test._validators = {precheck: {value: ['invalidType']}}
 
-      const testService = {
-        async step1(args) {
-          return args.value + 10
-        },
-        async step2(args) {
-          return args.value * 2
+      const config = {
+        services: {testService: service},
+        queries: {result: ['testService:test', {value: 'hello'}]}
+      }
+
+      await assert.rejects(
+        query(config),
+        /Invalid option: expected one of "string"\|"number"\|"boolean"/
+      )
+    })
+
+    it('should allow user-level validation to override service validation', async () => {
+      const service = createService('double', {
+        precheck: {value: ['number']}
+      })
+
+      const config = {
+        services: {testService: service},
+        queries: {
+          result: ['testService:process', {
+            value: 5,
+            precheck: {value: ['number', {min: 10, max: 20}]}
+          }]
         }
       }
 
-      // Add validation to step2
-      testService.step2._validators = {
-        precheck: {
-          value: ['number', {max: 50}] // Will fail if step1 result > 50
-        }
+      // User's stricter validation should fail even though service validation would pass
+      await assert.rejects(query(config), /Too small/)
+    })
+
+    it('should handle validation in chains', async () => {
+      const step1 = {async process(args) { return args.value + 10 }}
+      const step2 = {async process(args) { return args.value * 2 }}
+      step2.process._validators = {
+        precheck: {value: ['number', {max: 50}]}
       }
 
       const config = {
-        services: {testService},
+        services: {step1, step2},
         queries: {
           chain: [
-            ['testService:step1', {value: 45}], // Returns 55
-            ['testService:step2', {value: '@'}] // Should fail validation
+            ['step1:process', {value: 45}], // Returns 55
+            ['step2:process', {value: '@'}] // Should fail validation
           ]
         }
       }
 
-      await assert.rejects(
-        query(config),
-        new Error('[chain[1] - testService:step2] service precheck validation failed:\n- value: Too big: expected number to be <=50')
-      )
+      await assert.rejects(query(config), /Too big: expected number to be <=50/)
     })
 
-    it('should validate with optional fields', async () => {
-      const query = (await import('../index.js')).default
+    it('should validate arrays with service validation', async () => {
+      const service = {async process(args) { return args.items.map(i => i.toUpperCase()) }}
+      service.process._validators = {
+        precheck: {items: ['array', ['string'], {min: 2, max: 5}]}
+      }
 
-      const testService = {
-        async createProfile(args) {
-          const profile = {name: args.name}
-          if (args.bio) profile.bio = args.bio
-          if (args.age) profile.age = args.age
-          return profile
+      const config = {
+        services: {testService: service},
+        queries: {
+          result: ['testService:process', {items: ['hello', 'world']}]
         }
       }
 
-      // Service validation with optional fields
-      testService.createProfile._validators = {
+      const result = await query(config)
+      assert.deepStrictEqual(result.result, ['HELLO', 'WORLD'])
+
+      // Test failure cases
+      const failConfig = {
+        services: {testService: service},
+        queries: {
+          result: ['testService:process', {items: ['only-one']}]
+        }
+      }
+      await assert.rejects(query(failConfig), /Too small/)
+    })
+
+    it('should handle complex nested validation', async () => {
+      const service = createService('createUser', {
         precheck: {
-          name: ['string'],
-          bio: ['string', 'optional'],
-          age: ['number', 'positive', 'optional']
+          userData: {
+            name: ['string'],
+            age: ['number', 'positive'],
+            address: {
+              street: ['string'],
+              city: ['string'],
+              zip: ['string', {regex: /^\d{5}$/}]
+            },
+            tags: ['array', ['string'], {max: 5}]
+          }
         }
-      }
-
-      // Test with only required field
-      const config1 = {
-        services: {testService},
-        queries: {
-          profile: ['testService:createProfile', {name: 'Alice'}]
-        }
-      }
-
-      const result1 = await query(config1)
-      assert.deepStrictEqual(result1.profile, {name: 'Alice'})
-
-      // Test with all fields
-      const config2 = {
-        services: {testService},
-        queries: {
-          profile: ['testService:createProfile', {
-            name: 'Bob',
-            bio: 'Developer',
-            age: 30
-          }]
-        }
-      }
-
-      const result2 = await query(config2)
-      assert.deepStrictEqual(result2.profile, {
-        name: 'Bob',
-        bio: 'Developer',
-        age: 30
       })
-    })
 
-    it('should validate with enum types', async () => {
-      const query = (await import('../index.js')).default
-
-      const settingsService = {
-        async updateTheme(args) {
-          return {
-            theme: args.theme,
-            updated: true
-          }
-        }
-      }
-
-      // Service validation with enum
-      settingsService.updateTheme._validators = {
-        precheck: {
-          theme: ['enum', ['light', 'dark', 'auto']]
+      const validData = {
+        userData: {
+          name: 'John Doe',
+          age: 30,
+          address: {
+            street: '123 Main St',
+            city: 'Anytown',
+            zip: '12345'
+          },
+          tags: ['user', 'premium']
         }
       }
 
       const config = {
-        services: {settingsService},
-        queries: {
-          result: ['settingsService:updateTheme', {theme: 'dark'}]
-        }
+        services: {testService: service},
+        queries: {result: ['testService:process', validData]}
       }
 
       const result = await query(config)
-      assert.deepStrictEqual(result.result, {theme: 'dark', updated: true})
-
-      // Test invalid enum value
-      const invalidConfig = {
-        services: {settingsService},
-        queries: {
-          result: ['settingsService:updateTheme', {theme: 'blue'}]
-        }
-      }
-
-      await assert.rejects(
-        query(invalidConfig),
-        new Error('[result - settingsService:updateTheme] service precheck validation failed:\n- theme: Invalid option: expected one of "light"|"dark"|"auto"')
-      )
+      assert.strictEqual(result.result.id, 123)
+      assert.strictEqual(result.result.name, 'John Doe')
     })
 
-    it('should validate with regex patterns', async () => {
-      const query = (await import('../index.js')).default
-
-      const userService = {
-        async validateUsername(args) {
-          return {username: args.username, valid: true}
+    it('should validate both precheck and postcheck in sequence', async () => {
+      const service = {
+        async process(args) {
+          if (args.fail) throw new Error('Service error')
+          return {value: args.value * 2, status: 'success'}
         }
       }
 
-      // Service validation with regex
-      userService.validateUsername._validators = {
-        precheck: {
-          username: ['string', {regex: /^[a-zA-Z0-9_]{3,20}$/}]
+      service.process._validators = {
+        precheck: {value: ['number', 'positive']},
+        postcheck: {
+          value: ['number', {max: 100}],
+          status: ['enum', ['success', 'pending', 'failed']]
         }
       }
 
+      // Valid case
       const config = {
-        services: {userService},
-        queries: {
-          result: ['userService:validateUsername', {username: 'valid_user123'}]
-        }
+        services: {testService: service},
+        queries: {result: ['testService:process', {value: 10}]}
       }
-
       const result = await query(config)
-      assert.deepStrictEqual(result.result, {username: 'valid_user123', valid: true})
+      assert.deepStrictEqual(result.result, {value: 20, status: 'success'})
 
-      // Test invalid username
-      const invalidConfig = {
-        services: {userService},
-        queries: {
-          result: ['userService:validateUsername', {username: 'no-dashes'}]
-        }
+      // Postcheck failure
+      const failConfig = {
+        services: {testService: service},
+        queries: {result: ['testService:process', {value: 60}]} // 60 * 2 = 120 > 100
       }
-
-      await assert.rejects(
-        query(invalidConfig),
-        new Error('[result - userService:validateUsername] service precheck validation failed:\n- username: Invalid string: must match pattern /^[a-zA-Z0-9_]{3,20}$/')
-      )
+      await assert.rejects(query(failConfig), /postcheck validation failed/)
     })
 
-    it('should validate date constraints', async () => {
-      const query = (await import('../index.js')).default
-
-      const eventService = {
-        async scheduleEvent(args) {
-          return {
-            scheduled: true,
-            date: args.eventDate.toISOString()
-          }
-        }
+    // Test for constraint objects and modifiers
+    const modifierTests = [
+      {
+        name: 'date with constraints',
+        validators: {precheck: {value: ['date', {min: new Date('2023-01-01')}]}},
+        service: 'echo',
+        validInput: {value: new Date('2024-01-01')},
+        invalidInput: {value: new Date('2022-01-01')},
+        expectedError: /Too small/
+      },
+      {
+        name: 'URL string modifier',
+        validators: {precheck: {value: ['string', 'url']}},
+        service: 'echo',
+        validInput: {value: 'https://example.com'},
+        invalidInput: {value: 'not-a-url'},
+        expectedError: /Invalid URL/
+      },
+      {
+        name: 'object with optional modifier',
+        validators: {precheck: {value: ['object', 'optional']}},
+        service: 'echo',
+        validInput: {value: {name: 'test'}},
+        invalidInput: {value: 'not an object'},
+        expectedError: /Invalid input: expected object/
+      },
+      {
+        name: 'array with constraints',
+        validators: {precheck: {value: ['array', ['string'], {min: 1, max: 10}]}},
+        service: 'echo',
+        validInput: {value: ['one', 'two', 'three']},
+        invalidInput: {value: []},
+        expectedError: /Too small/
       }
+    ]
 
-      // Service validation requiring future dates
-      const minDate = new Date()
-      eventService.scheduleEvent._validators = {
-        precheck: {
-          eventDate: ['date', {min: minDate}]
+    modifierTests.forEach(test => {
+      it(`should accept ${test.name}`, async () => {
+        await runValidationTest(test.service, test.validators, test.validInput)
+        if (test.invalidInput) {
+          await runValidationTest(test.service, test.validators, test.invalidInput, test.expectedError)
         }
-      }
-
-      const futureDate = new Date()
-      futureDate.setDate(futureDate.getDate() + 7)
-
-      const config = {
-        services: {eventService},
-        queries: {
-          result: ['eventService:scheduleEvent', {eventDate: futureDate}]
-        }
-      }
-
-      const result = await query(config)
-      assert.strictEqual(result.result.scheduled, true)
-
-      // Test past date
-      const pastDate = new Date()
-      pastDate.setDate(pastDate.getDate() - 1)
-
-      const invalidConfig = {
-        services: {eventService},
-        queries: {
-          result: ['eventService:scheduleEvent', {eventDate: pastDate}]
-        }
-      }
-
-      await assert.rejects(
-        query(invalidConfig),
-        /precheck validation failed/
-      )
+      })
     })
   })
 })

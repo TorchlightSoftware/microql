@@ -9,6 +9,8 @@
  */
 
 import {z} from 'zod'
+import _ from 'lodash'
+import {inspect} from 'util'
 
 const PRIMITIVE_TYPES = ['string', 'number', 'boolean', 'date', 'any', 'unknown', 'void', 'undefined', 'null']
 const WRAPPER_TYPES = ['array', 'object', 'union', 'enum', 'nullable', 'optional', 'tuple', 'function']
@@ -42,10 +44,20 @@ const DescriptorSchema = z.lazy(() => z.union([
 /**
  * Format Zod error messages into MicroQL error format
  */
-function formatError(zodError) {
-  const errors = zodError?.issues || []
-  const errorMessages = errors.map(err => {
-    const path = err.path && err.path.length > 0 ? err.path.join('.') : 'value'
+function formatError(zodError, value) {
+  const issues = zodError?.issues || []
+  const errorMessages = issues.map(err => {
+    // Build a more detailed path showing the exact location of the error
+    let path = '.'
+    if (err.path && err.path.length > 0) {
+      path = err.path.map((segment, index) => {
+        if (typeof segment === 'number') {
+          return `[${segment}]`
+        }
+        return index === 0 ? segment : `.${segment}`
+      }).join('')
+    }
+    const specificValue = path === '.' ? value : _.get(value, path)
 
     // Improve union error messages by finding the most helpful branch error
     let message = err.message
@@ -61,7 +73,7 @@ function formatError(zodError) {
       }
     }
 
-    return `- ${path}: ${message}`
+    return `- ${path}: ${inspect(specificValue, {depth: 4})} => ${message}`
   })
 
   return errorMessages.join('\n')
@@ -70,14 +82,14 @@ function formatError(zodError) {
 /**
  * Main validation function called by withValidation wrapper
  */
-export function validate(schema, value) {
+export function validate(schema, value, validateDescriptor = true) {
   if (!schema) return
 
-  const zodSchema = parseSchema(schema)
+  const zodSchema = parseSchema(schema, validateDescriptor)
   const result = zodSchema.safeParse(value)
 
   if (!result.success) {
-    throw new Error(formatError(result.error))
+    throw new Error(formatError(result.error, value))
   }
 }
 
@@ -86,15 +98,18 @@ export function validate(schema, value) {
  * during withValidations() wrapper execution.
  * The second time it just returns the already-parsed schema.
  */
-export function parseSchema(descriptor) {
+export function parseSchema(descriptor, validateDescriptor = true) {
   // If already a Zod schema, return it immediately
   if (descriptor instanceof z.ZodType) {
     return descriptor
   }
 
   // Validate descriptor format itself to ensure it's of valid form
-  validate(DescriptorSchema, descriptor)
+  if (validateDescriptor) validate(DescriptorSchema, descriptor, false)
+  return parseSchemaRecursive(descriptor)
+}
 
+function parseSchemaRecursive(descriptor) {
   // String: direct type lookup
   if (typeof descriptor === 'string') {
     return z[descriptor]()
@@ -106,12 +121,13 @@ export function parseSchema(descriptor) {
 
     // Special cases that need arguments
     if (type === 'array') {
-      const elementSchema = args[0] || 'any'
-      const options = args[1]
-      let arraySchema = z.array(parseSchema(elementSchema))
+      const elementSchema = args[0] || 'any' // BM: is it always arg[0]?
+      let arraySchema = z.array(parseSchemaRecursive(elementSchema))
 
       // Apply array constraints
+      const options = args[1] // BM: is it always arg[1]?
       if (options && typeof options === 'object') {
+        // BM: are these the only options?
         if (options.min !== undefined) arraySchema = arraySchema.min(options.min)
         if (options.max !== undefined) arraySchema = arraySchema.max(options.max)
         if (options.length !== undefined) arraySchema = arraySchema.length(options.length)
@@ -120,20 +136,37 @@ export function parseSchema(descriptor) {
       return arraySchema
     }
 
+    // BM: optional in the second argument is causing a problem here... optional actually needs to be applied on the outside as a wrapper type
+    // How do we detect and apply a wrapper on the outside?
+    // could loop through args, detect WRAPPER_TYPES, separate them out, apply in canonical WRAPPER_TYPES order to the outside
     if (type === 'object') {
-      const shape = args[0] || {}
-      return z.object(transformObjectShape(shape))
+      // For 'object' type, if no shape is provided, use a generic object schema
+      const shape = args.find(arg => typeof arg === 'object' && !Array.isArray(arg))
+      let objectSchema
+      if (shape) {
+        objectSchema = z.object(transformObjectShape(shape))
+      } else {
+        // Generic object schema for ['object'] or ['object', 'optional']
+        objectSchema = z.object({}).passthrough()
+      }
+
+      // Apply any modifiers (like 'optional')
+      const modifiers = args.filter(arg => typeof arg === 'string')
+      return applyModifiers(objectSchema, modifiers)
     }
 
+    // BM: what happens to the rest of the args?
     if (type === 'function') {
       return z.any()
     }
 
+    // BM: what happens to the rest of the args?
     if (type === 'union') {
       const schemas = args[0] || []
-      return z.union(schemas.map(parseSchema))
+      return z.union(schemas.map(parseSchemaRecursive))
     }
 
+    // BM: what happens to the rest of the args?
     if (type === 'enum') {
       const values = args[0] || []
       if (!Array.isArray(values) || values.length === 0) {
@@ -142,22 +175,29 @@ export function parseSchema(descriptor) {
       return z.enum(values)
     }
 
+    // BM: what happens to the rest of the args?
     if (type === 'nullable') {
       const innerSchema = args[0] || 'any'
-      return z.nullable(parseSchema(innerSchema))
+      return z.nullable(parseSchemaRecursive(innerSchema))
     }
 
+    // BM: what happens to the rest of the args?
     if (type === 'optional') {
       const innerSchema = args[0] || 'any'
-      return z.optional(parseSchema(innerSchema))
+      return z.optional(parseSchemaRecursive(innerSchema))
     }
 
+    // BM: what happens to the rest of the args?
     if (type === 'tuple') {
       const elements = args
-      return z.tuple(elements.map(parseSchema))
+      return z.tuple(elements.map(parseSchemaRecursive))
     }
 
     // Try dynamic access with modifiers (functional composition)
+    // BM: this doesn't make sense to me - in which cases do none of the above
+    // `if` cases trigger, but this one does, and it has appropriate arguments
+    // to do its job?
+    // Can we canonize "MODIFIER_TYPES" to make this clearer?
     if (z[type] && typeof z[type] === 'function') {
       return applyModifiers(z[type](), args)
     }
@@ -205,7 +245,7 @@ function getZodMethodName(modifier) {
 function transformObjectShape(shape) {
   const result = {}
   for (const [key, subDescriptor] of Object.entries(shape)) {
-    result[key] = parseSchema(subDescriptor)
+    result[key] = parseSchemaRecursive(subDescriptor)
   }
   return result
 }

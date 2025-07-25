@@ -26,7 +26,11 @@ const withArgs = (fn) => {
       }
 
       // is it a chain?
-      if (Array.isArray(value) && _.every(value, v => typeof v === 'function')) {
+      if (
+        Array.isArray(value) &&
+        value.length > 0 &&
+        _.every(value, v => typeof v === 'function')
+      ) {
         return async (ctx) => {
           // we need to push two layers of stack for the `fn` and the `chain`
           // @ will refer to chain, @@ will refer to fn

@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import query from '../index.js'
+import query from '../query.js'
 
 describe('Validation Edge Cases and Error Handling', () => {
   describe('Invalid validation syntax in user queries', () => {
