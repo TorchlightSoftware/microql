@@ -195,7 +195,7 @@ orderService.createOrder._validators = {
       customerId: ['string', 'uuid'],
       items: ['array', [{
         productId: ['string'],
-        quantity: ['number', 'positive', 'integer'],
+        quantity: ['number', 'positive', 'int'],
         price: ['number', 'positive']
       }], {min: 1}],
       shippingAddress: {

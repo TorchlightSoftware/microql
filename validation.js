@@ -23,12 +23,15 @@ const DescriptorSchema = z.lazy(() => z.union([
   // String format: primitive or wrapper type names
   AllTypesEnum,
 
+  // Direct Zod schema
+  z.instanceof(z.ZodType),
+
   // Array format: [type, ...modifiers]
   z.array(z.union([
     z.string(), // type names and string modifiers
     z.object({}).passthrough(), // constraint objects like {min: 5}
     z.instanceof(RegExp), // regex patterns
-    z.array(z.any()).min(0), // empty arrays or arrays with any content (for enum values, etc.)
+    z.array(z.any()).min(0), // arrays with content (for enum values, etc.)
     DescriptorSchema // nested descriptors
   ])).min(1).refine(arr => {
     // First element must be a string and a valid type name
@@ -110,6 +113,11 @@ export function parseSchema(descriptor, validateDescriptor = true) {
 }
 
 function parseSchemaRecursive(descriptor) {
+  // we support putting zod schemas inside our own schemas...
+  if (descriptor instanceof z.ZodType) {
+    return descriptor
+  }
+
   // String: direct type lookup
   if (typeof descriptor === 'string') {
     return z[descriptor]()
@@ -121,24 +129,30 @@ function parseSchemaRecursive(descriptor) {
 
     // Special cases that need arguments
     if (type === 'array') {
-      const elementSchema = args[0] || 'any' // BM: is it always arg[0]?
+      const elementSchema = args[0] || 'any'
       let arraySchema = z.array(parseSchemaRecursive(elementSchema))
 
-      // Apply array constraints
-      const options = args[1] // BM: is it always arg[1]?
-      if (options && typeof options === 'object') {
-        // BM: are these the only options?
-        if (options.min !== undefined) arraySchema = arraySchema.min(options.min)
-        if (options.max !== undefined) arraySchema = arraySchema.max(options.max)
-        if (options.length !== undefined) arraySchema = arraySchema.length(options.length)
+      // Separate constraint objects from modifiers
+      const constraintObjects = args.filter(arg => typeof arg === 'object' && arg !== null && !Array.isArray(arg))
+      const modifiers = args.filter(arg => typeof arg === 'string')
+
+      // Apply array constraints dynamically
+      for (const options of constraintObjects) {
+        for (const [key, value] of Object.entries(options)) {
+          if (arraySchema[key] && typeof arraySchema[key] === 'function') {
+            if (key === 'nonempty' && value === true) {
+              arraySchema = arraySchema[key]()
+            } else {
+              arraySchema = arraySchema[key](value)
+            }
+          }
+        }
       }
 
-      return arraySchema
+      // Apply modifiers
+      return applyModifiers(arraySchema, modifiers)
     }
 
-    // BM: optional in the second argument is causing a problem here... optional actually needs to be applied on the outside as a wrapper type
-    // How do we detect and apply a wrapper on the outside?
-    // could loop through args, detect WRAPPER_TYPES, separate them out, apply in canonical WRAPPER_TYPES order to the outside
     if (type === 'object') {
       // For 'object' type, if no shape is provided, use a generic object schema
       const shape = args.find(arg => typeof arg === 'object' && !Array.isArray(arg))
@@ -155,52 +169,57 @@ function parseSchemaRecursive(descriptor) {
       return applyModifiers(objectSchema, modifiers)
     }
 
-    // BM: what happens to the rest of the args?
     if (type === 'function') {
       return z.any()
     }
 
-    // BM: what happens to the rest of the args?
     if (type === 'union') {
-      const schemas = args[0] || []
-      return z.union(schemas.map(parseSchemaRecursive))
+      // Separate schema descriptors from string modifiers
+      const schemas = args.filter(arg => Array.isArray(arg))
+      const modifiers = args.filter(arg => typeof arg === 'string')
+      const unionSchema = z.union(schemas.map(schema => parseSchemaRecursive(schema)))
+      return applyModifiers(unionSchema, modifiers)
     }
 
-    // BM: what happens to the rest of the args?
     if (type === 'enum') {
       const values = args[0] || []
       if (!Array.isArray(values) || values.length === 0) {
         throw new Error('Enum must have an array of values')
       }
-      return z.enum(values)
+      const modifiers = args.filter(arg => typeof arg === 'string')
+      const enumSchema = z.enum(values)
+      return applyModifiers(enumSchema, modifiers)
     }
 
-    // BM: what happens to the rest of the args?
     if (type === 'nullable') {
       const innerSchema = args[0] || 'any'
-      return z.nullable(parseSchemaRecursive(innerSchema))
+      const modifiers = args.filter(arg => typeof arg === 'string')
+      const nullableSchema = z.nullable(parseSchemaRecursive(innerSchema))
+      return applyModifiers(nullableSchema, modifiers)
     }
 
-    // BM: what happens to the rest of the args?
     if (type === 'optional') {
       const innerSchema = args[0] || 'any'
-      return z.optional(parseSchemaRecursive(innerSchema))
+      const modifiers = args.filter(arg => typeof arg === 'string')
+      const optionalSchema = z.optional(parseSchemaRecursive(innerSchema))
+      return applyModifiers(optionalSchema, modifiers)
     }
 
-    // BM: what happens to the rest of the args?
     if (type === 'tuple') {
-      const elements = args
-      return z.tuple(elements.map(parseSchemaRecursive))
+      const schemas = args.filter(arg => Array.isArray(arg) || typeof arg === 'string')
+      const modifiers = args.filter(arg => typeof arg === 'string' && !['string', 'number', 'boolean', 'date', 'any', 'unknown', 'void', 'undefined', 'null'].includes(arg))
+      const tupleSchema = z.tuple(schemas.map(parseSchemaRecursive))
+      return applyModifiers(tupleSchema, modifiers)
     }
 
-    // Try dynamic access with modifiers (functional composition)
-    // BM: this doesn't make sense to me - in which cases do none of the above
-    // `if` cases trigger, but this one does, and it has appropriate arguments
-    // to do its job?
-    // Can we canonize "MODIFIER_TYPES" to make this clearer?
-    if (z[type] && typeof z[type] === 'function') {
-      return applyModifiers(z[type](), args)
+    // Handle primitive types with modifiers (e.g., ['string', 'email', 'optional'])
+    if (PRIMITIVE_TYPES.includes(type) && z[type] && typeof z[type] === 'function') {
+      const modifiers = args.filter(arg => typeof arg === 'string' || typeof arg === 'object' || arg instanceof RegExp)
+      return applyModifiers(z[type](), modifiers)
     }
+
+    // If we get here, it's an unknown type
+    throw new Error(`Did you turn off schema validation? Unknown type: ${type}`)
   }
 
   // Object: shape definition
@@ -211,12 +230,8 @@ function parseSchemaRecursive(descriptor) {
 
 function applyModifiers(schema, modifiers) {
   return modifiers.reduce((currentSchema, modifier) => {
-    if (typeof modifier === 'string') {
-      // Handle special modifier name mappings
-      const methodName = getZodMethodName(modifier)
-      if (currentSchema[methodName]) {
-        return currentSchema[methodName]()
-      }
+    if (typeof modifier === 'string' && currentSchema[modifier]) {
+      return currentSchema[modifier]()
     } else if (typeof modifier === 'object' && modifier !== null) {
       // Apply object modifiers like {min: 10, max: 20}
       return Object.entries(modifier).reduce((s, [key, value]) => {
@@ -224,28 +239,10 @@ function applyModifiers(schema, modifiers) {
       }, currentSchema)
     } else if (modifier instanceof RegExp && currentSchema.regex) {
       return currentSchema.regex(modifier)
+    } else {
+      return currentSchema
     }
-    return currentSchema
   }, schema)
 }
 
-/**
- * Map modifier names to Zod method names
- */
-function getZodMethodName(modifier) {
-  switch (modifier) {
-    case 'integer': return 'int'
-    default: return modifier
-  }
-}
-
-/**
- * Transform object shape for Zod
- */
-function transformObjectShape(shape) {
-  const result = {}
-  for (const [key, subDescriptor] of Object.entries(shape)) {
-    result[key] = parseSchemaRecursive(subDescriptor)
-  }
-  return result
-}
+const transformObjectShape = (shape) => _.mapValues(shape, parseSchemaRecursive)

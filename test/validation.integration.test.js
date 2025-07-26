@@ -692,7 +692,7 @@ describe('Validation Integration Tests', () => {
           email: ['string', 'email'],
           url: ['string', 'url'],
           positive: ['number', 'positive'],
-          integer: ['number', 'integer'],
+          integer: ['number', 'int'],
           finite: ['number', 'finite'],
           safe: ['number', 'safe']
         }
@@ -724,11 +724,7 @@ describe('Validation Integration Tests', () => {
       }
       service.process._validators = {
         precheck: {
-          value: ['union', [
-            ['string'],
-            ['number'],
-            ['boolean']
-          ]]
+          value: ['union', ['string'], ['number'], ['boolean']]
         }
       }
 

@@ -87,15 +87,21 @@ MicroQL validators use a JSON-based syntax that gets transformed into Zod schema
 
 // With modifiers
 ['string', 'email']
-['number', 'positive', 'integer']
+['number', 'positive', 'int']
 ['string', {min: 5, max: 100}]
 
 // Optional/nullable
 ['string', 'optional']
 ['number', 'nullable']
+
+// Combining multiple modifiers (flat syntax)
+['string', 'optional', 'nullable']
+['number', 'positive', 'int', 'optional']
 ```
 
 ### 2. Object Syntax
+
+Shorthand syntax for objects.  See longhand syntax below in Wrapper Types.
 
 ```javascript
 {
@@ -107,43 +113,59 @@ MicroQL validators use a JSON-based syntax that gets transformed into Zod schema
 
 ### 3. Wrapper Types
 
+Wrapper types handle complex data structures and can be combined with modifiers:
+
 ```javascript
 // Arrays
-['array', ['string']]        // Array of strings
-['array', ['number'], {min: 2, max: 10}]  // Array of numbers with constraints
-['array']                    // Array of any type (shorthand for ['array', ['any']])
+['array', ['string']]                    // Array of strings
+['array', ['number'], {min: 2, max: 10}] // Array with constraints
+['array', ['string'], 'optional']       // Optional array of strings
+['array', ['string'], 'nullable']       // Nullable array of strings
+['array']                               // Array of any type (shorthand)
 
 // Objects
-['object', {name: ['string'], age: ['number']}]  // Object with specific shape
-['object']                   // Any object (shorthand for ['object', {}])
+['object', {name: ['string'], age: ['number']}] // Object with specific shape
+{name: ['string'], age: ['number']}             // Same object, shorthand, if you don't need modifiers
+['object', {name: ['string']}, 'optional']      // Optional object
+['object', {name: ['string']}, 'nullable']      // Nullable object
+['object']                                      // Any object (shorthand)
 
 // Unions
-['union', [['string'], ['number']]]
-
-// Nullable wrapper
-['nullable', ['string']]
-
-// Optional wrapper
-['optional', ['number']]
+['union', ['string'], ['number']]               // String or number
+['union', ['string'], ['number'], 'optional']  // Optional union
+['union', ['string'], ['number'], 'nullable']  // Nullable union
 
 // Enums
-['enum', ['red', 'green', 'blue']]  // Must be one of the specified values
+['enum', ['red', 'green', 'blue']]             // Must be one of the values
+['enum', ['red', 'blue', 'green'], 'optional'] // Optional enum
 
 // Tuples
-['tuple', [['string'], ['number']]]  // Fixed-length array with typed elements
+['tuple', ['string'], ['number']]              // Fixed-length typed array
+['tuple', ['string'], ['number'], 'optional']  // Optional tuple
+
+// Nullable/Optional wrappers (legacy - prefer flat syntax above)
+['nullable', ['string']]
+['optional', ['number']]
 ```
 
-### Natural Syntax Shortcuts
+### 5. Direct Zod Schema Usage
 
-The validation system supports convenient shortcuts:
+For advanced cases not covered by the JSON syntax, you can use Zod schemas directly:
 
 ```javascript
-// These are equivalent:
-['array']           ↔ ['array', ['any']]
-['object']          ↔ ['object', {}]
-['nullable']        ↔ ['nullable', ['any']]
-['optional']        ↔ ['optional', ['any']]
+import {z} from 'zod'
+
+const CustomSchema = z.string().min(8).regex(/^[A-Z]/)
+
+// Usage in service validators
+userService.create._validators = {
+  precheck: {
+    username: CustomSchema
+  }
+}
 ```
+
+See the [Zod documentation](https://zod.dev/) for full schema capabilities.
 
 ### Service Arguments Convention
 
@@ -166,15 +188,15 @@ Validation errors provide clear, detailed messages with full context:
 ```
 // [<queryName> - <serviceName>:<action>]
 [newUser - userService:createUser] precheck validation failed:
-- userData.age: Too small: expected number to be >=18
-- userData.email: Invalid email
+ - userData.age: -25 => Too small: expected number to be >0
+ - userData.email: 'invalid-email' => Invalid email
 ```
-
-MicroQL also adds the properties `queryName`, `serviceName`, and `action` to all error messages for programmatic decision making.
 
 ## Examples
 
 Examples are mixed from Query and Service validations.  The format is the same, `Query` / `Service` and `precheck` / `postcheck`.  So any of the examples here can be used anywhere a validator is expected.
+
+**For comprehensive examples and test cases**, see `test/validation.test.js` which contains data-driven tests demonstrating all syntax patterns, modifier combinations, and edge cases.
 
 ### Basic String Validation
 
@@ -230,7 +252,7 @@ orderService.create._validators = {
       },
       items: ['array', [{
         productId: ['string'],
-        quantity: ['number', 'positive', 'integer'],
+        quantity: ['number', 'positive', 'int'],
         price: ['number', 'positive']
       }], {min: 1}],
       shipping: {
