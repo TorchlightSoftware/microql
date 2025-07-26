@@ -377,7 +377,7 @@ util.snapshot._validators = {
   precheck: {
     on: ['any'],
     capture: ['any', 'optional'],
-    out: ['string', {min: 1, regex: /^[^<>:"|?*\x00-\x1f]+$/}] // Basic path validation
+    out: ['string', {min: 1, regex: /^[^<>:"|?*\t\n\r\0]+$/}] // Basic path validation - exclude tab, newline, carriage return, null
   }
 }
 
@@ -390,7 +390,7 @@ util.recordFailure._validators = {
       queryName: ['string'],
       args: ['any']
     },
-    location: ['string', {min: 1, regex: /^[^<>:"|?*\x00-\x1f]+$/}] // Basic path validation
+    location: ['string', {min: 1, regex: /^[^<>:"|?*\t\n\r\0]+$/}] // Basic path validation - exclude tab, newline, carriage return, null
   }
 }
 
