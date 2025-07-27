@@ -1,6 +1,6 @@
 import _ from 'lodash'
 import resolveValue from './resolve.js'
-import {getServiceColor} from './common.js'
+import {getServiceColorName} from './common.js'
 import {inspect} from 'util'
 
 import utilService from './services/util.js'
@@ -57,11 +57,11 @@ const withDebug = (fn) => {
   return async function (args) {
     const {queryName, serviceName, action, settings} = this
     const startTime = Date.now()
-    const [color, reset] = getServiceColor(serviceName)
+    const color = getServiceColorName(serviceName)
 
     if (settings.debug) {
       const printArgs = inspect(args, settings.inspect)
-      utilService.print({on: `${color}[${queryName} - ${serviceName}:${action}] Called with args:\n${printArgs}${reset}`, settings})
+      utilService.print({on: `[${queryName} - ${serviceName}:${action}] Called with args:\n${printArgs}`, settings, color})
     }
 
     // no try/catch - let errors be handled by withError
@@ -70,7 +70,7 @@ const withDebug = (fn) => {
     if (settings.debug) {
       const duration = Date.now() - startTime
       const printResult = inspect(result, settings.inspect)
-      utilService.print({on: `${color}[${queryName} - ${serviceName}:${action}] Completed in ${duration}ms returning:\n${printResult}${reset}`, settings})
+      utilService.print({on: `[${queryName} - ${serviceName}:${action}] Completed in ${duration}ms returning:\n${printResult}`, settings, color})
     }
 
     return result

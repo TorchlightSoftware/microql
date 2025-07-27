@@ -6,12 +6,26 @@
 import path from 'node:path'
 import fs from 'fs-extra'
 import {ANSI_COLORS} from '../common.js'
+import _ from 'lodash'
 
 /**
  * Ordered list of color names for service assignment
  */
 const COLOR_NAMES = ['green', 'yellow', 'blue', 'magenta', 'cyan', 'white']
 
+// Filter hidden properties (starting with _) before formatting
+const filterHidden = (val) => {
+  if (Array.isArray(val)) {
+    return val.map(filterHidden)
+  }
+  if (typeof val === 'object' && val !== null) {
+    return _.omitBy(val, (v, k) => k.startsWith('_'))
+  }
+  return val
+}
+
+const truncate = (str, maxStr) => !!maxStr && typeof str === 'string' ?
+  str.slice(0, maxStr) : str
 
 // Check if we should skip based on timestamp
 async function shouldSkipSnapshot(timestamp, out) {
@@ -136,33 +150,13 @@ const util = {
     // Format timestamp if enabled
     const timestamp = settings?.ts ? `[${new Date().toISOString()}] ` : ''
 
-    // Filter hidden properties (starting with _) before formatting
-    const filterHidden = (val) => {
-      if (Array.isArray(val)) {
-        return val.map(filterHidden)
-      }
-      if (typeof val === 'object' && val !== null) {
-        const filtered = {}
-        for (const [key, value] of Object.entries(val)) {
-          if (!key.startsWith('_')) {
-            filtered[key] = filterHidden(value)
-          }
-        }
-        return filtered
-      }
-      return val
-    }
-
     // use util.inspect with provided settings
     const util = await import('node:util')
-    let formatted
 
-    if (typeof on === 'string') {
-      formatted = on
-    } else {
-      const filtered = filterHidden(on)
-      formatted = util.inspect(filtered, settings?.inspect)
-    }
+    const maxStr = settings?.inspect?.maxStringLength
+
+    const formatted = typeof on === 'string' ? truncate(on, maxStr) :
+      util.inspect(filterHidden(on), settings?.inspect)
 
     // Apply color if specified
     const colorCode = ANSI_COLORS[color] || ''
@@ -288,6 +282,14 @@ util.snapshot._argtypes = {
 }
 
 util.template._argtypes = {on: {argOrder: 0}}
+
+util.pick._argtypes = {
+  on: {argOrder: 0}
+}
+
+util.recordFailure._argtypes = {
+  on: {argOrder: 0}
+}
 
 // Enhanced validation schemas for each service method
 util.map._validators = {

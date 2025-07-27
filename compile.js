@@ -12,6 +12,7 @@ _.mixin(lodashDeep)
 import {DEP_REGEX, SERVICE_REGEX, RESERVE_ARGS} from './common.js'
 import applyWrappers from './wrappers.js'
 import {parseSchema} from './validation.js'
+import util from './services/util.js'
 
 // Detects if a descriptor is a chain (nested arrays)
 const isChain = (descriptor) => {
@@ -162,13 +163,13 @@ function mergeArgs(args, arg0, argtypes = {}, serviceName, action) {
   args[argOrder0] = arg0
 }
 
-// Compiles a service descriptor like ['util:print', {color: 'green'}] or ['@', 'util:print', {color: 'green'}]
+// Compiles a service descriptor like ['@', 'util:print', {color: 'green'}]
 // into [a compiled function, recursive dependencies]
 function compileServiceFunction(queryName, descriptor, config) {
   const [serviceName, action, args, arg0] = parseServiceDescriptor(descriptor)
 
-  const service = config.services[serviceName]
   // Validate service exists and has the required method
+  const service = config.services[serviceName]
   if (!service) {
     throw new Error(`Service '${serviceName}' not found`)
   }
@@ -249,7 +250,9 @@ function compileDescriptor(queryName, descriptor, config) {
  * @returns {Object} Compiled queryTree
  */
 export function compile(config) {
-  const {services, queries, given, debug, settings = {}} = config
+  _.defaults(config, {services: {}, queries: {}, debug: false, settings: {}})
+  const {services, queries, given, debug, settings} = config
+  _.defaults(config.services, {util})
 
   // Build tree for each query (use config as-is for service compilation)
   const queryTree = {}

@@ -28,6 +28,14 @@ const getServiceColor = (serviceName) => {
   return [ANSI_COLORS[serviceColors.get(serviceName)], ANSI_COLORS.reset]
 }
 
+const getServiceColorName = (serviceName) => {
+  if (!serviceColors.has(serviceName)) {
+    serviceColors.set(serviceName, COLOR_NAMES[colorIndex % COLOR_NAMES.length])
+    colorIndex++
+  }
+  return serviceColors.get(serviceName)
+}
+
 const RESERVE_ARGS = ['timeout', 'retry', 'onError', 'ignoreErrors', 'precheck', 'postcheck']
 
-export {ANSI_COLORS, DEP_REGEX, SERVICE_REGEX, AT_REGEX, BARE_DOLLAR_REGEX, getServiceColor, RESERVE_ARGS}
+export {ANSI_COLORS, DEP_REGEX, SERVICE_REGEX, AT_REGEX, BARE_DOLLAR_REGEX, getServiceColor, getServiceColorName, RESERVE_ARGS}

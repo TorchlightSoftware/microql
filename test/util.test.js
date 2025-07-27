@@ -51,8 +51,7 @@ describe('Util Service Tests', () => {
           return sum + (product ? product.price : 0)
         }, 0)
       }
-    },
-    util
+    }
   }
 
   describe('Direct Service Usage', () => {
@@ -133,18 +132,10 @@ describe('Util Service Tests', () => {
     it('should handle util.map with template in MicroQL', async () => {
       const result = await query({
         given: {people: testData.people},
-        services: {util},
         queries: {
-          summary: [
-            'util:map',
-            {
-              on: '$.given.people',
-              service: {
-                name: '@.name',
-                info: '@.department'
-              }
-            }
-          ]
+          summary: ['$.given.people', 'util:map', {
+            service: {name: '@.name', info: '@.department'}
+          }]
         },
         select: 'summary'
       })
@@ -162,13 +153,9 @@ describe('Util Service Tests', () => {
         given: {people: testData.people},
         services: mockServices,
         queries: {
-          formatted: [
-            'util:map',
-            {
-              on: '$.given.people',
-              service: ['data:formatName', {person: '@'}]
-            }
-          ]
+          formatted: ['$.given.people', 'util:map', {
+            service: ['data:formatName', {person: '@'}]
+          }]
         },
         select: 'formatted'
       })
@@ -181,13 +168,9 @@ describe('Util Service Tests', () => {
         given: {people: testData.people},
         services: mockServices,
         queries: {
-          engineers: [
-            'util:filter',
-            {
-              on: '$.given.people',
-              service: ['data:isEngineer', {person: '@'}]
-            }
-          ]
+          engineers: ['$.given.people', 'util:filter', {
+            service: ['data:isEngineer', {person: '@'}]
+          }]
         },
         select: 'engineers'
       })
@@ -203,13 +186,9 @@ describe('Util Service Tests', () => {
         given: {products: testData.products},
         services: mockServices,
         queries: {
-          allCategories: [
-            'util:flatMap',
-            {
-              on: '$.given.products',
-              service: ['data:getCategories', {product: '@'}]
-            }
-          ]
+          allCategories: ['$.given.products', 'util:flatMap', {
+            service: ['data:getCategories', {product: '@'}]
+          }]
         },
         select: 'allCategories'
       })
@@ -228,20 +207,16 @@ describe('Util Service Tests', () => {
       const result = await query({
         given: {person: {name: 'Alice', age: 30}},
         services: {
-          util,
           age: {
             isAdult({person}) {return person.age >= 18}
           }
         },
         queries: {
-          status: [
-            'util:when',
-            {
-              test: ['age:isAdult', {person: '$.given.person'}],
-              then: 'Adult',
-              or: 'Minor'
-            }
-          ]
+          status: ['util:when', {
+            test: ['age:isAdult', {person: '$.given.person'}],
+            then: 'Adult',
+            or: 'Minor'
+          }]
         },
         select: 'status'
       })
@@ -252,15 +227,10 @@ describe('Util Service Tests', () => {
     it('should handle method syntax with util', async () => {
       const result = await query({
         given: {items: [{id: 1}, {id: 2}, {id: 3}]},
-        services: {util},
         queries: {
-          processed: [
-            '$.given.items',
-            'util:map',
-            {
-              service: {original: '@.id', processed: true}
-            }
-          ]
+          processed: ['$.given.items', 'util:map', {
+            service: {original: '@.id', processed: true}
+          }]
         },
         select: 'processed'
       })
@@ -281,28 +251,17 @@ describe('Util Service Tests', () => {
         services: mockServices,
         queries: {
           // Calculate total for each order
-          orderTotals: [
-            'util:map',
-            {
-              on: '$.given.orders',
-              service: [
-                'data:calculateTotal',
-                {
-                  items: '@.items',
-                  products: testData.products
-                }
-              ]
-            }
-          ],
+          orderTotals: ['$.given.orders', 'util:map', {
+            service: ['data:calculateTotal', {
+              items: '@.items',
+              products: testData.products
+            }]
+          }],
 
           // Filter to orders over $30
-          bigOrders: [
-            'util:filter',
-            {
-              on: '$.orderTotals',
-              service: ['util:gt', {l: '@', r: 30}]
-            }
-          ],
+          bigOrders: ['$.orderTotals', 'util:filter', {
+            service: ['util:gt', {l: '@', r: 30}]
+          }],
 
           // Count big orders
           bigOrderCount: ['util:length', {value: '$.bigOrders'}]
@@ -335,7 +294,6 @@ describe('Util Service Tests', () => {
 
     it('should print basic values', async () => {
       const result = await query({
-        services: {util},
         queries: {
           printed: [
             'util:print',
@@ -388,7 +346,6 @@ describe('Util Service Tests', () => {
 
       const result = await query({
         given: testData,
-        services: {util},
         settings: {
           inspect: {
             depth: 1,
@@ -424,24 +381,16 @@ describe('Util Service Tests', () => {
     })
 
     it('should work with method syntax and custom inspect settings', async () => {
-      const testData = {
-        message:
-          'This is a very long string that should be truncated based on settings'
-      }
-
       await query({
-        given: testData,
-        services: {util},
+        given: {
+          message: 'This is a very long string that should be truncated based on settings'
+        },
         queries: {
-          result: [
-            '$.given.message',
-            'util:print',
-            {
-              settings: {inspect: {maxStringLength: 30}},
-              color: 'green',
-              ts: false
-            }
-          ]
+          result: ['$.given.message', 'util:print', {
+            settings: {inspect: {maxStringLength: 30}},
+            color: 'green',
+            ts: false
+          }]
         }
       })
 
@@ -451,8 +400,10 @@ describe('Util Service Tests', () => {
 
       // Should be a string (not inspected as object)
       assert(
-        output.includes('This is a very long string'),
-        'Should contain the message'
+        output.includes('This is a very long string'), 'Should contain "very long string"'
+      )
+      assert(
+        !output.includes('should be truncated'), 'Should not contain "truncated"'
       )
       assert(output.includes(ANSI_COLORS.green), 'Should contain green color code')
     })
@@ -474,7 +425,6 @@ describe('Util Service Tests', () => {
     it('should create snapshot with results format', async () => {
       const testQuery = {
         given: {value: 42},
-        services: {util},
         settings: {debug: false},
         queries: {
           doubled: ['util:when', {test: true, then: 84, or: 0}],
@@ -501,7 +451,6 @@ describe('Util Service Tests', () => {
     it('should save execution state correctly in snapshot', async () => {
       const testQuery = {
         given: {start: 1},
-        services: {util},
         settings: {debug: false},
         queries: {
           step1: ['util:pick', {on: '$.given', fields: ['start']}],
@@ -530,7 +479,6 @@ describe('Util Service Tests', () => {
     it('should work with different capture options', async () => {
       const testQuery = {
         given: {data: [1, 2, 3]},
-        services: {util},
         settings: {debug: false},
         queries: {
           result: [
