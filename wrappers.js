@@ -77,23 +77,8 @@ const withDebug = (fn) => {
   }
 }
 
-const withTimeout = (fn) => {
-  return async function (args) {
-    const {timeout} = this.settings
-    let timeoutId
-
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutId = setTimeout(() => {
-        reject(new Error(`Timed out after ${timeout}ms`))
-      }, timeout)
-    })
-
-    try {
-      return await Promise.race([fn.call(this, args), timeoutPromise])
-    } finally {
-      clearTimeout(timeoutId)
-    }
-  }
+const withRateLimit = (fn) => async function (args) {
+  return this.rateLimit.push(fn.bind(this, args))
 }
 
 const withRetry = (fn) => {
@@ -120,6 +105,26 @@ const withRetry = (fn) => {
     throw lastError
   }
 }
+
+const withTimeout = (fn) => {
+  return async function (args) {
+    const {timeout} = this.settings
+    let timeoutId
+
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error(`Timed out after ${timeout}ms`))
+      }, timeout)
+    })
+
+    try {
+      return await Promise.race([fn.call(this, args), timeoutPromise])
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  }
+}
+
 
 const withErrorHandling = (fn) => {
   return async function (args) {
@@ -162,13 +167,13 @@ const withErrorHandling = (fn) => {
 
 const withValidation = (fn) => {
   return async function (args) {
-    const {validators} = this
+    const {validators, settings} = this
 
     function runValidator(args, order, designation) {
       const schema = validators[order][designation]
       if (!schema) return
       try {
-        validate(schema, args)
+        validate(schema, args, settings)
       } catch (error) {
         error.message = `${designation} ${order} validation failed:\n${error.message}`
         throw error
@@ -191,7 +196,7 @@ const withValidation = (fn) => {
 }
 
 const applyWrappers = (def, config) => {
-  const {queryName, serviceName, action, args, settings, validators} = def
+  const {queryName, serviceName, action, args, settings, validators, rateLimit} = def
 
   const service = config.services[serviceName]
 
@@ -211,17 +216,18 @@ const applyWrappers = (def, config) => {
   wrappers.push(withErrorHandling)
 
   // Add validation wrapper if validators are defined
-  if (validators && (validators.precheck || validators.postcheck)) {
+  if (validators) {
     wrappers.push(withValidation)
   }
-
+  if (rateLimit) {
+    wrappers.push(withRateLimit)
+  }
   if (settings.retry > 0) {
     wrappers.push(withRetry)
   }
   if (settings.timeout && settings.timeout > 0) {
     wrappers.push(withTimeout)
   }
-
   //console.log('wrappers:', wrappers.map(f => f.name))
 
   // Apply all wrappers using functional composition
@@ -230,7 +236,7 @@ const applyWrappers = (def, config) => {
   // give all wrappers access to the full calling context so they don't have to fish for it
   // allow the contextStack to be passed at execution time
   return (queryResults, contextStack) =>
-    wrapped.call({queryName, serviceName, action, settings, validators, queryResults, contextStack}, args)
+    wrapped.call({queryName, serviceName, action, settings, validators, queryResults, contextStack, rateLimit}, args)
 }
 
 export default applyWrappers

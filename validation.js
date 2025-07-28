@@ -47,7 +47,7 @@ const DescriptorSchema = z.lazy(() => z.union([
 /**
  * Format Zod error messages into MicroQL error format
  */
-function formatError(zodError, value) {
+function formatError(zodError, value, settings) {
   const issues = zodError?.issues || []
   const errorMessages = issues.map(err => {
     // Build a more detailed path showing the exact location of the error
@@ -76,7 +76,7 @@ function formatError(zodError, value) {
       }
     }
 
-    return `- ${path}: ${inspect(specificValue, {depth: 4})} => ${message}`
+    return `- ${path}: ${inspect(specificValue, settings?.inspect)} => ${message}`
   })
 
   return errorMessages.join('\n')
@@ -85,14 +85,14 @@ function formatError(zodError, value) {
 /**
  * Main validation function called by withValidation wrapper
  */
-export function validate(schema, value, validateDescriptor = true) {
+export function validate(schema, value, settings, validateDescriptor = true) {
   if (!schema) return
 
-  const zodSchema = parseSchema(schema, validateDescriptor)
+  const zodSchema = parseSchema(schema, settings, validateDescriptor)
   const result = zodSchema.safeParse(value)
 
   if (!result.success) {
-    throw new Error(formatError(result.error, value))
+    throw new Error(formatError(result.error, value, settings))
   }
 }
 
@@ -101,14 +101,14 @@ export function validate(schema, value, validateDescriptor = true) {
  * during withValidations() wrapper execution.
  * The second time it just returns the already-parsed schema.
  */
-export function parseSchema(descriptor, validateDescriptor = true) {
+export function parseSchema(descriptor, settings, validateDescriptor = true) {
   // If already a Zod schema, return it immediately
   if (descriptor instanceof z.ZodType) {
     return descriptor
   }
 
   // Validate descriptor format itself to ensure it's of valid form
-  if (validateDescriptor) validate(DescriptorSchema, descriptor, false)
+  if (validateDescriptor) validate(DescriptorSchema, descriptor, settings, false)
   return parseSchemaRecursive(descriptor)
 }
 
@@ -175,7 +175,8 @@ function parseSchemaRecursive(descriptor) {
 
     if (type === 'union') {
       // Separate schema descriptors from string modifiers
-      const schemas = args.filter(arg => Array.isArray(arg))
+      const schemas = args.filter(arg =>
+        typeof arg === 'object' && arg !== null || Array.isArray(arg))
       const modifiers = args.filter(arg => typeof arg === 'string')
       const unionSchema = z.union(schemas.map(schema => parseSchemaRecursive(schema)))
       return applyModifiers(unionSchema, modifiers)

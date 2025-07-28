@@ -13,6 +13,7 @@ import {DEP_REGEX, SERVICE_REGEX, RESERVE_ARGS} from './common.js'
 import applyWrappers from './wrappers.js'
 import {parseSchema} from './validation.js'
 import util from './services/util.js'
+import RateLimitedQueue from './ratelimit.js'
 
 // Detects if a descriptor is a chain (nested arrays)
 const isChain = (descriptor) => {
@@ -60,7 +61,6 @@ const getDeps = (args) => {
 }
 
 function parseSchemaWithErrorContext(designation, order, schema) {
-  if (!schema) return
   try {
     return parseSchema(schema)
   } catch (error) {
@@ -75,27 +75,35 @@ const compileValidators = (args, validators) => {
     precheck: {query: args.precheck, service: validators.precheck},
     postcheck: {service: validators.postcheck, query: args.postcheck}
   }
+  let hasValidators = false
   for (const o in order) {
     for (const d in order[o])
-      order[o][d] = parseSchemaWithErrorContext(d, o, order[o][d])
+      if (order[o][d]) {
+        hasValidators = true
+        order[o][d] = parseSchemaWithErrorContext(d, o, order[o][d])
+      }
   }
-  return order
+  return hasValidators ? order : undefined
 }
 
 // settings are merged from query level settings and service level settings
 // they are placed in their own `settings` key on the compiled service definition
-const compileSettings = (queryName, args, argtypes, config) => {
+const compileSettings = (queryName, serviceName, args, argtypes, config) => {
   const reserveArgs = _.pick(args, RESERVE_ARGS)
   const settingsArgs = _.pickBy(args, (a, k) => argtypes[k]?.type === 'settings') // get args with their argtypes set to 'settings'
 
   // Only exclude global-level error handling from service settings merging
-  const configSettingsForServices = config.settings ? _.omit(config.settings, ['onError', 'ignoreErrors']) : {}
-  const settings = _.defaults({}, reserveArgs, ...Object.values(settingsArgs), configSettingsForServices)
+  const globalSettings = config.settings ?
+    _.omit(config.settings, ['onError', 'ignoreErrors']) : {}
+  const settings = _.defaults({}, reserveArgs, ...Object.values(settingsArgs), globalSettings)
 
   // compile onError if we have it
   if (settings.onError && Array.isArray(settings.onError) && settings.onError.length > 0) {
     settings.onError = compileServiceOrChain(queryName, settings.onError, config)
   }
+
+  // rate limit is defined globally for the service
+  settings.rateLimit = config.settings?.rateLimit?.[serviceName]
 
   return settings
 }
@@ -186,7 +194,8 @@ function compileServiceFunction(queryName, descriptor, config) {
   try {
     const argtypes = serviceCall._argtypes || {}
     mergeArgs(args, arg0, argtypes, serviceName, action)
-    const settings = compileSettings(queryName, args, argtypes, config)
+    const settings = compileSettings(queryName, serviceName, args, argtypes, config)
+    const rateLimit = config.rateLimiters?.[serviceName]
     const compiledArgs = compileArgs(queryName, serviceName, args, argtypes, config, settings)
     const validators = compileValidators(args, serviceCall._validators || {}, queryName, serviceName, action)
 
@@ -198,6 +207,7 @@ function compileServiceFunction(queryName, descriptor, config) {
       action,
       validators,
       settings,
+      rateLimit,
       args: compiledArgs,
       dependencies: getDeps(args)
     }
@@ -253,6 +263,14 @@ export function compile(config) {
   _.defaults(config, {services: {}, queries: {}, debug: false, settings: {}})
   const {services, queries, given, debug, settings} = config
   _.defaults(config.services, {util})
+
+  // Create rate limiter cache to share rate limiters across queries
+  config.rateLimiters = {}
+  if (settings.rateLimit) {
+    for (const [serviceName, interval] of Object.entries(settings.rateLimit)) {
+      config.rateLimiters[serviceName] = new RateLimitedQueue(interval)
+    }
+  }
 
   // Build tree for each query (use config as-is for service compilation)
   const queryTree = {}

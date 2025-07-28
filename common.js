@@ -36,6 +36,6 @@ const getServiceColorName = (serviceName) => {
   return serviceColors.get(serviceName)
 }
 
-const RESERVE_ARGS = ['timeout', 'retry', 'onError', 'ignoreErrors', 'precheck', 'postcheck']
+const RESERVE_ARGS = ['timeout', 'retry', 'onError', 'ignoreErrors', 'precheck', 'postcheck', 'debug']
 
 export {ANSI_COLORS, DEP_REGEX, SERVICE_REGEX, AT_REGEX, BARE_DOLLAR_REGEX, getServiceColor, getServiceColorName, RESERVE_ARGS}

@@ -50,7 +50,6 @@ export default [
       '@stylistic/array-element-newline': ['error', 'consistent'],
 
       // Additional formatting rules
-      '@stylistic/comma-dangle': ['error', 'never'],
       '@stylistic/comma-spacing': ['error', {before: false, after: true}],
       '@stylistic/key-spacing': ['error', {beforeColon: false, afterColon: true}],
       '@stylistic/quote-props': ['error', 'as-needed'],

@@ -48,25 +48,14 @@ async function shouldSkipSnapshot(timestamp, out) {
  * Provides map, filter, flatMap, concat and other operations
  */
 const util = {
-  /**
-   * Transform each item in a collection using a service
-   */
   async map({on, service}) {
-    if (service && typeof service === 'function') {
-      return Promise.all(on.map(service))
-    }
-
-    throw new Error('service must be provided for map operation')
+    return Promise.all(on.map(service))
   },
 
   /**
    * Filter collection based on a service
    */
   async filter({on, service}) {
-    if (!service || typeof service !== 'function') {
-      throw new Error('Service is required for filter operation')
-    }
-
     const keepResults = await Promise.all(on.map(service))
     return on.filter((_, index) => keepResults[index])
   },
@@ -289,6 +278,10 @@ util.pick._argtypes = {
 
 util.recordFailure._argtypes = {
   on: {argOrder: 0}
+}
+
+util.concat._argtypes = {
+  args: {argOrder: 0}
 }
 
 // Enhanced validation schemas for each service method

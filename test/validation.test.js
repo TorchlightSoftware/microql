@@ -101,7 +101,17 @@ describe('Validation Unit Tests', () => {
           {schema: ['array', ['object', {name: ['string']}]], valid: [{name: 'test'}], invalid: [{}]},
           {schema: ['object', {items: ['array', ['string']]}], valid: {items: ['a', 'b']}, invalid: {items: [1, 2]}},
           {schema: ['union', ['array', ['string']], ['string']], valid: ['a'], invalid: 123},
-          {schema: ['union', ['array', ['string']], ['string']], valid: 'hello', invalid: 123}
+          {schema: ['union', ['array', ['string']], ['string']], valid: 'hello', invalid: 123},
+          {
+            schema: ['union', {'company-name': 'string'}, {website: 'string'}],
+            valid: {website: 'https://foo.com'},
+            invalid: {}
+          },
+          {
+            schema: ['union', {'company-name': ['string']}, {website: ['string']}],
+            valid: {website: 'https://foo.com'},
+            invalid: {}
+          }
         ]
       },
       {
@@ -211,13 +221,13 @@ describe('Validation Unit Tests', () => {
 
     it('should handle unknown type when validateDescriptor=false', () => {
       assert.throws(
-        () => parseSchema(['unknowntype'], false),
+        () => parseSchema(['unknowntype'], {}, false),
         /Did you turn off schema validation\? Unknown type: unknowntype/
       )
     })
 
     it('should handle valid enum with validateDescriptor=false', () => {
-      const schema = parseSchema(['enum', ['red', 'blue']], false)
+      const schema = parseSchema(['enum', ['red', 'blue']], {}, false)
       const validResult = schema.safeParse('red')
       assert.strictEqual(validResult.success, true)
 
@@ -226,7 +236,7 @@ describe('Validation Unit Tests', () => {
     })
 
     it('should handle valid primitive type with validateDescriptor=false', () => {
-      const schema = parseSchema(['string'], false)
+      const schema = parseSchema(['string'], {}, false)
       const validResult = schema.safeParse('hello')
       assert.strictEqual(validResult.success, true)
 
