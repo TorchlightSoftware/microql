@@ -5,6 +5,9 @@ import {inspect} from 'util'
 
 import utilService from './services/util.js'
 import {validate} from './validation.js'
+import Cache from './cache.js'
+
+const cache = new Cache()
 
 const withArgs = (fn) => {
   return async function (args = {}) {
@@ -75,6 +78,20 @@ const withDebug = (fn) => {
 
     return result
   }
+}
+
+const withCache = (fn) => async function (args) {
+  const {serviceName, action, settings} = this
+
+  // Use getOrCompute to handle race conditions properly
+  const result = await cache.getOrCompute(serviceName, action, args, fn.bind(this, args))
+
+  // Run cleanup if invalidateAfter is specified
+  if (settings.cache.invalidateAfter) {
+    cache.cleanupExpired(settings.cache.invalidateAfter)
+  }
+
+  return result
 }
 
 const withRateLimit = (fn) => async function (args) {
@@ -196,7 +213,7 @@ const withValidation = (fn) => {
 }
 
 const applyWrappers = (def, config) => {
-  const {queryName, serviceName, action, args, settings, validators, rateLimit} = def
+  const {queryName, serviceName, action, args, settings, validators, rateLimit, noTimeout} = def
 
   const service = config.services[serviceName]
 
@@ -215,6 +232,9 @@ const applyWrappers = (def, config) => {
 
   wrappers.push(withErrorHandling)
 
+  if (settings.cache) {
+    wrappers.push(withCache)
+  }
   // Add validation wrapper if validators are defined
   if (validators) {
     wrappers.push(withValidation)
@@ -225,7 +245,8 @@ const applyWrappers = (def, config) => {
   if (settings.retry > 0) {
     wrappers.push(withRetry)
   }
-  if (settings.timeout && settings.timeout > 0) {
+  // Apply timeout wrapper unless _noTimeout is set AND no explicit timeout is provided
+  if (settings.timeout && settings.timeout > 0 && (!noTimeout || args.timeout !== undefined)) {
     wrappers.push(withTimeout)
   }
   //console.log('wrappers:', wrappers.map(f => f.name))

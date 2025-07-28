@@ -244,16 +244,19 @@ util.map._argtypes = {
   on: {argOrder: 0},
   service: {type: 'service'}
 }
+util.map._noTimeout = true
 
 util.filter._argtypes = {
   on: {argOrder: 0},
   service: {type: 'service'}
 }
+util.filter._noTimeout = true
 
 util.flatMap._argtypes = {
   on: {argOrder: 0},
   service: {type: 'service'}
 }
+util.flatMap._noTimeout = true
 
 util.when._argtypes = {
   test: {type: 'service'}

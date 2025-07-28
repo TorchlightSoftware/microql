@@ -209,7 +209,8 @@ function compileServiceFunction(queryName, descriptor, config) {
       settings,
       rateLimit,
       args: compiledArgs,
-      dependencies: getDeps(args)
+      dependencies: getDeps(args),
+      noTimeout: serviceCall._noTimeout || false
     }
 
     // prepare the service with arg resolution, debugging, error handling, timeout, retry
