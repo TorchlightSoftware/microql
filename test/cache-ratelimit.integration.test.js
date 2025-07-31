@@ -4,10 +4,12 @@ import query from '../query.js'
 import {existsSync} from 'fs'
 import {rm} from 'fs/promises'
 
+const CACHEDIR = '.cache-test-cache-ratelimit'
+
 describe('Cache and Rate Limit Integration Tests', () => {
   const cleanup = async () => {
-    if (existsSync('.cache')) {
-      await rm('.cache', {recursive: true, force: true})
+    if (existsSync(CACHEDIR)) {
+      await rm(CACHEDIR, {recursive: true, force: true})
     }
   }
 
@@ -35,6 +37,7 @@ describe('Cache and Rate Limit Integration Tests', () => {
       given: {value: 'cached'},
       services,
       settings: {
+        cache: {configDir: CACHEDIR},
         rateLimit: {
           heavy: 100 // 100ms between calls
         }
@@ -90,6 +93,7 @@ describe('Cache and Rate Limit Integration Tests', () => {
     const result1 = await query({
       given: {value: 'test'},
       services,
+      settings: {cache: {configDir: CACHEDIR}},
       queries: {
         result: ['heavy:process', {input: '$.given.value', cache: {}}]
       },
@@ -106,6 +110,7 @@ describe('Cache and Rate Limit Integration Tests', () => {
     const result2 = await query({
       given: {value: 'test'},
       services,
+      settings: {cache: {configDir: CACHEDIR}},
       queries: {
         result: ['heavy:process', {input: '$.given.value', cache: {}}]
       },
@@ -136,6 +141,7 @@ describe('Cache and Rate Limit Integration Tests', () => {
       given: {value: 'expiring'},
       services,
       settings: {
+        cache: {configDir: CACHEDIR},
         rateLimit: {
           timed: 100
         }
@@ -154,6 +160,7 @@ describe('Cache and Rate Limit Integration Tests', () => {
       given: {value: 'expiring'},
       services,
       settings: {
+        cache: {configDir: CACHEDIR},
         rateLimit: {
           timed: 100
         }

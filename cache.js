@@ -12,11 +12,12 @@ const parseTimeUnit = (timeStr) => {
 }
 
 export default class Cache {
-  constructor(baseDir = '.cache') {
-    this.baseDir = baseDir
+  constructor(cacheConfig = {}) {
+    this.baseDir = cacheConfig.configDir || cacheConfig.baseDir || '.cache'
+    this.invalidateAfter = cacheConfig.invalidateAfter
     this.memoryCache = new Map()
     this.pendingPromises = new Map()
-    if (!existsSync(baseDir)) mkdir(baseDir, {recursive: true}).catch(() => {})
+    if (!existsSync(this.baseDir)) mkdir(this.baseDir, {recursive: true}).catch(() => {})
     this.cleanupByModifiedTime().catch(() => {})
   }
 
@@ -32,29 +33,34 @@ export default class Cache {
     if (this.pendingPromises.has(key)) return await this.pendingPromises.get(key)
 
     const computePromise = (async () => {
+      const dir = path.join(this.baseDir, `${serviceName}-${action}`)
+      const file = path.join(dir, `${key}.json`)
+
+      // check disk cache
       try {
-        const dir = path.join(this.baseDir, `${serviceName}-${action}`)
-        const file = path.join(dir, `${key}.json`)
+        const cached = JSON.parse(await readFile(file, 'utf8'))
+        this.memoryCache.set(key, cached.result)
+        utimes(file, new Date(), new Date()).catch(() => {})
+        return cached.result
 
-        // check disk cache
-        try {
-          const cached = JSON.parse(await readFile(file, 'utf8'))
-          this.memoryCache.set(key, cached.result)
-          utimes(file, new Date(), new Date()).catch(() => {})
-          return cached.result
+      // run the service normally and cache it
+      } catch {
+        const result = await computeFn()
+        this.memoryCache.set(key, result)
 
-        // run the service normally and cache it
-        } catch {
-          const result = await computeFn()
-          this.memoryCache.set(key, result)
+        if (!existsSync(dir)) await mkdir(dir, {recursive: true})
+        await writeFile(file, JSON.stringify({created: new Date().toISOString(), result}, null, 2))
 
-          if (!existsSync(dir)) await mkdir(dir, {recursive: true})
-          await writeFile(file, JSON.stringify({created: new Date().toISOString(), result}, null, 2))
-
-          return result
-        }
+        return result
       } finally {
         this.pendingPromises.delete(key)
+
+        // Run cleanup if invalidateAfter is specified
+        // TODO: this probably shouldn't run after every request
+        // Maybe it should during tearDown at the end of the query
+        if (this.invalidateAfter) {
+          this.cleanupExpired(this.invalidateAfter)
+        }
       }
     })()
 

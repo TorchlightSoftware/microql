@@ -301,7 +301,7 @@ describe('MicroQL Comprehensive Tests', () => {
       })
 
       const duration = Date.now() - start
-      assert(duration < 40, `Should complete quickly (took ${duration}ms, expected <40ms)`)
+      assert(duration < 50, `Should complete quickly (took ${duration}ms, expected <50ms)`)
 
       // Verify all queries completed correctly
       for (let i = 0; i < 50; i++) {

@@ -14,6 +14,7 @@ import applyWrappers from './wrappers.js'
 import {parseSchema} from './validation.js'
 import util from './services/util.js'
 import RateLimitedQueue from './ratelimit.js'
+import Cache from './cache.js'
 
 // Detects if a descriptor is a chain (nested arrays)
 const isChain = (descriptor) => {
@@ -90,15 +91,16 @@ const compileValidators = (args, validators) => {
 // they are placed in their own `settings` key on the compiled service definition
 const compileSettings = (queryName, serviceName, args, argtypes, config) => {
   const reserveArgs = _.pick(args, RESERVE_ARGS)
-  const settingsArgs = _.pickBy(args, (a, k) => argtypes[k]?.type === 'settings') // get args with their argtypes set to 'settings'
+  // get args with their argtypes set to 'settings'
+  const settingsArgs = _.pickBy(args, (a, k) => argtypes[k]?.type === 'settings')
 
-  // Only exclude global-level error handling from service settings merging
+  // exclude some global settings from being merged with the service
   const globalSettings = config.settings ?
-    _.omit(config.settings, ['onError', 'ignoreErrors']) : {}
+    _.omit(config.settings, ['onError', 'ignoreErrors', 'cache']) : {}
   const settings = _.defaults({}, reserveArgs, ...Object.values(settingsArgs), globalSettings)
 
   // compile onError if we have it
-  if (settings.onError && Array.isArray(settings.onError) && settings.onError.length > 0) {
+  if (settings.onError) {
     settings.onError = compileServiceOrChain(queryName, settings.onError, config)
   }
 
@@ -264,6 +266,9 @@ export function compile(config) {
   _.defaults(config, {services: {}, queries: {}, debug: false, settings: {}})
   const {services, queries, given, debug, settings} = config
   _.defaults(config.services, {util})
+
+  // set up a cache for query results using the global settings provided
+  config.cache = new Cache(config.settings.cache)
 
   // Create rate limiter cache to share rate limiters across queries
   config.rateLimiters = {}

@@ -1,15 +1,14 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
 import query from '../query.js'
-import {existsSync} from 'fs'
 import {readdir, rm} from 'fs/promises'
+
+const CACHEDIR = '.cache-test-cache'
 
 describe('Cache Tests', () => {
   // Clean up cache before tests
   const cleanup = async () => {
-    if (existsSync('.cache')) {
-      await rm('.cache', {recursive: true, force: true})
-    }
+    await rm(CACHEDIR, {recursive: true, force: true})
   }
 
   describe('Basic Caching', () => {
@@ -30,6 +29,7 @@ describe('Cache Tests', () => {
       const result1 = await query({
         given: {value: 'test'},
         services,
+        settings: {cache: {configDir: CACHEDIR}},
         queries: {
           count: ['counter:increment', {value: '$.given.value', cache: true}]
         },
@@ -44,6 +44,7 @@ describe('Cache Tests', () => {
       const result2 = await query({
         given: {value: 'test'},
         services,
+        settings: {cache: {configDir: CACHEDIR}},
         queries: {
           count: ['counter:increment', {value: '$.given.value', cache: true}]
         },
@@ -58,6 +59,7 @@ describe('Cache Tests', () => {
       const result3 = await query({
         given: {value: 'different'},
         services,
+        settings: {cache: {configDir: CACHEDIR}},
         queries: {
           count: ['counter:increment', {value: '$.given.value', cache: true}]
         },
@@ -123,6 +125,7 @@ describe('Cache Tests', () => {
       await query({
         given: {value: 'cached'},
         services,
+        settings: {cache: {configDir: CACHEDIR}},
         queries: {
           result: ['test:action', {input: '$.given.value', cache: true}]
         },
@@ -130,12 +133,10 @@ describe('Cache Tests', () => {
       })
 
       // Check if cache directory and file were created
-      assert(existsSync('.cache'), 'Cache directory should exist')
-
-      const serviceDirs = await readdir('.cache')
+      const serviceDirs = await readdir(CACHEDIR)
       assert(serviceDirs.includes('test-action'), 'Service-action directory should exist')
 
-      const cacheFiles = await readdir('.cache/test-action')
+      const cacheFiles = await readdir(`${CACHEDIR}/test-action`)
       assert(cacheFiles.length === 1, 'Should have one cache file')
       assert(cacheFiles[0].endsWith('.json'), 'Cache file should be JSON')
     })
@@ -157,6 +158,7 @@ describe('Cache Tests', () => {
       await query({
         given: {value: 'test'},
         services,
+        settings: {cache: {configDir: CACHEDIR}},
         queries: {
           result: ['test:process', {input: '$.given.value', cache: {invalidateAfter: '1h'}}]
         },
@@ -164,7 +166,7 @@ describe('Cache Tests', () => {
       })
 
       // Verify cache file exists
-      const cacheFiles = await readdir('.cache/test-process')
+      const cacheFiles = await readdir(`${CACHEDIR}/test-process`)
       assert.strictEqual(cacheFiles.length, 1)
 
       // Note: In a real test, we'd manipulate file timestamps to test expiration
@@ -195,6 +197,7 @@ describe('Cache Tests', () => {
         given: {values: ['first', 'second']},
         services,
         settings: {
+          cache: {configDir: CACHEDIR},
           rateLimit: {
             slow: 100
           }
@@ -219,6 +222,7 @@ describe('Cache Tests', () => {
         given: {values: ['first', 'second']},
         services,
         settings: {
+          cache: {configDir: CACHEDIR},
           rateLimit: {
             slow: 100
           }
@@ -262,6 +266,7 @@ describe('Cache Tests', () => {
       const result1 = await query({
         given: {input: 'valid'},
         services,
+        settings: {cache: {configDir: CACHEDIR}},
         queries: {
           result: ['validator:process', {value: '$.given.input', cache: true}]
         },
@@ -276,6 +281,7 @@ describe('Cache Tests', () => {
       const result2 = await query({
         given: {input: 'valid'},
         services,
+        settings: {cache: {configDir: CACHEDIR}},
         queries: {
           result: ['validator:process', {value: '$.given.input', cache: true}]
         },

@@ -5,9 +5,6 @@ import {inspect} from 'util'
 
 import utilService from './services/util.js'
 import {validate} from './validation.js'
-import Cache from './cache.js'
-
-const cache = new Cache()
 
 const withArgs = (fn) => {
   return async function (args = {}) {
@@ -81,17 +78,11 @@ const withDebug = (fn) => {
 }
 
 const withCache = (fn) => async function (args) {
-  const {serviceName, action, settings} = this
+  const {serviceName, action, cache} = this
 
-  // Use getOrCompute to handle race conditions properly
-  const result = await cache.getOrCompute(serviceName, action, args, fn.bind(this, args))
-
-  // Run cleanup if invalidateAfter is specified
-  if (settings.cache.invalidateAfter) {
-    cache.cleanupExpired(settings.cache.invalidateAfter)
-  }
-
-  return result
+  // getOrCompute internally eliminates race conditions between cache, memory, disk,
+  // and concurrent calls
+  return await cache.getOrCompute(serviceName, action, args, fn.bind(this, args))
 }
 
 const withRateLimit = (fn) => async function (args) {
@@ -172,12 +163,13 @@ const withErrorHandling = (fn) => {
         }
       }
 
-      // Re-throw original error
-      if (!settings.ignoreErrors) {
-        throw error
+      if (settings.ignoreErrors) {
+        return null
+        // return error //should we?
       }
 
-      return null
+      // Re-throw original error
+      throw error
     }
   }
 }
@@ -214,6 +206,7 @@ const withValidation = (fn) => {
 
 const applyWrappers = (def, config) => {
   const {queryName, serviceName, action, args, settings, validators, rateLimit, noTimeout} = def
+  const {cache} = config
 
   const service = config.services[serviceName]
 
@@ -221,6 +214,8 @@ const applyWrappers = (def, config) => {
   const serviceCall = service[action].bind(service)
 
   // Build wrapper array in canonical order
+  // We use reduceRight on these wrappers, so they get applied last-first,
+  // and when they execute, they execute in the order listed here.
   const wrappers = []
 
   // 1. withArgs - resolves @ and $ references (outermost, called first)
@@ -246,7 +241,7 @@ const applyWrappers = (def, config) => {
     wrappers.push(withRetry)
   }
   // Apply timeout wrapper unless _noTimeout is set AND no explicit timeout is provided
-  if (settings.timeout && settings.timeout > 0 && (!noTimeout || args.timeout !== undefined)) {
+  if (settings?.timeout > 0 && (!noTimeout || args.timeout !== undefined)) {
     wrappers.push(withTimeout)
   }
   //console.log('wrappers:', wrappers.map(f => f.name))
@@ -257,7 +252,7 @@ const applyWrappers = (def, config) => {
   // give all wrappers access to the full calling context so they don't have to fish for it
   // allow the contextStack to be passed at execution time
   return (queryResults, contextStack) =>
-    wrapped.call({queryName, serviceName, action, settings, validators, queryResults, contextStack, rateLimit}, args)
+    wrapped.call({queryName, serviceName, action, settings, validators, queryResults, contextStack, rateLimit, cache}, args)
 }
 
 export default applyWrappers
