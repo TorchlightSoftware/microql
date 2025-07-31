@@ -1,6 +1,6 @@
 {
   "name": "microql",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "A query language for composing microservices.",
   "type": "module",
   "main": "query.js",
