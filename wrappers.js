@@ -141,11 +141,17 @@ const withErrorHandling = (fn) => {
     try {
       return await fn.call(this, args)
     } catch (error) {
-      error.message = `[${queryName} - ${serviceName}:${action}] ${error.message}`
-      error.queryName = queryName
-      error.serviceName = serviceName
-      error.action = action
-      error.args = args
+      // Only set error context properties if they haven't been set yet
+      // This preserves the innermost (original) error context
+      if (!error.wrapped) {
+        error.message = `[${queryName} - ${serviceName}:${action}] ${error.message}`
+
+        error.queryName = queryName
+        error.serviceName = serviceName
+        error.action = action
+        error.args = args
+        error.wrapped = true
+      }
 
       // Handle with onError if provided
       if (settings.onError) {

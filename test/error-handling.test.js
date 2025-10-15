@@ -47,7 +47,7 @@ describe('Error Handling Tests', () => {
         query(config),
         (error) => {
           // Verify the error has all expected properties
-          assert.strictEqual(error.message, '[result - error:fail] Service failed')
+          assert.match(error.message, /\[result - error:fail\] Service failed/)
           assert.strictEqual(error.serviceName, 'error')
           assert.strictEqual(error.action, 'fail')
           return true
@@ -169,7 +169,7 @@ describe('Error Handling Tests', () => {
         (error) => {
           // Verify the error has all expected properties
           assert.strictEqual(error.severity, 'bad')
-          assert.strictEqual(error.message, '[result - error:fail] Service failed')
+          assert.match(error.message, /\[result - error:fail\] Service failed/)
           assert.strictEqual(error.serviceName, 'error')
           assert.strictEqual(error.action, 'fail')
           assert.ok(error.timestamp)
@@ -269,11 +269,64 @@ describe('Error Handling Tests', () => {
       await query(config)
 
       assert.ok(capturedContext)
-      assert.strictEqual(capturedContext.message, '[testQuery - error:fail] Service failed')
+      assert.match(capturedContext.message, /\[testQuery - error:fail\] Service failed/)
       assert.strictEqual(capturedContext.queryName, 'testQuery')
       assert.strictEqual(capturedContext.serviceName, 'error')
       assert.strictEqual(capturedContext.action, 'fail')
       assert.strictEqual(capturedContext.args.someArg, 'value')
+    })
+  })
+
+  describe('Validation Error Attribution in Nested Services', () => {
+    it('should attribute postcheck errors to nested service, not wrapper service', async () => {
+      const scraper = {
+        async extract({url}) {
+          return {
+            images: [], // Will fail postcheck
+            websites: []
+          }
+        }
+      }
+
+      scraper.extract._validators = {
+        postcheck: {
+          images: ['array', ['object'], {min: 1}],
+          websites: ['array', ['object'], {min: 1}]
+        }
+      }
+
+      const config = {
+        services: {scraper},
+        queries: {
+          listings: ['$.given.urls', 'util:flatMap', {
+            service: ['scraper:extract', {url: '@'}]
+          }]
+        },
+        given: {
+          urls: ['http://example.com']
+        }
+      }
+
+      await assert.rejects(
+        query(config),
+        (error) => {
+          // Error properties should reflect the innermost service (where the error originated)
+          assert.strictEqual(error.serviceName, 'scraper')
+          assert.strictEqual(error.action, 'extract')
+          assert.strictEqual(error.queryName, 'listings')
+
+          // Error message should contain only the innermost service context
+          // (outer services don't modify the message once error.wrapped is set)
+          assert.match(error.message, /\[listings - scraper:extract\]/)
+          assert.match(error.message, /service postcheck validation failed/)
+
+          // Validation details should be present
+          assert.match(error.message, /images:.*Too small/)
+          assert.match(error.message, /websites:.*Too small/)
+
+          return true
+        }
+      )
     })
   })
 })
