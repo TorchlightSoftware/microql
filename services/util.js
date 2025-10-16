@@ -382,10 +382,10 @@ util.snapshot._validators = {
 util.recordFailure._validators = {
   precheck: {
     on: {
-      error: ['string'],
+      message: ['string'],
+      queryName: ['string'],
       serviceName: ['string'],
       action: ['string'],
-      queryName: ['string'],
       args: ['any']
     },
     location: ['string', {min: 1, regex: /^[^<>:"|?*\t\n\r\0]+$/}] // Basic path validation - exclude tab, newline, carriage return, null
