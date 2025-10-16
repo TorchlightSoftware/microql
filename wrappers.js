@@ -47,7 +47,12 @@ const withArgs = (fn) => {
     }
 
     const resolvedArgs = _.cloneDeepWith(args, resolveArg)
-    this.settings.onError = resolveArg(this.settings.onError)
+
+    // Only wrap onError once to preserve correct contextStack closure
+    if (this.settings.onError && !this.settings.onError._alreadyWrapped) {
+      this.settings.onError = resolveArg(this.settings.onError)
+      this.settings.onError._alreadyWrapped = true
+    }
 
     return await fn.call(this, resolvedArgs)
   }
