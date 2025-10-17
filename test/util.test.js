@@ -126,6 +126,54 @@ describe('Util Service Tests', () => {
         email: 'alice@example.com'
       })
     })
+
+    it('should merge objects together', async () => {
+      const result = await util.merge({
+        on: {
+          name: 'Alice',
+          age: 30,
+          profile: {
+            theme: 'dark'
+          }
+        },
+        with: {
+          age: 31,
+          profile: {
+            notifications: true
+          }
+        }
+      })
+
+      assert.deepStrictEqual(result, {
+        name: 'Alice',
+        age: 31,
+        profile: {
+          theme: 'dark',
+          notifications: true
+        }
+      })
+    })
+
+    it('should not mutate original objects in merge', async () => {
+      const original = {name: 'Alice', age: 30}
+      const toMerge = {age: 31, city: 'NYC'}
+
+      const result = await util.merge({
+        on: original,
+        with: toMerge
+      })
+
+      // Result should have merged values
+      assert.deepStrictEqual(result, {
+        name: 'Alice',
+        age: 31,
+        city: 'NYC'
+      })
+
+      // Original objects should be unchanged
+      assert.deepStrictEqual(original, {name: 'Alice', age: 30})
+      assert.deepStrictEqual(toMerge, {age: 31, city: 'NYC'})
+    })
   })
 
   describe('MicroQL Integration', () => {
@@ -270,6 +318,97 @@ describe('Util Service Tests', () => {
       })
 
       assert.strictEqual(result, 2) // Orders B456 and C789 are over $30
+    })
+
+    it('should handle util.merge with method syntax', async () => {
+      const result = await query({
+        given: {
+          person: {name: 'Alice', age: 30}
+        },
+        queries: {
+          updated: ['$.given.person', 'util:merge', {
+            with: {age: 31, city: 'NYC'}
+          }]
+        },
+        select: 'updated'
+      })
+
+      assert.deepStrictEqual(result, {
+        name: 'Alice',
+        age: 31,
+        city: 'NYC'
+      })
+    })
+
+    it('should handle util.merge with @ references in nested context', async () => {
+      const result = await query({
+        given: {
+          items: [
+            {id: 1, name: 'Widget'},
+            {id: 2, name: 'Gadget'}
+          ],
+          category: 'tools'
+        },
+        queries: {
+          enriched: ['$.given.items', 'util:map', {
+            service: ['@', 'util:merge', {
+              with: {category: '$.given.category'}
+            }]
+          }]
+        },
+        select: 'enriched'
+      })
+
+      assert.deepStrictEqual(result, [
+        {id: 1, name: 'Widget', category: 'tools'},
+        {id: 2, name: 'Gadget', category: 'tools'}
+      ])
+    })
+
+    it('should handle util.merge with deep @ references (@@@)', async () => {
+      const result = await query({
+        given: {
+          items: [
+            {id: 1, text: 'urgent'},
+            {id: 2, text: 'normal'}
+          ]
+        },
+        queries: {
+          enriched: ['$.given.items', 'util:map', {
+            service: ['@', 'util:merge', {
+              with: {category: '@.text'}
+            }]
+          }]
+        },
+        select: 'enriched'
+      })
+
+      assert.deepStrictEqual(result, [
+        {id: 1, text: 'urgent', category: 'urgent'},
+        {id: 2, text: 'normal', category: 'normal'}
+      ])
+    })
+
+    it('should handle util.merge in a chain', async () => {
+      const result = await query({
+        given: {
+          base: {name: 'Alice', age: 30}
+        },
+        queries: {
+          result: [
+            ['$.given.base', 'util:merge', {with: {city: 'NYC'}}],
+            ['util:merge', {on: '@', with: {role: 'Engineer'}}],
+            ['util:pick', {on: '@', fields: ['name', 'city', 'role']}]
+          ]
+        },
+        select: 'result'
+      })
+
+      assert.deepStrictEqual(result, {
+        name: 'Alice',
+        city: 'NYC',
+        role: 'Engineer'
+      })
     })
   })
 

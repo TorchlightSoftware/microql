@@ -132,6 +132,14 @@ const util = {
   },
 
   /**
+   * Merge objects together
+   * Performs a deep merge of 'with' onto 'on', returning a new object
+   */
+  async merge({on, with: withObj}) {
+    return _.merge({}, on, withObj)
+  },
+
+  /**
    * Print values to console with formatting options and color coding
    * Uses query-level inspect settings for consistent formatting
    */
@@ -279,6 +287,10 @@ util.pick._argtypes = {
   on: {argOrder: 0}
 }
 
+util.merge._argtypes = {
+  on: {argOrder: 0}
+}
+
 util.recordFailure._argtypes = {
   on: {argOrder: 0}
 }
@@ -360,6 +372,13 @@ util.pick._validators = {
   precheck: {
     on: ['object'],
     fields: ['array', ['string'], {min: 1}]
+  }
+}
+
+util.merge._validators = {
+  precheck: {
+    on: ['object'],
+    with: ['object']
   }
 }
 
