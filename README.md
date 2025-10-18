@@ -222,8 +222,56 @@ const queries = {
     condition: '$.user.isAdmin',
     then: ['admin', 'getAdminData'],
     else: ['user', 'getRegularData']
-  }]
+  }],
+
+  // Error handling utilities
+  // When using ignoreErrors: true, failed items become null or Error objects
+  cleanResults: ['$.processed', 'util:removeErrors'],    // Remove both nulls and Errors
+  noNulls: ['$.processed', 'util:removeNulls'],          // Remove nulls, keep Errors for inspection
+  onlyFailures: ['$.processed', 'util:removeSuccesses'], // Keep only nulls and Errors
+
+  // Partition for batch processing
+  separated: ['$.processed', 'util:partitionErrors']     // Returns {successes: [], failures: []}
 }
+```
+
+#### Error Removal Utilities
+
+When processing arrays with `ignoreErrors: true`, failed service calls return either `null` (no error handler) or the Error object (with error handler). These utilities help clean up results:
+
+- **`util:removeErrors`** - Removes both Error objects and null values, returning only successful results
+- **`util:removeNulls`** - Removes only null values, keeping Error objects for inspection/logging
+- **`util:removeSuccesses`** - Inverse operation, keeps only failures (nulls and Errors)
+- **`util:partitionErrors`** - Splits array into `{successes: [], failures: []}` for separate processing
+
+Example use case:
+
+```javascript
+const result = await query({
+  given: {urls: ['http://api1.com', 'http://api2.com', 'http://api3.com']},
+  services: {http, storage, util},
+  queries: {
+    // Fetch all URLs, ignoring errors
+    responses: ['$.given.urls', 'util:map', {
+      service: ['http:fetch', {
+        url: '@',
+        onError: ['util:recordFailure', {on: '@', location: 'logs/failures'}],
+        ignoreErrors: true
+      }]
+    }],
+
+    // Separate successes from failures
+    partitioned: ['$.responses', 'util:partitionErrors'],
+
+    // Store only successful responses
+    stored: ['$.partitioned.successes', 'storage:bulkInsert']
+  }
+})
+
+// Result contains:
+// - partitioned.successes: successful API responses
+// - partitioned.failures: null values (errors were recorded to disk)
+// - stored: confirmation of successful storage
 ```
 
 ### Settings & Configuration

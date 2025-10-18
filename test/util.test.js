@@ -643,4 +643,335 @@ describe('Util Service Tests', () => {
       assert.strictEqual(snapshot.results[2].doubled, 3)
     })
   })
+
+  describe('RecordFailure Function Tests', () => {
+    const testFailurePath = './test-failures'
+
+    afterEach(async () => {
+      // Clean up test failures directory
+      const fs = await import('fs-extra')
+      try {
+        await fs.default.remove(testFailurePath)
+      } catch (_error) {
+        // Ignore cleanup errors
+      }
+    })
+
+    it('should record error with message correctly', async () => {
+      const testService = {
+        async failing() {
+          throw new Error('Test error message')
+        }
+      }
+
+      const result = await query({
+        services: {testService, util},
+        settings: {debug: false},
+        queries: {
+          result: ['testService:failing', {
+            onError: ['util:recordFailure', {
+              on: '@',
+              location: testFailurePath
+            }],
+            ignoreErrors: true
+          }]
+        },
+        select: 'result'
+      })
+
+      // Verify that recordFailure returned the error context
+      assert(result, 'Should return error context from recordFailure')
+
+      // Verify failure file was created
+      const fs = await import('fs-extra')
+      const files = await fs.default.readdir(testFailurePath)
+      assert.strictEqual(files.length, 1, 'Should create one failure file')
+
+      // Read the failure record
+      const failureContent = await fs.default.readFile(
+        `${testFailurePath}/${files[0]}`,
+        'utf8'
+      )
+      const failureRecord = JSON.parse(failureContent)
+
+      // Verify the error message is captured correctly
+      assert(failureRecord.error, 'Should have error field')
+      assert.match(
+        failureRecord.error,
+        /Test error message/,
+        'Should contain the original error message'
+      )
+      assert.strictEqual(failureRecord.serviceName, 'testService')
+      assert.strictEqual(failureRecord.action, 'failing')
+      assert.strictEqual(failureRecord.queryName, 'result')
+    })
+
+    it('should handle recordFailure in a map operation', async () => {
+      const testService = {
+        async processItem({item}) {
+          if (item.shouldFail) {
+            throw new Error(`Failed to process item ${item.id}`)
+          }
+          return {id: item.id, processed: true}
+        }
+      }
+
+      const items = [
+        {id: 1, shouldFail: false},
+        {id: 2, shouldFail: true},
+        {id: 3, shouldFail: false}
+      ]
+
+      const result = await query({
+        given: {items},
+        services: {testService, util},
+        settings: {debug: false},
+        queries: {
+          results: ['$.given.items', 'util:map', {
+            service: ['testService:processItem', {
+              item: '@',
+              onError: ['util:recordFailure', {
+                on: '@',
+                location: testFailurePath
+              }],
+              ignoreErrors: true
+            }]
+          }]
+        },
+        select: 'results'
+      })
+
+      // Should have 3 results: 2 successful, 1 error context
+      assert.strictEqual(result.length, 3)
+      assert.deepStrictEqual(result[0], {id: 1, processed: true})
+      assert(result[1].message, 'Second item should be error context')
+      assert.deepStrictEqual(result[2], {id: 3, processed: true})
+
+      // Verify failure file was created for the failing item
+      const fs = await import('fs-extra')
+      const files = await fs.default.readdir(testFailurePath)
+      assert.strictEqual(files.length, 1, 'Should create one failure file')
+
+      const failureContent = await fs.default.readFile(
+        `${testFailurePath}/${files[0]}`,
+        'utf8'
+      )
+      const failureRecord = JSON.parse(failureContent)
+
+      // Verify the error message is captured
+      assert(failureRecord.error, 'Should have error field')
+      assert.match(
+        failureRecord.error,
+        /Failed to process item 2/,
+        'Should contain the original error message'
+      )
+    })
+  })
+
+  describe('Error Removal Function Tests', () => {
+    // Shared test data
+    const item1 = {id: 1}
+    const item2 = {id: 2}
+    const item3 = {id: 3}
+    const err1 = new Error('err1')
+    const err2 = new Error('err2')
+
+    // Shared service for integration tests
+    const testService = {
+      async processItem({item}) {
+        if (item.shouldFail) {
+          throw new Error(`Failed ${item.id}`)
+        }
+        return {id: item.id, processed: true}
+      },
+      async passthrough({on}) {
+        return on
+      }
+    }
+
+    // Helper to run util functions on test data
+    const runUtil = async (utilFunc, items) => {
+      return await query({
+        given: {items},
+        services: {util},
+        settings: {debug: false},
+        queries: {result: ['$.given.items', `util:${utilFunc}`]},
+        select: 'result'
+      })
+    }
+
+    // Data-driven tests for all utilities
+    const testCases = [
+      // removeErrors tests
+      {
+        util: 'removeErrors',
+        name: 'mixed errors and nulls',
+        input: [item1, err1, item2, null, item3],
+        expected: [item1, item2, item3]
+      },
+      {
+        util: 'removeErrors',
+        name: 'all errors and nulls',
+        input: [err1, null, err2],
+        expected: []
+      },
+      {
+        util: 'removeErrors',
+        name: 'no errors or nulls',
+        input: [item1, item2, item3],
+        expected: [item1, item2, item3]
+      },
+
+      // removeNulls tests
+      {
+        util: 'removeNulls',
+        name: 'keeps errors, removes nulls',
+        input: [item1, null, err1, item2, null, err2],
+        expected: [item1, err1, item2, err2]
+      },
+      {
+        util: 'removeNulls',
+        name: 'all nulls',
+        input: [null, null, null],
+        expected: []
+      },
+
+      // removeSuccesses tests
+      {
+        util: 'removeSuccesses',
+        name: 'keeps failures, removes successes',
+        input: [item1, null, err1, item2, err2],
+        expected: [null, err1, err2]
+      },
+      {
+        util: 'removeSuccesses',
+        name: 'no failures',
+        input: [item1, item2],
+        expected: []
+      }
+    ]
+
+    testCases.forEach(({util: utilFunc, name, input, expected}) => {
+      it(`${utilFunc}: ${name}`, async () => {
+        const result = await runUtil(utilFunc, input)
+        assert.deepStrictEqual(result, expected)
+      })
+    })
+
+    // partitionErrors data-driven tests
+    const partitionTests = [
+      {
+        name: 'mixed array',
+        input: [item1, null, err1, item2, err2, item3],
+        expectedSuccesses: [item1, item2, item3],
+        expectedFailures: [null, err1, err2]
+      },
+      {
+        name: 'all successes',
+        input: [item1, item2],
+        expectedSuccesses: [item1, item2],
+        expectedFailures: []
+      },
+      {
+        name: 'all failures',
+        input: [null, err1, err2],
+        expectedSuccesses: [],
+        expectedFailures: [null, err1, err2]
+      }
+    ]
+
+    partitionTests.forEach(({name, input, expectedSuccesses, expectedFailures}) => {
+      it(`partitionErrors: ${name}`, async () => {
+        const result = await runUtil('partitionErrors', input)
+        assert.deepStrictEqual(result.successes, expectedSuccesses)
+        assert.deepStrictEqual(result.failures, expectedFailures)
+      })
+    })
+
+    // Integration tests with real service failures
+    const integrationTests = [
+      {
+        util: 'removeErrors',
+        name: 'with service failures (no onError)',
+        items: [
+          {id: 1, shouldFail: false},
+          {id: 2, shouldFail: true},
+          {id: 3, shouldFail: false}
+        ],
+        expected: [{id: 1, processed: true}, {id: 3, processed: true}]
+      },
+      {
+        util: 'removeErrors',
+        name: 'with service failures (with onError)',
+        items: [
+          {id: 1, shouldFail: false},
+          {id: 2, shouldFail: true},
+          {id: 3, shouldFail: false}
+        ],
+        useErrorHandler: true,
+        expected: [{id: 1, processed: true}, {id: 3, processed: true}]
+      },
+      {
+        util: 'removeSuccesses',
+        name: 'isolates failures',
+        items: [
+          {id: 1, shouldFail: false},
+          {id: 2, shouldFail: true},
+          {id: 3, shouldFail: false}
+        ],
+        expected: [null]
+      }
+    ]
+
+    integrationTests.forEach(({util: utilFunc, name, items, useErrorHandler, expected}) => {
+      it(`${utilFunc}: ${name}`, async () => {
+        const errorHandler = useErrorHandler
+          ? {onError: ['testService:passthrough', {on: '@'}], ignoreErrors: true}
+          : {ignoreErrors: true}
+
+        const result = await query({
+          given: {items},
+          services: {testService, util},
+          settings: {debug: false},
+          queries: {
+            processed: ['$.given.items', 'util:map', {
+              service: ['testService:processItem', {item: '@', ...errorHandler}]
+            }],
+            filtered: ['$.processed', `util:${utilFunc}`]
+          },
+          select: 'filtered'
+        })
+
+        assert.deepStrictEqual(result, expected)
+      })
+    })
+
+    it('partitionErrors: batch processing integration', async () => {
+      const items = [
+        {id: 1, shouldFail: false},
+        {id: 2, shouldFail: true},
+        {id: 3, shouldFail: false},
+        {id: 4, shouldFail: true}
+      ]
+
+      const result = await query({
+        given: {items},
+        services: {testService, util},
+        settings: {debug: false},
+        queries: {
+          processed: ['$.given.items', 'util:map', {
+            service: ['testService:processItem', {item: '@', ignoreErrors: true}]
+          }],
+          partitioned: ['$.processed', 'util:partitionErrors']
+        },
+        select: 'partitioned'
+      })
+
+      assert.deepStrictEqual(result.successes, [
+        {id: 1, processed: true},
+        {id: 3, processed: true}
+      ])
+      assert.deepStrictEqual(result.failures, [null, null])
+    })
+  })
 })

@@ -61,6 +61,49 @@ const util = {
   },
 
   /**
+   * Remove Error objects and null values from an array
+   * Useful for removing failed items when ignoreErrors is used
+   */
+  async removeErrors({on}) {
+    return on.filter(item => item !== null && !(item instanceof Error))
+  },
+
+  /**
+   * Remove only null values from an array, keeping Error objects
+   * Useful when you want to inspect errors while removing null placeholders
+   */
+  async removeNulls({on}) {
+    return on.filter(item => item !== null)
+  },
+
+  /**
+   * Remove successful results, keeping only Error objects and nulls
+   * Useful for inspecting or logging only the failures
+   */
+  async removeSuccesses({on}) {
+    return on.filter(item => item === null || item instanceof Error)
+  },
+
+  /**
+   * Partition an array into successes and failures
+   * Returns {successes: [], failures: []} where failures includes both Errors and nulls
+   */
+  async partitionErrors({on}) {
+    const successes = []
+    const failures = []
+
+    for (const item of on) {
+      if (item === null || item instanceof Error) {
+        failures.push(item)
+      } else {
+        successes.push(item)
+      }
+    }
+
+    return {successes, failures}
+  },
+
+  /**
    * Map and then flatten the results
    */
   async flatMap({on, service}) {
@@ -214,13 +257,13 @@ const util = {
     // Create failure record
     const failureRecord = {
       timestamp: new Date().toISOString(),
-      error: on.error,
+      error: on.message,
       serviceName: on.serviceName,
       action: on.action,
       queryName: on.queryName,
       args: on.args,
       // Include stack trace if available
-      stack: on.originalError?.stack
+      stack: on.stack
     }
 
     // Generate filename with timestamp
@@ -259,6 +302,26 @@ util.filter._argtypes = {
   service: {type: 'service'}
 }
 util.filter._noTimeout = true
+
+util.removeErrors._argtypes = {
+  on: {argOrder: 0}
+}
+util.removeErrors._noTimeout = true
+
+util.removeNulls._argtypes = {
+  on: {argOrder: 0}
+}
+util.removeNulls._noTimeout = true
+
+util.removeSuccesses._argtypes = {
+  on: {argOrder: 0}
+}
+util.removeSuccesses._noTimeout = true
+
+util.partitionErrors._argtypes = {
+  on: {argOrder: 0}
+}
+util.partitionErrors._noTimeout = true
 
 util.flatMap._argtypes = {
   on: {argOrder: 0},
@@ -311,6 +374,30 @@ util.filter._validators = {
   precheck: {
     on: ['array'],
     service: ['any'] // Compiled by MicroQL's _argtypes system
+  }
+}
+
+util.removeErrors._validators = {
+  precheck: {
+    on: ['array']
+  }
+}
+
+util.removeNulls._validators = {
+  precheck: {
+    on: ['array']
+  }
+}
+
+util.removeSuccesses._validators = {
+  precheck: {
+    on: ['array']
+  }
+}
+
+util.partitionErrors._validators = {
+  precheck: {
+    on: ['array']
   }
 }
 
