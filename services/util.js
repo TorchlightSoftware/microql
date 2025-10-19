@@ -48,8 +48,15 @@ async function shouldSkipSnapshot(timestamp, out) {
  * Provides map, filter, flatMap, concat and other operations
  */
 const util = {
-  async map({on, service}) {
-    return Promise.all(on.map(service))
+  async map({on, service, skipInputErrors = false, skipOutputErrors = false}) {
+    // Filter input if requested
+    const input = skipInputErrors ? await util.removeErrors({on}) : on
+
+    // Apply service to all items
+    const results = await Promise.all(input.map(service))
+
+    // Filter output if requested
+    return skipOutputErrors ? await util.removeErrors({on: results}) : results
   },
 
   /**
@@ -106,8 +113,8 @@ const util = {
   /**
    * Map and then flatten the results
    */
-  async flatMap({on, service}) {
-    const results = await util.map({on, service})
+  async flatMap({on, service, skipInputErrors = false, skipOutputErrors = false}) {
+    const results = await util.map({on, service, skipInputErrors, skipOutputErrors})
     return results.flat()
   },
 
@@ -366,7 +373,9 @@ util.concat._argtypes = {
 util.map._validators = {
   precheck: {
     on: ['array'],
-    service: ['any'] // Compiled by MicroQL's _argtypes system
+    service: ['any'], // Compiled by MicroQL's _argtypes system
+    skipInputErrors: ['boolean', 'optional'],
+    skipOutputErrors: ['boolean', 'optional']
   }
 }
 
@@ -404,7 +413,9 @@ util.partitionErrors._validators = {
 util.flatMap._validators = {
   precheck: {
     on: ['array'],
-    service: ['any'] // Compiled by MicroQL's _argtypes system
+    service: ['any'], // Compiled by MicroQL's _argtypes system
+    skipInputErrors: ['boolean', 'optional'],
+    skipOutputErrors: ['boolean', 'optional']
   }
 }
 

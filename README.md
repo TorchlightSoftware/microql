@@ -217,6 +217,13 @@ const queries = {
   filtered: ['util', 'filter', {on: '$.data', service: ['data', 'isActive', {item: '@'}]}],
   mapped: ['util', 'map', {on: '$.filtered', service: ['data', 'getName', {item: '@'}]}],
 
+  // Map/flatMap with automatic error handling
+  clean: ['$.data', 'util:map', {
+    service: ['service:process', {item: '@', ignoreErrors: true}],
+    skipInputErrors: true,   // Skip null/Error items in input
+    skipOutputErrors: true   // Remove null/Error items from output
+  }],
+
   // Conditional logic
   result: ['util', 'when', {
     condition: '$.user.isAdmin',
@@ -232,6 +239,30 @@ const queries = {
 
   // Partition for batch processing
   separated: ['$.processed', 'util:partitionErrors']     // Returns {successes: [], failures: []}
+}
+```
+
+#### Map and FlatMap Error Skipping
+
+`util:map` and `util:flatMap` support automatic error filtering through optional parameters:
+
+- **`skipInputErrors: true`** - Automatically removes Error objects and null values from the input array before processing
+- **`skipOutputErrors: true`** - Automatically removes Error objects and null values from the output array after processing
+
+This is particularly useful when processing arrays where some items may have failed in previous steps:
+
+```javascript
+const queries = {
+  // Fetch data for multiple URLs, some may fail
+  responses: ['$.urls', 'util:map', {
+    service: ['http:fetch', {url: '@', ignoreErrors: true}]
+  }],
+
+  // Process only successful responses, skip nulls from failures
+  processed: ['$.responses', 'util:map', {
+    service: ['data:transform', {item: '@'}],
+    skipInputErrors: true  // Skips null values from failed fetches
+  }]
 }
 ```
 

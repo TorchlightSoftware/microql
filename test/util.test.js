@@ -412,6 +412,197 @@ describe('Util Service Tests', () => {
     })
   })
 
+  describe('Map and FlatMap Skip Errors Tests', () => {
+    // Shared test data
+    const item1 = {id: 1, value: 'a'}
+    const item2 = {id: 2, value: 'b'}
+    const item3 = {id: 3, value: 'c'}
+    const err1 = new Error('error1')
+    const err2 = new Error('error2')
+
+    // Service that doubles the id
+    const doubleService = {
+      async double({item}) {
+        return {id: item.id * 2, value: item.value}
+      },
+      async mayFail({item}) {
+        if (item.shouldFail) {
+          throw new Error(`Failed ${item.id}`)
+        }
+        return {id: item.id, processed: true}
+      }
+    }
+
+    // Data-driven tests for skipInputErrors
+    const skipInputTests = [
+      {
+        name: 'skipInputErrors removes errors before mapping',
+        input: [item1, err1, item2, null, item3],
+        skipInputErrors: true,
+        skipOutputErrors: false,
+        expected: [
+          {id: 2, value: 'a'},
+          {id: 4, value: 'b'},
+          {id: 6, value: 'c'}
+        ]
+      },
+      {
+        name: 'without skipInputErrors, processes all items',
+        input: [item1, item2],
+        skipInputErrors: false,
+        skipOutputErrors: false,
+        expected: [
+          {id: 2, value: 'a'},
+          {id: 4, value: 'b'}
+        ]
+      }
+    ]
+
+    skipInputTests.forEach(({name, input, skipInputErrors, skipOutputErrors, expected}) => {
+      it(`map: ${name}`, async () => {
+        const result = await query({
+          given: {items: input},
+          services: {doubleService, util},
+          settings: {debug: false},
+          queries: {
+            result: ['$.given.items', 'util:map', {
+              service: ['doubleService:double', {item: '@'}],
+              skipInputErrors,
+              skipOutputErrors
+            }]
+          },
+          select: 'result'
+        })
+
+        assert.deepStrictEqual(result, expected)
+      })
+    })
+
+    // Tests for skipOutputErrors
+    it('map: skipOutputErrors removes errors from output', async () => {
+      const input = [
+        {id: 1, shouldFail: false},
+        {id: 2, shouldFail: true},
+        {id: 3, shouldFail: false}
+      ]
+
+      const result = await query({
+        given: {items: input},
+        services: {doubleService, util},
+        settings: {debug: false},
+        queries: {
+          result: ['$.given.items', 'util:map', {
+            service: ['doubleService:mayFail', {
+              item: '@',
+              ignoreErrors: true
+            }],
+            skipOutputErrors: true
+          }]
+        },
+        select: 'result'
+      })
+
+      assert.deepStrictEqual(result, [
+        {id: 1, processed: true},
+        {id: 3, processed: true}
+      ])
+    })
+
+    // Tests combining both skip parameters
+    it('map: both skipInputErrors and skipOutputErrors work together', async () => {
+      const input = [
+        {id: 1, shouldFail: false},
+        err1,
+        {id: 2, shouldFail: true},
+        null,
+        {id: 3, shouldFail: false}
+      ]
+
+      const result = await query({
+        given: {items: input},
+        services: {doubleService, util},
+        settings: {debug: false},
+        queries: {
+          result: ['$.given.items', 'util:map', {
+            service: ['doubleService:mayFail', {
+              item: '@',
+              ignoreErrors: true
+            }],
+            skipInputErrors: true,
+            skipOutputErrors: true
+          }]
+        },
+        select: 'result'
+      })
+
+      assert.deepStrictEqual(result, [
+        {id: 1, processed: true},
+        {id: 3, processed: true}
+      ])
+    })
+
+    // FlatMap tests
+    it('flatMap: skipInputErrors works with flatMap', async () => {
+      const arrayService = {
+        async makeArray({item}) {
+          return [item.id, item.id + 10]
+        }
+      }
+
+      const input = [item1, err1, item2, null, item3]
+
+      const result = await query({
+        given: {items: input},
+        services: {arrayService, util},
+        settings: {debug: false},
+        queries: {
+          result: ['$.given.items', 'util:flatMap', {
+            service: ['arrayService:makeArray', {item: '@'}],
+            skipInputErrors: true
+          }]
+        },
+        select: 'result'
+      })
+
+      assert.deepStrictEqual(result, [1, 11, 2, 12, 3, 13])
+    })
+
+    it('flatMap: skipOutputErrors works with flatMap', async () => {
+      const arrayService = {
+        async makeArrayOrFail({item}) {
+          if (item.shouldFail) {
+            throw new Error(`Failed ${item.id}`)
+          }
+          return [item.id, item.id + 10]
+        }
+      }
+
+      const input = [
+        {id: 1, shouldFail: false},
+        {id: 2, shouldFail: true},
+        {id: 3, shouldFail: false}
+      ]
+
+      const result = await query({
+        given: {items: input},
+        services: {arrayService, util},
+        settings: {debug: false},
+        queries: {
+          result: ['$.given.items', 'util:flatMap', {
+            service: ['arrayService:makeArrayOrFail', {
+              item: '@',
+              ignoreErrors: true
+            }],
+            skipOutputErrors: true
+          }]
+        },
+        select: 'result'
+      })
+
+      assert.deepStrictEqual(result, [1, 11, 3, 13])
+    })
+  })
+
   describe('Print Function Tests', () => {
     let originalWrite
     let capturedOutput
