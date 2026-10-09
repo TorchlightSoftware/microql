@@ -20,7 +20,6 @@ import {columnsOf} from './graph.js'
 // Settings that change how a call runs, never what it returns.
 const OPERATIONAL_SETTINGS = ['timeout', 'retry', 'debug', 'cache']
 
-const isPlainObject = (value) => _.isPlainObject(value)
 
 // The value as canonical JSON: sorted keys (RFC 8785 ordering), functions and
 // undefined dropped, errors by name, message and their own fields.
@@ -32,7 +31,7 @@ function canonicalValue(value) {
   if (value instanceof Error) return canonicalValue({...value, name: value.name, message: value.message})
   if (value instanceof Date) return value.toISOString()
   if (Array.isArray(value)) return value.map(v => v === undefined || typeof v === 'function' ? null : canonicalValue(v))
-  if (isPlainObject(value)) {
+  if (_.isPlainObject(value)) {
     return Object.fromEntries(Object.keys(value).sort()
       .filter(k => value[k] !== undefined && typeof value[k] !== 'function')
       .map(k => [k, canonicalValue(value[k])]))
@@ -62,7 +61,7 @@ function referenceForm(text, scope, env) {
 const argumentsForm = (value, scope, env) => {
   if (isReference(value)) return referenceForm(value, scope, env)
   if (Array.isArray(value)) return value.map(v => argumentsForm(v, scope, env))
-  if (isPlainObject(value)) return _.mapValues(value, v => argumentsForm(v, scope, env))
+  if (_.isPlainObject(value)) return _.mapValues(value, v => argumentsForm(v, scope, env))
   return value
 }
 

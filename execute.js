@@ -65,7 +65,7 @@ function runPosition(position, scope, input, run) {
 
 function invoke(call, scope, run) {
   run.usedServices.set(call.parts.service, call.service)
-  const pending = wrap(call, run)(call.args, {call, scope, run})
+  const pending = run.pipelines.get(call)(call.args, {call, scope, run})
   run.pending.add(pending)
   return pending.finally(() => run.pending.delete(pending))
 }
@@ -169,6 +169,8 @@ export async function execute(compiled, {runState = memoryStore(), trigger, targ
     onUpdate,
     runPosition: (position, scope, input) => runPosition(position, scope, input, run)
   }
+  // each call's wrappers depend only on the call and the Run, so they're built once
+  run.pipelines = new Map(compiled.calls.map(call => [call, wrap(call, run)]))
 
   await initServices(new Set(compiled.calls.map(call => call.service)), runtime)
 

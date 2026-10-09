@@ -20,7 +20,6 @@ import {getServiceColorName} from './common.js'
 import {hashOf} from './forms.js'
 import {validate} from './validation.js'
 
-const isPlainObject = (value) => _.isPlainObject(value)
 
 // A call's label in errors and logs: its address and service key.
 const labelOf = (call) => `[${call.address} - ${call.key}]`
@@ -30,7 +29,7 @@ const labelOf = (call) => `[${call.address} - ${call.key}]`
 export const resolveArgs = (value, scope, nodes) => {
   if (isReference(value)) return resolveReference(parseReference(value), scope, nodes)
   if (Array.isArray(value)) return value.map(v => resolveArgs(v, scope, nodes))
-  if (isPlainObject(value)) return _.mapValues(value, v => resolveArgs(v, scope, nodes))
+  if (_.isPlainObject(value)) return _.mapValues(value, v => resolveArgs(v, scope, nodes))
   return value
 }
 

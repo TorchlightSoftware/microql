@@ -42,7 +42,6 @@ const fail = (site, message) => {
 const isChain = (value) =>
   Array.isArray(value) && value.length > 0 && value.every(Array.isArray)
 
-const isPlainObject = (value) => _.isPlainObject(value)
 
 // Splits a descriptor into its service key, arguments and the method-syntax
 // target, if any: ['KEY', {...}] or [target, 'KEY', {...}].
@@ -140,7 +139,7 @@ function checkReferences(site, args, scope, query) {
       if (ref.sigil === '$' && !ROOT_NODES.includes(ref.name)) dependencies.add(ref.name)
     } else if (Array.isArray(value)) {
       value.forEach(check)
-    } else if (isPlainObject(value)) {
+    } else if (_.isPlainObject(value)) {
       Object.values(value).forEach(check)
     }
   }
@@ -201,7 +200,7 @@ function compilePosition(owner, field, letter, value, scope, as, returns, query)
   const iteration = field === 'onError' ? undefined : as
 
   // an object in a service position is a template of its input
-  const descriptor = isPlainObject(value) ? ['GET [util]/template', value] : value
+  const descriptor = _.isPlainObject(value) ? ['GET [util]/template', value] : value
   const chain = isChain(descriptor)
   if (chain && field !== 'onError' && !iteration) {
     fail(owner, `The chain in '${field}' can't reach its input. Name it with as: and reference it as @name`)
@@ -230,7 +229,7 @@ function positionFields(site, args, argtypes, key) {
     }
   }
   // a reference or literal in a service-typed argument stays data
-  return fields.filter(k => k === 'onError' || Array.isArray(args[k]) || isPlainObject(args[k])).sort()
+  return fields.filter(k => k === 'onError' || Array.isArray(args[k]) || _.isPlainObject(args[k])).sort()
 }
 
 // Compiles one service descriptor at a site, in a scope.
@@ -239,7 +238,7 @@ function compileCall(descriptor, site, scope, query) {
   const parsed = parseDescriptor(site, descriptor)
   const {service, action} = lookupAction(site, query.services, parsed.parts)
   const argtypes = action._argtypes || {}
-  if (!isPlainObject(parsed.args)) fail(site, `Arguments for ${parsed.key} must be an object`)
+  if (!_.isPlainObject(parsed.args)) fail(site, `Arguments for ${parsed.key} must be an object`)
 
   const call = {
     address: site.address,
