@@ -1,17 +1,16 @@
 /**
- * @fileoverview Utility service for common data transformations in MicroQL
- * Provides map, filter, flatMap, concat and other operations
+ * @fileoverview Utility service for common data transformations in MicroQL.
+ * Resources are addressed by service key: `GET [util]/each`.
+ *
+ * `print` and `recordFailure` reach the outside world through the runtime,
+ * which MicroQL hands to the service at init.
  */
 
-import path from 'node:path'
-import fs from 'fs-extra'
-import {ANSI_COLORS} from '../common.js'
 import _ from 'lodash'
 
-/**
- * Ordered list of color names for service assignment
- */
-const COLOR_NAMES = ['green', 'yellow', 'blue', 'magenta', 'cyan', 'white']
+// An item that failed: an Error, or the null left by ignoreErrors.
+const isFailure = (item) => item === null || item instanceof Error
+const successes = (list) => list.filter(item => !isFailure(item))
 
 // Filter hidden properties (starting with _) before formatting
 const filterHidden = (val) => {
@@ -27,264 +26,142 @@ const filterHidden = (val) => {
 const truncate = (str, maxStr) => !!maxStr && typeof str === 'string' ?
   str.slice(0, maxStr) : str
 
-// Check if we should skip based on timestamp
-async function shouldSkipSnapshot(timestamp, out) {
-  if (timestamp && (await fs.pathExists(out))) {
-    try {
-      const existingSnapshot = JSON.parse(await fs.readFile(out, 'utf8'))
-      if (existingSnapshot.timestamp === timestamp) {
-        // Skip - this snapshot was already taken
-        return true
-      }
-    } catch (_error) {
-      return false
-    }
-  }
-  return false
-}
-
-/**
- * Utility service for common data transformations in MicroQL
- * Provides map, filter, flatMap, concat and other operations
- */
 const util = {
-  async map({on, service, skipInputErrors = false, skipOutputErrors = false}) {
-    // Filter input if requested
-    const input = skipInputErrors ? await util.removeErrors({on}) : on
-
-    // Apply service to all items
-    const results = await Promise.all(input.map(service))
-
-    // Filter output if requested
-    return skipOutputErrors ? await util.removeErrors({on: results}) : results
+  // Receives the runtime's capabilities before a Run uses this service.
+  init(runtime) {
+    this.runtime = runtime
   },
 
   /**
-   * Filter collection based on a service
+   * Run a service for every item; `flatten` concatenates the results.
    */
-  async filter({on, service}) {
-    const keepResults = await Promise.all(on.map(service))
-    return on.filter((_, index) => keepResults[index])
+  async '/each'({on, service, flatten = false, skipInputErrors = false, skipOutputErrors = false}) {
+    const input = skipInputErrors ? successes(on) : on
+    const results = await Promise.all(input.map(item => service(item)))
+    const kept = skipOutputErrors ? successes(results) : results
+    return flatten ? kept.flat() : kept
+  },
+
+  /**
+   * Keep (or remove, with mode: 'remove') the items for which the service is truthy.
+   */
+  async '/filter'({on, service, mode = 'keep'}) {
+    const tests = await Promise.all(on.map(item => service(item)))
+    const keep = mode === 'keep'
+    return on.filter((_, index) => Boolean(tests[index]) === keep)
   },
 
   /**
    * Remove Error objects and null values from an array
    * Useful for removing failed items when ignoreErrors is used
    */
-  async removeErrors({on}) {
-    return on.filter(item => item !== null && !(item instanceof Error))
+  async '/removeErrors'({on}) {
+    return successes(on)
   },
 
   /**
    * Remove only null values from an array, keeping Error objects
-   * Useful when you want to inspect errors while removing null placeholders
    */
-  async removeNulls({on}) {
+  async '/removeNulls'({on}) {
     return on.filter(item => item !== null)
   },
 
   /**
    * Remove successful results, keeping only Error objects and nulls
-   * Useful for inspecting or logging only the failures
    */
-  async removeSuccesses({on}) {
-    return on.filter(item => item === null || item instanceof Error)
+  async '/removeSuccesses'({on}) {
+    return on.filter(isFailure)
   },
 
   /**
-   * Partition an array into successes and failures
-   * Returns {successes: [], failures: []} where failures includes both Errors and nulls
+   * Partition an array into {successes, failures}; failures include Errors and nulls
    */
-  async partitionErrors({on}) {
-    const successes = []
-    const failures = []
-
-    for (const item of on) {
-      if (item === null || item instanceof Error) {
-        failures.push(item)
-      } else {
-        successes.push(item)
-      }
-    }
-
-    return {successes, failures}
-  },
-
-  /**
-   * Map and then flatten the results
-   */
-  async flatMap({on, service, skipInputErrors = false, skipOutputErrors = false}) {
-    const results = await util.map({on, service, skipInputErrors, skipOutputErrors})
-    return results.flat()
+  async '/partitionErrors'({on}) {
+    return {successes: successes(on), failures: on.filter(isFailure)}
   },
 
   /**
    * Concatenate multiple arrays into a single array
    */
-  async concat({args}) {
+  async '/concat'({args}) {
     return [].concat(...args)
   },
 
   /**
-   * Conditional logic - return different values based on test
+   * Conditional logic - `then` when test is truthy, otherwise `otherwise`
    */
-  async when({test, then, or}) {
-    return test ? then : or
+  async '/when'({test, then, otherwise}) {
+    return test ? then : otherwise
   },
 
-  /**
-   * Equality comparison
-   */
-  async eq({l, r}) {
+  async '/eq'({l, r}) {
     return l === r
   },
 
-  /**
-   * Greater than comparison
-   */
-  async gt({l, r}) {
+  async '/gt'({l, r}) {
     return l > r
   },
 
-  /**
-   * Less than comparison
-   */
-  async lt({l, r}) {
+  async '/lt'({l, r}) {
     return l < r
   },
 
   /**
    * Check if value exists (not null/undefined)
    */
-  async exists({value}) {
+  async '/exists'({value}) {
     return value != null
   },
 
   /**
    * Get length of array or string
    */
-  async length({value}) {
+  async '/length'({value}) {
     return value?.length || 0
   },
 
   /**
    * Pick specific fields from an object (similar to lodash pick)
    */
-  async pick({on, fields}) {
-    const result = {}
-    for (const field of fields) {
-      if (Object.hasOwn(on, field)) {
-        result[field] = on[field]
-      }
-    }
-
-    return result
+  async '/pick'({on, fields}) {
+    return _.pick(on, fields.filter(field => Object.hasOwn(on, field)))
   },
 
   /**
-   * Merge objects together
-   * Performs a deep merge of 'with' onto 'on', returning a new object
+   * Deep merge of 'with' onto 'on', returning a new object
    */
-  async merge({on, with: withObj}) {
+  async '/merge'({on, with: withObj}) {
     return _.merge({}, on, withObj)
   },
 
   /**
-   * Print values to console with formatting options and color coding
-   * Uses query-level inspect settings for consistent formatting
+   * Print a value through the runtime, formatted with the Query's inspect settings
    */
-  async print({on, settings, color}) {
-    // Format timestamp if enabled
+  async '/print'({on, settings, color}) {
     const timestamp = settings?.ts ? `[${new Date().toISOString()}] ` : ''
+    const formatted = typeof on === 'string' ? truncate(on, settings?.inspect?.maxStringLength) :
+      this.runtime.inspect(filterHidden(on), settings?.inspect)
 
-    // use util.inspect with provided settings
-    const util = await import('node:util')
-
-    const maxStr = settings?.inspect?.maxStringLength
-
-    const formatted = typeof on === 'string' ? truncate(on, maxStr) :
-      util.inspect(filterHidden(on), settings?.inspect)
-
-    // Apply color if specified
-    const colorCode = ANSI_COLORS[color] || ''
-    const resetCode = colorCode ? ANSI_COLORS.reset : ''
-
-    // Print with formatting and color
-    process.stdout.write(`${colorCode + timestamp + formatted + resetCode}\n`)
+    this.runtime.print(timestamp + formatted, {color})
 
     // Return the original value for chaining
     return on
   },
 
   /**
-   * Save data to a JSON snapshot file
-   *
-   * Design: This service supports two distinct arguments to separate timing control from data capture:
-   * - `on`: Controls when the snapshot executes (dependency timing) - what to wait for
-   * - `capture`: Controls what data to save - what to capture
-   *
-   * Common patterns:
-   * - `capture: '$'` - Captures all completed queries at service execution time
-   * - `on: '$.someQuery'` - Waits for someQuery to complete before executing
-   * - `on: '@'` - Waits for a step in a chain (should be unnecessary, because chains run in fixed order anyway)
-   * - Default behavior: If no `capture` specified, captures the `on` value
-   *
-   * The `$` reference unlike most paths, does not imply waiting for any queries to finish.
-   * This allows capturing current execution state at any point.
+   * Record a failure, with the error context MicroQL attached, through the runtime
    */
-  async snapshot({on, capture, out}) {
-    capture ??= on
-
-    // Skip logic: if we have a restore timestamp and file exists with same timestamp
-    if (await shouldSkipSnapshot(capture.snapshotRestoreTimestamp, out))
-      return on
-
-    const snapshotData = {
-      timestamp: new Date().toISOString(),
-      results: capture
-    }
-
-    // Ensure directory exists
-    await fs.ensureDir(path.dirname(out))
-
-    // Write snapshot file
-    await fs.writeFile(out, JSON.stringify(snapshotData, null, 2))
-
-    // Return the on argument for chaining
-    return on
-  },
-
-  /**
-   * Record a failure to disk with error context from MicroQL
-   */
-  async recordFailure({on, location}) {
-    // Ensure directory exists
-    await fs.ensureDir(location)
-
-    // Create failure record
-    const failureRecord = {
+  async '/recordFailure'({on, location}) {
+    await this.runtime.recordFailure(location, {
       timestamp: new Date().toISOString(),
       error: on.message,
-      serviceName: on.serviceName,
-      action: on.action,
-      queryName: on.queryName,
+      address: on.address,
+      key: on.key,
       args: on.args,
-      // Include stack trace if available
       stack: on.stack
-    }
+    })
 
-    // Generate filename with timestamp
-    const filename = `failure-${Date.now()}.json`
-    const filePath = path.join(location, filename)
-
-    // Write failure record
-    await fs.writeFile(filePath, JSON.stringify(failureRecord, null, 2))
-
-    console.error(
-      `❌ Failure recorded: ${path.relative(process.cwd(), filePath)}`
-    )
-
-    // Return the error context for potential chaining
+    // Return the error for potential chaining
     return on
   },
 
@@ -292,227 +169,112 @@ const util = {
    * Template service - returns the provided template object
    * MicroQL handles @ symbol resolution automatically through arg compilation
    */
-  template(args) {
+  '/template'(args) {
     return args
   }
 }
 
-// Argument type metadata for MicroQL service compilation
-util.map._argtypes = {
+// Argument type metadata for MicroQL service compilation. `reserve` marks
+// arguments that configure the call rather than feed it data.
+util['/each']._argtypes = {
   on: {argOrder: 0},
-  service: {type: 'service'}
+  service: {type: 'service'},
+  skipInputErrors: {reserve: true},
+  skipOutputErrors: {reserve: true}
 }
-util.map._noTimeout = true
-
-util.filter._argtypes = {
+util['/filter']._argtypes = {
   on: {argOrder: 0},
-  service: {type: 'service'}
-}
-util.filter._noTimeout = true
-
-util.removeErrors._argtypes = {
-  on: {argOrder: 0}
-}
-util.removeErrors._noTimeout = true
-
-util.removeNulls._argtypes = {
-  on: {argOrder: 0}
-}
-util.removeNulls._noTimeout = true
-
-util.removeSuccesses._argtypes = {
-  on: {argOrder: 0}
-}
-util.removeSuccesses._noTimeout = true
-
-util.partitionErrors._argtypes = {
-  on: {argOrder: 0}
-}
-util.partitionErrors._noTimeout = true
-
-util.flatMap._argtypes = {
-  on: {argOrder: 0},
-  service: {type: 'service'}
-}
-util.flatMap._noTimeout = true
-
-util.when._argtypes = {
-  test: {type: 'service'}
+  service: {type: 'service', returns: ['boolean']}
 }
 
-util.print._argtypes = {
-  on: {argOrder: 0},
-  settings: {type: 'settings'}
+for (const resource of ['/each', '/filter', '/removeErrors', '/removeNulls', '/removeSuccesses', '/partitionErrors']) {
+  util[resource]._noTimeout = true
 }
 
-util.snapshot._argtypes = {
-  on: {argOrder: 0}
-  // capture argument will be resolved by MicroQL context ($ references)
-  // out argument is a simple string path
+const takesTarget = {on: {argOrder: 0}}
+for (const resource of ['/removeErrors', '/removeNulls', '/removeSuccesses', '/partitionErrors', '/pick', '/merge', '/recordFailure', '/template']) {
+  util[resource]._argtypes = takesTarget
 }
+util['/print']._argtypes = {on: {argOrder: 0}, settings: {type: 'settings'}}
+util['/concat']._argtypes = {args: {argOrder: 0}}
 
-util.template._argtypes = {on: {argOrder: 0}}
+// Argument (precheck) and return (postcheck) schemas for each resource
+const listOfAnything = {precheck: {on: ['array']}, postcheck: ['array']}
 
-util.pick._argtypes = {
-  on: {argOrder: 0}
-}
-
-util.merge._argtypes = {
-  on: {argOrder: 0}
-}
-
-util.recordFailure._argtypes = {
-  on: {argOrder: 0}
-}
-
-util.concat._argtypes = {
-  args: {argOrder: 0}
-}
-
-// Enhanced validation schemas for each service method
-util.map._validators = {
+util['/each']._validators = {
   precheck: {
     on: ['array'],
-    service: ['any'], // Compiled by MicroQL's _argtypes system
+    service: ['any'],
+    flatten: ['boolean', 'optional'],
     skipInputErrors: ['boolean', 'optional'],
     skipOutputErrors: ['boolean', 'optional']
-  }
+  },
+  postcheck: ['array']
 }
 
-util.filter._validators = {
+util['/filter']._validators = {
   precheck: {
     on: ['array'],
-    service: ['any'] // Compiled by MicroQL's _argtypes system
-  }
+    service: ['any'],
+    mode: ['enum', ['keep', 'remove'], 'optional']
+  },
+  postcheck: ['array']
 }
 
-util.removeErrors._validators = {
-  precheck: {
-    on: ['array']
-  }
+util['/removeErrors']._validators = listOfAnything
+util['/removeNulls']._validators = listOfAnything
+util['/removeSuccesses']._validators = listOfAnything
+
+util['/partitionErrors']._validators = {
+  precheck: {on: ['array']},
+  postcheck: {successes: ['array'], failures: ['array']}
 }
 
-util.removeNulls._validators = {
-  precheck: {
-    on: ['array']
-  }
+util['/concat']._validators = {
+  precheck: {args: ['array', ['array'], {min: 1}]},
+  postcheck: ['array']
 }
 
-util.removeSuccesses._validators = {
-  precheck: {
-    on: ['array']
-  }
+util['/when']._validators = {
+  precheck: {test: ['any'], then: ['any'], otherwise: ['any']}
 }
 
-util.partitionErrors._validators = {
-  precheck: {
-    on: ['array']
-  }
+const comparison = (type) => ({precheck: {l: [type], r: [type]}, postcheck: ['boolean']})
+util['/eq']._validators = comparison('any')
+util['/gt']._validators = comparison('number')
+util['/lt']._validators = comparison('number')
+
+util['/exists']._validators = {precheck: {value: ['any']}, postcheck: ['boolean']}
+util['/length']._validators = {precheck: {value: ['any']}, postcheck: ['number']}
+
+util['/pick']._validators = {
+  precheck: {on: ['object'], fields: ['array', ['string'], {min: 1}]},
+  postcheck: ['object']
 }
 
-util.flatMap._validators = {
-  precheck: {
-    on: ['array'],
-    service: ['any'], // Compiled by MicroQL's _argtypes system
-    skipInputErrors: ['boolean', 'optional'],
-    skipOutputErrors: ['boolean', 'optional']
-  }
+util['/merge']._validators = {
+  precheck: {on: ['object'], with: ['object']},
+  postcheck: ['object']
 }
 
-util.concat._validators = {
-  precheck: {
-    args: ['array', ['array'], {min: 1}]
-  }
-}
-
-util.when._validators = {
-  precheck: {
-    test: ['any'], // test can be any value (truthy/falsy)
-    then: ['any'],
-    or: ['any']
-  }
-}
-
-util.eq._validators = {
-  precheck: {
-    l: ['any'],
-    r: ['any']
-  }
-}
-
-util.gt._validators = {
-  precheck: {
-    l: ['number'],
-    r: ['number']
-  }
-}
-
-util.lt._validators = {
-  precheck: {
-    l: ['number'],
-    r: ['number']
-  }
-}
-
-util.exists._validators = {
-  precheck: {
-    value: ['any']
-  }
-}
-
-util.length._validators = {
-  precheck: {
-    value: ['any'] // Accepts strings and arrays, returns 0 for other types
-  }
-}
-
-util.pick._validators = {
-  precheck: {
-    on: ['object'],
-    fields: ['array', ['string'], {min: 1}]
-  }
-}
-
-util.merge._validators = {
-  precheck: {
-    on: ['object'],
-    with: ['object']
-  }
-}
-
-util.print._validators = {
+util['/print']._validators = {
   precheck: {
     on: ['any'],
-    settings: ['any', 'optional'], // Settings object structure varies
+    settings: ['any', 'optional'],
     color: ['string', 'optional']
   }
 }
 
-util.snapshot._validators = {
-  precheck: {
-    on: ['any'],
-    capture: ['any', 'optional'],
-    out: ['string', {min: 1, regex: /^[^<>:"|?*\t\n\r\0]+$/}] // Basic path validation - exclude tab, newline, carriage return, null
-  }
-}
-
-util.recordFailure._validators = {
+util['/recordFailure']._validators = {
   precheck: {
     on: {
       message: ['string'],
-      queryName: ['string'],
-      serviceName: ['string'],
-      action: ['string'],
+      address: ['string'],
+      key: ['string'],
       args: ['any']
     },
-    location: ['string', {min: 1, regex: /^[^<>:"|?*\t\n\r\0]+$/}] // Basic path validation - exclude tab, newline, carriage return, null
+    location: ['string', {min: 1, regex: /^[^<>:"|?*\t\n\r\0]+$/}]
   }
 }
 
-util.template._validators = {
-  // template accepts any arguments and returns them as-is
-  precheck: {} // No validation needed - template is designed to accept any structure
-}
-
 export default util
-export {COLOR_NAMES}

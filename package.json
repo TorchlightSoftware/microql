@@ -1,9 +1,16 @@
 {
   "name": "microql",
-  "version": "0.6.6",
+  "version": "1.0.0",
   "description": "A query language for composing microservices.",
   "type": "module",
-  "main": "query.js",
+  "main": "node.js",
+  "exports": {
+    ".": {
+      "workerd": "./index.js",
+      "node": "./node.js",
+      "default": "./index.js"
+    }
+  },
   "scripts": {
     "test": "node --test test/*.test.js",
     "lint": "npx eslint .",
@@ -39,12 +46,15 @@
   "devDependencies": {
     "@stylistic/eslint-plugin": "^5.2.0",
     "eslint": "^9.31.0",
+    "fs-extra": "^11.4.1",
     "simple-git-hooks": "^2.13.0"
   },
   "dependencies": {
-    "fs-extra": "^11.3.0",
+    "@tlsft/service-key": "^0.2.0",
     "lodash": "^4.17.10",
-    "lodash-deep": "^2.0.0",
     "zod": "^4.0.5"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

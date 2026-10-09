@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import query from '../query.js'
+import query from '../node.js'
 
 describe('Error Handler Context Tests', () => {
   it('should pass error object when error occurs in nested service within util:map - SINGLE ITEM', async () => {
@@ -12,30 +12,30 @@ describe('Error Handler Context Tests', () => {
 
     const services = {
       failing: {
-        async process() {
+        async '/process'() {
           throw new Error('Test failure')
         }
       },
       recorder: {
-        async record(args) {
+        async '/record'(args) {
           capturedContext = args.on
           return {recorded: true}
         }
       }
     }
 
-    services.recorder.record._argtypes = {
+    services.recorder['/record']._argtypes = {
       on: {argOrder: 0}
     }
 
     const config = {
       services,
       given: {items: [1]}, // Single item
-      queries: {
-        mapped: ['$.given.items', 'util:map', {
-          service: ['failing:process', {
+      phases: {
+        mapped: ['$given.items', 'GET [util]/each', {
+          service: ['GET [failing]/process', {
             data: '@',
-            onError: ['@', 'recorder:record'],
+            onError: ['@', 'GET [recorder]/record'],
             ignoreErrors: true
           }]
         }]
@@ -54,8 +54,7 @@ describe('Error Handler Context Tests', () => {
 
     // Assertions to ensure test actually fails if bug returns
     assert.ok(capturedContext instanceof Error, 'Should receive Error object, not query results')
-    assert.strictEqual(capturedContext.serviceName, 'failing', 'Should have correct serviceName')
-    assert.strictEqual(capturedContext.action, 'process', 'Should have correct action')
+    assert.strictEqual(capturedContext.key, 'GET [failing]/process', 'Should have correct key')
   })
 
   it('should pass error object when error occurs in nested service within util:map - TWO ITEMS', async () => {
@@ -63,30 +62,30 @@ describe('Error Handler Context Tests', () => {
 
     const services = {
       failing: {
-        async process() {
+        async '/process'() {
           throw new Error('Test failure')
         }
       },
       recorder: {
-        async record(args) {
+        async '/record'(args) {
           capturedContext = args.on
           return {recorded: true}
         }
       }
     }
 
-    services.recorder.record._argtypes = {
+    services.recorder['/record']._argtypes = {
       on: {argOrder: 0}
     }
 
     const config = {
       services,
       given: {items: [1, 2]}, // Two items
-      queries: {
-        mapped: ['$.given.items', 'util:map', {
-          service: ['failing:process', {
+      phases: {
+        mapped: ['$given.items', 'GET [util]/each', {
+          service: ['GET [failing]/process', {
             data: '@',
-            onError: ['@', 'recorder:record'],
+            onError: ['@', 'GET [recorder]/record'],
             ignoreErrors: true
           }]
         }]
@@ -105,8 +104,7 @@ describe('Error Handler Context Tests', () => {
 
     // Assertions to ensure test actually fails if bug returns
     assert.ok(capturedContext instanceof Error, 'Should receive Error object, not query results')
-    assert.strictEqual(capturedContext.serviceName, 'failing', 'Should have correct serviceName')
-    assert.strictEqual(capturedContext.action, 'process', 'Should have correct action')
+    assert.strictEqual(capturedContext.key, 'GET [failing]/process', 'Should have correct key')
   })
 
   it('should pass error object as @ context to onError handler', async () => {
@@ -114,12 +112,12 @@ describe('Error Handler Context Tests', () => {
 
     const services = {
       failing: {
-        async process() {
+        async '/process'() {
           throw new Error('Test failure')
         }
       },
       recorder: {
-        async record({on}) {
+        async '/record'({on}) {
           capturedContext = on
           return {recorded: true}
         }
@@ -127,27 +125,26 @@ describe('Error Handler Context Tests', () => {
     }
 
     // Add argOrder for method syntax
-    services.recorder.record._argtypes = {
+    services.recorder['/record']._argtypes = {
       on: {argOrder: 0}
     }
 
     // Add validation to recorder to ensure it receives error context
-    services.recorder.record._validators = {
+    services.recorder['/record']._validators = {
       precheck: {
         on: {
           message: ['string'],
-          serviceName: ['string'],
-          action: ['string'],
-          queryName: ['string']
+          key: ['string'],
+          address: ['string']
         }
       }
     }
 
     const config = {
       services,
-      queries: {
-        test: ['failing:process', {
-          onError: ['@', 'recorder:record'],
+      phases: {
+        test: ['GET [failing]/process', {
+          onError: ['@', 'GET [recorder]/record'],
           ignoreErrors: true
         }]
       }
@@ -158,8 +155,7 @@ describe('Error Handler Context Tests', () => {
     // Verify the recorder received the error object, not query results
     assert.ok(capturedContext, 'Context should be captured')
     assert.ok(capturedContext.message, 'Should have error message')
-    assert.strictEqual(capturedContext.serviceName, 'failing')
-    assert.strictEqual(capturedContext.action, 'process')
+    assert.strictEqual(capturedContext.key, 'GET [failing]/process')
   })
 
   it('should pass error object to onError handler with additional args', async () => {
@@ -168,12 +164,12 @@ describe('Error Handler Context Tests', () => {
 
     const services = {
       failing: {
-        async process() {
+        async '/process'() {
           throw new Error('Test failure')
         }
       },
       recorder: {
-        async record({on, location}) {
+        async '/record'({on, location}) {
           capturedContext = on
           capturedLocation = location
           return {recorded: true}
@@ -181,27 +177,26 @@ describe('Error Handler Context Tests', () => {
       }
     }
 
-    services.recorder.record._argtypes = {
+    services.recorder['/record']._argtypes = {
       on: {argOrder: 0}
     }
 
     // Add validation to ensure it receives error context
-    services.recorder.record._validators = {
+    services.recorder['/record']._validators = {
       precheck: {
         on: {
           message: ['string'],
-          serviceName: ['string'],
-          action: ['string'],
-          queryName: ['string']
+          key: ['string'],
+          address: ['string']
         }
       }
     }
 
     const config = {
       services,
-      queries: {
-        test: ['failing:process', {
-          onError: ['@', 'recorder:record', {location: 'db/failed/test'}],
+      phases: {
+        test: ['GET [failing]/process', {
+          onError: ['@', 'GET [recorder]/record', {location: 'db/failed/test'}],
           ignoreErrors: true
         }]
       }
@@ -212,8 +207,7 @@ describe('Error Handler Context Tests', () => {
     // Verify the recorder received the error object
     assert.ok(capturedContext, 'Context should be captured')
     assert.ok(capturedContext.message, 'Should have error message')
-    assert.strictEqual(capturedContext.serviceName, 'failing')
-    assert.strictEqual(capturedContext.action, 'process')
+    assert.strictEqual(capturedContext.key, 'GET [failing]/process')
     assert.strictEqual(capturedLocation, 'db/failed/test')
   })
 })

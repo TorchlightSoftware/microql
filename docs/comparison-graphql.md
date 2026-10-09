@@ -27,9 +27,9 @@ MicroQL and GraphQL solve different problems despite both being query languages.
 
 **MicroQL**: **Automatic** - infers dependencies from `$` and `@` references
 ```javascript
-queries: {
-  profile: ['users:getProfile', {id: '$.given.userId'}],
-  auditLog: ['audit:log', {user: '$.profile'}]  // Auto-detects dependency on profile
+phases: {
+  profile: ['GET [users]/getProfile', {id: '$given.userId'}],
+  auditLog: ['GET [audit]/log', {user: '$profile'}]  // Auto-detects dependency on profile
 }
 ```
 
@@ -54,22 +54,22 @@ const resolvers = {
 const result = await query({
   given: {userId: 'user123'},
   services: {users, notifications, audit},
-  queries: {
+  phases: {
     // These run in parallel (no dependencies)
-    user: ['users:getProfile', {id: '$.given.userId'}],
-    preferences: ['users:getPreferences', {id: '$.given.userId'}],
+    user: ['GET [users]/getProfile', {id: '$given.userId'}],
+    preferences: ['GET [users]/getPreferences', {id: '$given.userId'}],
     
     // This waits for user data (has dependency)
-    notification: ['notifications:send', {
-      to: '$.user.email',
-      message: 'Welcome $.user.name!'
+    notification: ['GET [notifications]/send', {
+      to: '$user.email',
+      name: '$user.name'
     }],
     
     // Sequential chain with @ context passing
     pipeline: [
-      ['data:extract', {source: '$.given.data'}],
-      ['data:transform', {input: '@'}],        // @ = previous step result
-      ['data:validate', {processed: '@'}]
+      ['GET [data]/extract', {source: '$given.data'}],
+      ['GET [data]/transform', {input: '@'}],        // @ = previous step result
+      ['GET [data]/validate', {processed: '@'}]
     ]
   }
 })
@@ -104,18 +104,18 @@ Simple async functions focused on business logic:
 
 ```javascript
 const userService = {
-  async getProfile({id}) {
+  async '/getProfile'({id}) {
     return await db.users.findById(id)
   },
   
-  async updateProfile({id, updates}) {
+  async '/updateProfile'({id, updates}) {
     await validateUpdates(updates)
     return await db.users.update(id, updates)
   }
 }
 
 // Optional: Add validation contracts
-userService.updateProfile._validators = {
+userService['/updateProfile']._validators = {
   precheck: {
     id: ['string', 'uuid'],
     updates: {
@@ -157,31 +157,31 @@ const resolvers = {
 
 **Parallel Execution**: Independent queries run simultaneously
 ```javascript
-queries: {
-  user: ['users:get', {id: '$.userId'}],
-  orders: ['orders:getByUser', {userId: '$.userId'}],
-  preferences: ['prefs:get', {userId: '$.userId'}]
+phases: {
+  user: ['GET [users]/get', {id: '$given.userId'}],
+  orders: ['GET [orders]/getByUser', {userId: '$given.userId'}],
+  preferences: ['GET [prefs]/get', {userId: '$given.userId'}]
   // All three execute in parallel
 }
 ```
 
 **Sequential Chains**: Multi-step workflows with context passing
 ```javascript
-queries: {
+phases: {
   pipeline: [
-    ['parser:parseCSV', {data: '$.csvData'}],
-    ['validator:check', {rows: '@'}],          // @ = parsed data
-    ['transformer:enrich', {data: '@'}],       // @ = validated data
-    ['storage:save', {records: '@'}]           // @ = enriched data
+    ['GET [parser]/parseCSV', {data: '$given.csvData'}],
+    ['GET [validator]/check', {rows: '@'}],          // @ = parsed data
+    ['GET [transformer]/enrich', {data: '@'}],       // @ = validated data
+    ['GET [storage]/save', {records: '@'}]           // @ = enriched data
   ]
 }
 ```
 
 **Method Syntax**: Functional composition
 ```javascript
-queries: {
-  result: ['$.data', 'transform:filter', {service: ['data:isActive', {item: '@'}]}],
-  upper: ['$.result', 'transform:map', {service: ['string:toUpperCase', {text: '@'}]}]
+phases: {
+  result: ['$given.data', 'GET [transform]/filter', {service: ['GET [data]/isActive', {item: '@'}]}],
+  upper: ['$result', 'GET [transform]/map', {service: ['GET [string]/toUpperCase', {text: '@'}]}]
 }
 ```
 
@@ -207,10 +207,10 @@ query {
 ### MicroQL: Built-in Resilience
 
 ```javascript
-queries: {
-  user: ['users:getUser', {
-    id: '$.userId',
-    onError: ['fallback:getDefaultUser'],      // Service-level fallback
+phases: {
+  user: ['GET [users]/getUser', {
+    id: '$given.userId',
+    onError: ['GET [fallback]/getDefaultUser'],      // Service-level fallback
     retry: 3,                                   // Built-in retry
     timeout: 5000,                             // Built-in timeout
     ignoreErrors: false                        // Continue on error
@@ -219,7 +219,7 @@ queries: {
 
 // Global error handling
 settings: {
-  onError: ['logger:logError']                 // Global error handler
+  onError: ['GET [logger]/logError']                 // Global error handler
 }
 ```
 
@@ -316,9 +316,9 @@ const resolvers = {
 const result = await query({
   given: {userId: 'user123'},
   services: {users, audit},
-  queries: {
-    profile: ['users:getProfile', {id: '$.given.userId'}],
-    logged: ['audit:log', {action: 'profile_access', user: '$.profile'}]
+  phases: {
+    profile: ['GET [users]/getProfile', {id: '$given.userId'}],
+    logged: ['GET [audit]/log', {action: 'profile_access', user: '$profile'}]
   }
 })
 ```

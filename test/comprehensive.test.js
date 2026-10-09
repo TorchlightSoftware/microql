@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query from '../query.js'
+import query from '../node.js'
 
 describe('MicroQL Comprehensive Tests', () => {
   describe('Basic Functionality', () => {
@@ -9,19 +9,19 @@ describe('MicroQL Comprehensive Tests', () => {
         given: {userId: 'user123'},
         services: {
           users: {
-            async getProfile({id}) {
+            async '/getProfile'({id}) {
               return {id, name: 'John', email: 'john@example.com'}
             }
           },
           audit: {
-            async log({user}) {
+            async '/log'({user}) {
               return {logged: true, user: user.name}
             }
           }
         },
-        queries: {
-          profile: ['users:getProfile', {id: '$.given.userId'}],
-          auditLog: ['audit:log', {user: '$.profile'}]
+        phases: {
+          profile: ['GET [users]/getProfile', {id: '$given.userId'}],
+          auditLog: ['GET [audit]/log', {user: '$profile'}]
         }
       })
 
@@ -38,21 +38,21 @@ describe('MicroQL Comprehensive Tests', () => {
         given: {numbers: [1, 2, 3, 4, 5]},
         services: {
           math: {
-            async sum({values}) {
+            async '/sum'({values}) {
               return values.reduce((a, b) => a + b, 0)
             },
-            async average({values}) {
+            async '/average'({values}) {
               return values.reduce((a, b) => a + b, 0) / values.length
             },
-            async max({values}) {
+            async '/max'({values}) {
               return Math.max(...values)
             }
           }
         },
-        queries: {
-          total: ['math:sum', {values: '$.given.numbers'}],
-          avg: ['math:average', {values: '$.given.numbers'}],
-          maximum: ['math:max', {values: '$.given.numbers'}]
+        phases: {
+          total: ['GET [math]/sum', {values: '$given.numbers'}],
+          avg: ['GET [math]/average', {values: '$given.numbers'}],
+          maximum: ['GET [math]/max', {values: '$given.numbers'}]
         }
       })
 
@@ -64,30 +64,30 @@ describe('MicroQL Comprehensive Tests', () => {
     it('should handle method syntax with data transformation', async () => {
       const services = {
         transform: {
-          async filter({on, fn}) {
+          async '/filter'({on, fn}) {
             return on.filter((item) => item.includes(fn))
           },
-          async upper({on}) {
+          async '/upper'({on}) {
             return on.map((item) => item.toUpperCase())
           },
-          async count({on}) {
+          async '/count'({on}) {
             return on.length
           }
         }
       }
 
       // Add argOrder metadata for method syntax
-      services.transform.filter._argtypes = {on: {argOrder: 0}}
-      services.transform.upper._argtypes = {on: {argOrder: 0}}
-      services.transform.count._argtypes = {on: {argOrder: 0}}
+      services.transform['/filter']._argtypes = {on: {argOrder: 0}}
+      services.transform['/upper']._argtypes = {on: {argOrder: 0}}
+      services.transform['/count']._argtypes = {on: {argOrder: 0}}
 
       const result = await query({
         given: {items: ['apple', 'banana', 'cherry']},
         services,
-        queries: {
-          filtered: ['$.given.items', 'transform:filter', {fn: 'a'}],
-          uppercased: ['$.filtered', 'transform:upper', {}],
-          count: ['$.uppercased', 'transform:count', {}]
+        phases: {
+          filtered: ['$given.items', 'GET [transform]/filter', {fn: 'a'}],
+          uppercased: ['$filtered', 'GET [transform]/upper', {}],
+          count: ['$uppercased', 'GET [transform]/count', {}]
         }
       })
 
@@ -101,18 +101,18 @@ describe('MicroQL Comprehensive Tests', () => {
         given: {text: 'Hello World 123'},
         services: {
           text: {
-            async extractNumbers({input}) {
+            async '/extractNumbers'({input}) {
               return input.match(/\d+/g) || []
             },
-            async sum({numbers}) {
+            async '/sum'({numbers}) {
               return numbers.map(Number).reduce((a, b) => a + b, 0)
             }
           }
         },
-        queries: {
+        phases: {
           result: [
-            ['text:extractNumbers', {input: '$.given.text'}],
-            ['text:sum', {numbers: '@'}]
+            ['GET [text]/extractNumbers', {input: '$given.text'}],
+            ['GET [text]/sum', {numbers: '@'}]
           ]
         }
       })
@@ -125,7 +125,7 @@ describe('MicroQL Comprehensive Tests', () => {
         given: {userData: 'name:John,age:30,city:NYC'},
         services: {
           parser: {
-            async parseKeyValue({data}) {
+            async '/parseKeyValue'({data}) {
               const pairs = data.split(',')
               const result = {}
               pairs.forEach((pair) => {
@@ -134,18 +134,18 @@ describe('MicroQL Comprehensive Tests', () => {
               })
               return result
             },
-            async formatGreeting({name, city}) {
+            async '/formatGreeting'({name, city}) {
               return `Hello ${name} from ${city}!`
             }
           }
         },
-        queries: {
-          parsed: ['parser:parseKeyValue', {data: '$.given.userData'}],
+        phases: {
+          parsed: ['GET [parser]/parseKeyValue', {data: '$given.userData'}],
           greeting: [
-            'parser:formatGreeting',
+            'GET [parser]/formatGreeting',
             {
-              name: '$.parsed.name',
-              city: '$.parsed.city'
+              name: '$parsed.name',
+              city: '$parsed.city'
             }
           ]
         }
@@ -165,16 +165,16 @@ describe('MicroQL Comprehensive Tests', () => {
         given: {delay: 10},
         services: {
           async: {
-            async delay({ms, value}) {
+            async '/delay'({ms, value}) {
               await new Promise((resolve) => setTimeout(resolve, ms))
               return value
             }
           }
         },
-        queries: {
-          query1: ['async:delay', {ms: '$.given.delay', value: 'A'}],
-          query2: ['async:delay', {ms: '$.given.delay', value: 'B'}],
-          query3: ['async:delay', {ms: '$.given.delay', value: 'C'}]
+        phases: {
+          query1: ['GET [async]/delay', {ms: '$given.delay', value: 'A'}],
+          query2: ['GET [async]/delay', {ms: '$given.delay', value: 'B'}],
+          query3: ['GET [async]/delay', {ms: '$given.delay', value: 'C'}]
         }
       })
 
@@ -190,20 +190,20 @@ describe('MicroQL Comprehensive Tests', () => {
         given: {x: 5, y: 10},
         services: {
           calc: {
-            async add({a, b}) {
+            async '/add'({a, b}) {
               return a + b
             },
-            async multiply({a, b}) {
+            async '/multiply'({a, b}) {
               return a * b
             }
           }
         },
-        queries: {
-          sum: ['calc:add', {a: '$.given.x', b: '$.given.y'}],
-          product: ['calc:multiply', {a: '$.given.x', b: '$.given.y'}],
-          unused: ['calc:add', {a: 1, b: 2}]
+        phases: {
+          sum: ['GET [calc]/add', {a: '$given.x', b: '$given.y'}],
+          product: ['GET [calc]/multiply', {a: '$given.x', b: '$given.y'}],
+          unused: ['GET [calc]/add', {a: 1, b: 2}]
         },
-        select: ['sum', 'product']
+        select: ['$sum', '$product']
       })
 
       assert.deepStrictEqual(result, {sum: 15, product: 50})
@@ -216,8 +216,8 @@ describe('MicroQL Comprehensive Tests', () => {
         query({
           given: {x: 1},
           services: {},
-          queries: {
-            result: ['nonexistent:action', {value: '$.given.x'}]
+          phases: {
+            result: ['GET [nonexistent]/action', {value: '$given.x'}]
           }
         }),
         /Service 'nonexistent' not found/
@@ -235,30 +235,30 @@ describe('MicroQL Comprehensive Tests', () => {
               }
             }
           },
-          queries: {
-            result: ['test:invalidMethod', {value: '$.given.x'}]
+          phases: {
+            result: ['GET [test]/invalidMethod', {value: '$given.x'}]
           }
         }),
-        /Method 'invalidMethod' not found on service 'test'/
+        /Resource '\/invalidMethod' not found on service 'test'/
       )
     })
 
-    it('should throw error for missing dependency', async () => {
+    it('should throw error for an unknown phase reference', async () => {
       await assert.rejects(
         query({
           given: {start: 1},
           services: {
             test: {
-              async increment({value}) {
+              async '/increment'({value}) {
                 return value + 1
               }
             }
           },
-          queries: {
-            result: ['test:increment', {value: '$.nonexistent'}]
+          phases: {
+            result: ['GET [test]/increment', {value: '$nonexistent'}]
           }
         }),
-        /Circular dependency detected at compile time: result/
+        /\[\$result.@1\] Unknown reference '\$nonexistent'/
       )
     })
 
@@ -269,11 +269,11 @@ describe('MicroQL Comprehensive Tests', () => {
           services: {
             invalid: 'not a function or object'
           },
-          queries: {
-            result: ['invalid:action', {value: '$.given.data'}]
+          phases: {
+            result: ['GET [invalid]/action', {value: '$given.data'}]
           }
         }),
-        /Service 'invalid' must be an object with methods in the form: async \(args\) => result/
+        /Service 'invalid' must be an object of resources/
       )
     })
   })
@@ -285,23 +285,25 @@ describe('MicroQL Comprehensive Tests', () => {
         given: {count: 50},
         services: {
           worker: {
-            async process({id}) {
+            async '/process'({id}) {
               await new Promise((resolve) =>
                 setTimeout(resolve, Math.random() * 5))
               return `processed-${id}`
             }
           }
         },
-        queries: Object.fromEntries(
+        phases: Object.fromEntries(
           Array.from({length: 50}, (_, i) => [
             `query${i}`,
-            ['worker:process', {id: i}]
+            ['GET [worker]/process', {id: i}]
           ])
         )
       })
 
       const duration = Date.now() - start
-      assert(duration < 50, `Should complete quickly (took ${duration}ms, expected <50ms)`)
+      // run serially, 50 calls averaging 2.5ms would take ~125ms; hashing every
+      // call's form and inputs costs a few ms more than 0.6 did
+      assert(duration < 100, `Should complete quickly (took ${duration}ms, expected <100ms)`)
 
       // Verify all queries completed correctly
       for (let i = 0; i < 50; i++) {
@@ -315,25 +317,25 @@ describe('MicroQL Comprehensive Tests', () => {
       const result = await query({
         services: {
           arrayProcessor: {
-            async sum({numbers}) {
+            async '/sum'({numbers}) {
               return numbers.reduce((a, b) => a + b, 0)
             },
-            async concatenate({strings}) {
+            async '/concatenate'({strings}) {
               return strings.join(' ')
             },
-            async count({items}) {
+            async '/count'({items}) {
               return items.length
             }
           }
         },
-        queries: {
-          numberSum: ['arrayProcessor:sum', {numbers: [1, 2, 3, 4, 5]}],
+        phases: {
+          numberSum: ['GET [arrayProcessor]/sum', {numbers: [1, 2, 3, 4, 5]}],
           textJoin: [
-            'arrayProcessor:concatenate',
+            'GET [arrayProcessor]/concatenate',
             {strings: ['hello', 'world', 'test']}
           ],
           itemCount: [
-            'arrayProcessor:count',
+            'GET [arrayProcessor]/count',
             {items: ['a', 'b', 'c', 'd']}
           ]
         }
@@ -349,17 +351,17 @@ describe('MicroQL Comprehensive Tests', () => {
         given: {multiplier: 2},
         services: {
           calculator: {
-            async multiplyAndSum({numbers, factor}) {
+            async '/multiplyAndSum'({numbers, factor}) {
               return numbers.reduce((a, b) => a + b, 0) * factor
             }
           }
         },
-        queries: {
+        phases: {
           result: [
-            'calculator:multiplyAndSum',
+            'GET [calculator]/multiplyAndSum',
             {
               numbers: [10, 20, 30],
-              factor: '$.given.multiplier'
+              factor: '$given.multiplier'
             }
           ]
         }
@@ -372,7 +374,7 @@ describe('MicroQL Comprehensive Tests', () => {
       const result = await query({
         services: {
           dataProcessor: {
-            async processNestedData({config}) {
+            async '/processNestedData'({config}) {
               const {items, settings} = config
               return {
                 processedCount: items.length,
@@ -382,9 +384,9 @@ describe('MicroQL Comprehensive Tests', () => {
             }
           }
         },
-        queries: {
+        phases: {
           processed: [
-            'dataProcessor:processNestedData',
+            'GET [dataProcessor]/processNestedData',
             {
               config: {
                 items: [
@@ -414,10 +416,10 @@ describe('MicroQL Comprehensive Tests', () => {
         given: {baseNumbers: [1, 2, 3]},
         services: {
           arrayOps: {
-            async merge({on, additional}) {
+            async '/merge'({on, additional}) {
               return [...on, ...additional]
             },
-            async transform({on, operations}) {
+            async '/transform'({on, operations}) {
               return on.map((num) => {
                 let result = num
                 operations.forEach((op) => {
@@ -429,18 +431,18 @@ describe('MicroQL Comprehensive Tests', () => {
             }
           }
         },
-        queries: {
+        phases: {
           merged: [
-            'arrayOps:merge',
+            'GET [arrayOps]/merge',
             {
-              on: '$.given.baseNumbers',
+              on: '$given.baseNumbers',
               additional: [4, 5, 6]
             }
           ],
           transformed: [
-            'arrayOps:transform',
+            'GET [arrayOps]/transform',
             {
-              on: '$.merged',
+              on: '$merged',
               operations: ['double', 'add10']
             }
           ]

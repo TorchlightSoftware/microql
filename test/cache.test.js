@@ -1,9 +1,11 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query from '../query.js'
+import query, {nodeRuntime, fileStore} from '../node.js'
 import {readdir, rm} from 'fs/promises'
 
 const CACHEDIR = '.cache-test-cache'
+// the node runtime with its Cache kept in a test directory
+const runtime = {...nodeRuntime, cache: fileStore(CACHEDIR)}
 
 describe('Cache Tests', () => {
   // Clean up cache before tests
@@ -18,7 +20,7 @@ describe('Cache Tests', () => {
       let callCount = 0
       const services = {
         counter: {
-          async increment({value}) {
+          async '/increment'({value}) {
             callCount++
             return {count: callCount, input: value}
           }
@@ -29,11 +31,11 @@ describe('Cache Tests', () => {
       const result1 = await query({
         given: {value: 'test'},
         services,
-        settings: {cache: {configDir: CACHEDIR}},
-        queries: {
-          count: ['counter:increment', {value: '$.given.value', cache: true}]
+        runtime,
+        phases: {
+          count: ['GET [counter]/increment', {value: '$given.value', cache: true}]
         },
-        select: 'count'
+        select: '$count'
       })
 
       assert.strictEqual(result1.count, 1)
@@ -44,11 +46,11 @@ describe('Cache Tests', () => {
       const result2 = await query({
         given: {value: 'test'},
         services,
-        settings: {cache: {configDir: CACHEDIR}},
-        queries: {
-          count: ['counter:increment', {value: '$.given.value', cache: true}]
+        runtime,
+        phases: {
+          count: ['GET [counter]/increment', {value: '$given.value', cache: true}]
         },
-        select: 'count'
+        select: '$count'
       })
 
       assert.strictEqual(result2.count, 1) // Same as first call
@@ -59,11 +61,11 @@ describe('Cache Tests', () => {
       const result3 = await query({
         given: {value: 'different'},
         services,
-        settings: {cache: {configDir: CACHEDIR}},
-        queries: {
-          count: ['counter:increment', {value: '$.given.value', cache: true}]
+        runtime,
+        phases: {
+          count: ['GET [counter]/increment', {value: '$given.value', cache: true}]
         },
-        select: 'count'
+        select: '$count'
       })
 
       assert.strictEqual(result3.count, 2) // New execution
@@ -77,7 +79,7 @@ describe('Cache Tests', () => {
       let callCount = 0
       const services = {
         counter: {
-          async increment({value}) {
+          async '/increment'({value}) {
             callCount++
             return {count: callCount, input: value}
           }
@@ -88,10 +90,10 @@ describe('Cache Tests', () => {
       const result1 = await query({
         given: {value: 'test'},
         services,
-        queries: {
-          count: ['counter:increment', {value: '$.given.value'}]
+        phases: {
+          count: ['GET [counter]/increment', {value: '$given.value'}]
         },
-        select: 'count'
+        select: '$count'
       })
 
       assert.strictEqual(result1.count, 1)
@@ -101,10 +103,10 @@ describe('Cache Tests', () => {
       const result2 = await query({
         given: {value: 'test'},
         services,
-        queries: {
-          count: ['counter:increment', {value: '$.given.value'}]
+        phases: {
+          count: ['GET [counter]/increment', {value: '$given.value'}]
         },
-        select: 'count'
+        select: '$count'
       })
 
       assert.strictEqual(result2.count, 2)
@@ -116,7 +118,7 @@ describe('Cache Tests', () => {
 
       const services = {
         test: {
-          async action({input}) {
+          async '/action'({input}) {
             return {processed: input}
           }
         }
@@ -125,20 +127,21 @@ describe('Cache Tests', () => {
       await query({
         given: {value: 'cached'},
         services,
-        settings: {cache: {configDir: CACHEDIR}},
-        queries: {
-          result: ['test:action', {input: '$.given.value', cache: true}]
+        runtime,
+        phases: {
+          result: ['GET [test]/action', {input: '$given.value', cache: true}]
         },
-        select: 'result'
+        select: '$result'
       })
 
-      // Check if cache directory and file were created
-      const serviceDirs = await readdir(CACHEDIR)
-      assert(serviceDirs.includes('test-action'), 'Service-action directory should exist')
+      // One directory per form, one file per input
+      const formDirs = await readdir(CACHEDIR)
+      assert.strictEqual(formDirs.length, 1, 'Should have one form directory')
+      assert.match(formDirs[0], /^[0-9a-f]{64}$/, 'Form directory is named by form hash')
 
-      const cacheFiles = await readdir(`${CACHEDIR}/test-action`)
+      const cacheFiles = await readdir(`${CACHEDIR}/${formDirs[0]}`)
       assert(cacheFiles.length === 1, 'Should have one cache file')
-      assert(cacheFiles[0].endsWith('.json'), 'Cache file should be JSON')
+      assert.match(cacheFiles[0], /^[0-9a-f]{64}\.json$/, 'Cache file is named by input hash')
     })
   })
 
@@ -148,7 +151,7 @@ describe('Cache Tests', () => {
 
       const services = {
         test: {
-          async process({input}) {
+          async '/process'({input}) {
             return {processed: input, timestamp: Date.now()}
           }
         }
@@ -158,15 +161,16 @@ describe('Cache Tests', () => {
       await query({
         given: {value: 'test'},
         services,
-        settings: {cache: {configDir: CACHEDIR}},
-        queries: {
-          result: ['test:process', {input: '$.given.value', cache: {invalidateAfter: '1h'}}]
+        runtime,
+        phases: {
+          result: ['GET [test]/process', {input: '$given.value', cache: {ttl: '1h'}}]
         },
-        select: 'result'
+        select: '$result'
       })
 
       // Verify cache file exists
-      const cacheFiles = await readdir(`${CACHEDIR}/test-process`)
+      const [formDir] = await readdir(CACHEDIR)
+      const cacheFiles = await readdir(`${CACHEDIR}/${formDir}`)
       assert.strictEqual(cacheFiles.length, 1)
 
       // Note: In a real test, we'd manipulate file timestamps to test expiration
@@ -184,7 +188,7 @@ describe('Cache Tests', () => {
 
       const services = {
         slow: {
-          async process({input}) {
+          async '/process'({input}) {
             callCount++
             callTimes.push(Date.now() - startTime)
             return {processed: input, call: callCount}
@@ -196,17 +200,17 @@ describe('Cache Tests', () => {
       const result1 = await query({
         given: {values: ['first', 'second']},
         services,
+        runtime,
         settings: {
-          cache: {configDir: CACHEDIR},
           rateLimit: {
             slow: 100
           }
         },
-        queries: {
-          result1: ['slow:process', {input: '$.given.values[0]', cache: true}],
-          result2: ['slow:process', {input: '$.given.values[1]', cache: true}]
+        phases: {
+          result1: ['GET [slow]/process', {input: '$given.values[0]', cache: true}],
+          result2: ['GET [slow]/process', {input: '$given.values[1]', cache: true}]
         },
-        select: ['result1', 'result2']
+        select: ['$result1', '$result2']
       })
 
       assert.strictEqual(result1.result1.call, 1)
@@ -221,17 +225,17 @@ describe('Cache Tests', () => {
       const result2 = await query({
         given: {values: ['first', 'second']},
         services,
+        runtime,
         settings: {
-          cache: {configDir: CACHEDIR},
           rateLimit: {
             slow: 100
           }
         },
-        queries: {
-          result1: ['slow:process', {input: '$.given.values[0]', cache: true}],
-          result2: ['slow:process', {input: '$.given.values[1]', cache: true}]
+        phases: {
+          result1: ['GET [slow]/process', {input: '$given.values[0]', cache: true}],
+          result2: ['GET [slow]/process', {input: '$given.values[1]', cache: true}]
         },
-        select: ['result1', 'result2']
+        select: ['$result1', '$result2']
       })
       const duration = Date.now() - secondStartTime
 
@@ -250,7 +254,7 @@ describe('Cache Tests', () => {
       let callCount = 0
       const services = {
         validator: {
-          async process({value}) {
+          async '/process'({value}) {
             callCount++
             return {validated: value, count: callCount}
           }
@@ -258,7 +262,7 @@ describe('Cache Tests', () => {
       }
 
       // Add simple validation
-      services.validator.process._validators = {
+      services.validator['/process']._validators = {
         precheck: {value: ['string']}
       }
 
@@ -266,11 +270,11 @@ describe('Cache Tests', () => {
       const result1 = await query({
         given: {input: 'valid'},
         services,
-        settings: {cache: {configDir: CACHEDIR}},
-        queries: {
-          result: ['validator:process', {value: '$.given.input', cache: true}]
+        runtime,
+        phases: {
+          result: ['GET [validator]/process', {value: '$given.input', cache: true}]
         },
-        select: 'result'
+        select: '$result'
       })
 
       assert.strictEqual(result1.validated, 'valid')
@@ -281,11 +285,11 @@ describe('Cache Tests', () => {
       const result2 = await query({
         given: {input: 'valid'},
         services,
-        settings: {cache: {configDir: CACHEDIR}},
-        queries: {
-          result: ['validator:process', {value: '$.given.input', cache: true}]
+        runtime,
+        phases: {
+          result: ['GET [validator]/process', {value: '$given.input', cache: true}]
         },
-        select: 'result'
+        select: '$result'
       })
 
       assert.strictEqual(result2.validated, 'valid')

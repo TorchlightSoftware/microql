@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query from '../query.js'
+import query from '../node.js'
 import util from '../services/util.js'
 
 describe('Chain Sequential Execution Tests', () => {
@@ -13,28 +13,28 @@ describe('Chain Sequential Execution Tests', () => {
         settings: {debug: false},
         services: {
           tracker: {
-            async step1({value}) {
+            async '/step1'({value}) {
               executionOrder.push('step1')
               return value + 1
             },
-            async step2({value}) {
+            async '/step2'({value}) {
               executionOrder.push('step2')
               return value + 10
             },
-            async step3({value}) {
+            async '/step3'({value}) {
               executionOrder.push('step3')
               return value + 100
             }
           }
         },
-        queries: {
+        phases: {
           result: [
             // Step 1: uses given data (has $ dependency)
-            ['tracker:step1', {value: '$.given.start'}],
+            ['GET [tracker]/step1', {value: '$given.start'}],
             // Step 2: uses static value (NO @ or $ dependency)
-            ['tracker:step2', {value: 5}],
+            ['GET [tracker]/step2', {value: 5}],
             // Step 3: uses @ dependency from previous step
-            ['tracker:step3', {value: '@'}]
+            ['GET [tracker]/step3', {value: '@'}]
           ]
         }
       })
@@ -53,32 +53,32 @@ describe('Chain Sequential Execution Tests', () => {
         given: {base: 10},
         services: {
           calc: {
-            async add({a, b}) {
+            async '/add'({a, b}) {
               executionOrder.push(`add-${a}-${b}`)
               return a + b
             },
-            async multiply({a, b}) {
+            async '/multiply'({a, b}) {
               executionOrder.push(`multiply-${a}-${b}`)
               return a * b
             },
-            async constant({value}) {
+            async '/constant'({value}) {
               executionOrder.push(`constant-${value}`)
               return value
             }
           }
         },
-        queries: {
+        phases: {
           result: [
             // Step 1: uses given data
-            ['calc:add', {a: '$.given.base', b: 5}], // 10 + 5 = 15
+            ['GET [calc]/add', {a: '$given.base', b: 5}], // 10 + 5 = 15
             // Step 2: no path dependencies (static values)
-            ['calc:multiply', {a: 2, b: 3}], // 2 * 3 = 6
+            ['GET [calc]/multiply', {a: 2, b: 3}], // 2 * 3 = 6
             // Step 3: uses previous chain result
-            ['calc:add', {a: '@', b: 1}], // 6 + 1 = 7
+            ['GET [calc]/add', {a: '@', b: 1}], // 6 + 1 = 7
             // Step 4: uses constant (no dependencies)
-            ['calc:constant', {value: 100}], // 100
+            ['GET [calc]/constant', {value: 100}], // 100
             // Step 5: uses previous result
-            ['calc:add', {a: '@', b: 0}] // 100 + 0 = 100
+            ['GET [calc]/add', {a: '@', b: 0}] // 100 + 0 = 100
           ]
         }
       })
@@ -103,23 +103,23 @@ describe('Chain Sequential Execution Tests', () => {
         given: {ignored: 'not used'},
         services: {
           math: {
-            async getValue({n}) {
+            async '/getValue'({n}) {
               executionOrder.push(`getValue-${n}`)
               return n * 2
             },
-            async process({data}) {
+            async '/process'({data}) {
               executionOrder.push(`process-${data}`)
               return data + 1
             }
           }
         },
-        queries: {
+        phases: {
           result: [
             // All steps use static values, no path dependencies
-            ['math:getValue', {n: 5}], // 10
-            ['math:getValue', {n: 3}], // 6 (ignores previous @)
-            ['math:process', {data: 100}], // 101 (ignores previous @)
-            ['math:getValue', {n: 1}] // 2 (ignores previous @)
+            ['GET [math]/getValue', {n: 5}], // 10
+            ['GET [math]/getValue', {n: 3}], // 6 (ignores previous @)
+            ['GET [math]/process', {data: 100}], // 101 (ignores previous @)
+            ['GET [math]/getValue', {n: 1}] // 2 (ignores previous @)
           ]
         }
       })
@@ -143,24 +143,24 @@ describe('Chain Sequential Execution Tests', () => {
         given: {numbers: [1, 2, 3]},
         services: {
           math: {
-            async double({value}) {
+            async '/double'({value}) {
               return value * 2
             }
           },
           util
         },
-        queries: {
+        phases: {
           result: [
             // Step 1: map with service function
             [
-              'util:map',
+              'GET [util]/each',
               {
-                on: '$.given.numbers',
-                service: ['math:double', {value: '@'}]
+                on: '$given.numbers',
+                service: ['GET [math]/double', {value: '@'}]
               }
             ],
             // Step 2: use result in static operation
-            ['util:length', {value: '@'}]
+            ['GET [util]/length', {value: '@'}]
           ]
         }
       })
@@ -178,18 +178,18 @@ describe('Chain Sequential Execution Tests', () => {
           ]
         },
         services: {util},
-        queries: {
+        phases: {
           result: [
             // Step 1: map with template
             [
-              'util:map',
+              'GET [util]/each',
               {
-                on: '$.given.items',
+                on: '$given.items',
                 service: {itemId: '@.id', itemName: '@.name'}
               }
             ],
             // Step 2: use result in static operation
-            ['util:length', {value: '@'}]
+            ['GET [util]/length', {value: '@'}]
           ]
         }
       })
@@ -208,25 +208,25 @@ describe('Chain Sequential Execution Tests', () => {
           given: {start: 1},
           services: {
             test: {
-              async step1({value}) {
+              async '/step1'({value}) {
                 executionOrder.push('step1')
                 return value + 1
               },
-              async step2({_value}) {
+              async '/step2'({_value}) {
                 executionOrder.push('step2')
                 throw new Error('Step 2 failed')
               },
-              async step3({value}) {
+              async '/step3'({value}) {
                 executionOrder.push('step3')
                 return value + 100
               }
             }
           },
-          queries: {
+          phases: {
             result: [
-              ['test:step1', {value: '$.given.start'}],
-              ['test:step2', {value: 5}], // This will fail
-              ['test:step3', {value: '@'}] // This should never execute
+              ['GET [test]/step1', {value: '$given.start'}],
+              ['GET [test]/step2', {value: 5}], // This will fail
+              ['GET [test]/step3', {value: '@'}] // This should never execute
             ]
           }
         }),

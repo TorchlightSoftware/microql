@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query from '../query.js'
+import query from '../node.js'
 
 describe('NoTimeout Tests', () => {
   describe('Iterator services without timeout', () => {
@@ -8,7 +8,7 @@ describe('NoTimeout Tests', () => {
       let callCount = 0
       const services = {
         fast: {
-          async process({value}) {
+          async '/process'({value}) {
             callCount++
             // Simulate fast processing (shorter than timeout)
             await new Promise(resolve => setTimeout(resolve, 10))
@@ -23,13 +23,13 @@ describe('NoTimeout Tests', () => {
         settings: {
           timeout: 50
         },
-        queries: {
-          results: ['util:map', {
-            on: '$.given.items',
-            service: ['fast:process', {value: '@'}]
+        phases: {
+          results: ['GET [util]/each', {
+            on: '$given.items',
+            service: ['GET [fast]/process', {value: '@'}]
           }]
         },
-        select: 'results'
+        select: '$results'
       })
 
       // All items should be processed - map itself won't timeout, and nested services are fast enough
@@ -44,7 +44,7 @@ describe('NoTimeout Tests', () => {
       let callCount = 0
       const services = {
         slow: {
-          async process({value}) {
+          async '/process'({value}) {
             callCount++
             // Simulate slow processing (longer than timeout)
             await new Promise(resolve => setTimeout(resolve, 100))
@@ -60,13 +60,13 @@ describe('NoTimeout Tests', () => {
           settings: {
             timeout: 50
           },
-          queries: {
-            results: ['util:map', {
-              on: '$.given.items',
-              service: ['slow:process', {value: '@'}]
+          phases: {
+            results: ['GET [util]/each', {
+              on: '$given.items',
+              service: ['GET [slow]/process', {value: '@'}]
             }]
           },
-          select: 'results'
+          select: '$results'
         }),
         /Timed out after 50ms/
       )
@@ -76,7 +76,7 @@ describe('NoTimeout Tests', () => {
       let callCount = 0
       const services = {
         fastFilter: {
-          async isLong({value}) {
+          async '/isLong'({value}) {
             callCount++
             // Simulate fast processing
             await new Promise(resolve => setTimeout(resolve, 10))
@@ -91,13 +91,13 @@ describe('NoTimeout Tests', () => {
         settings: {
           timeout: 50
         },
-        queries: {
-          longWords: ['util:filter', {
-            on: '$.given.words',
-            service: ['fastFilter:isLong', {value: '@'}]
+        phases: {
+          longWords: ['GET [util]/filter', {
+            on: '$given.words',
+            service: ['GET [fastFilter]/isLong', {value: '@'}]
           }]
         },
-        select: 'longWords'
+        select: '$longWords'
       })
 
       assert.strictEqual(result.length, 2)
@@ -109,7 +109,7 @@ describe('NoTimeout Tests', () => {
       let callCount = 0
       const services = {
         fastSplit: {
-          async chars({word}) {
+          async '/chars'({word}) {
             callCount++
             // Simulate fast processing
             await new Promise(resolve => setTimeout(resolve, 10))
@@ -124,13 +124,14 @@ describe('NoTimeout Tests', () => {
         settings: {
           timeout: 50
         },
-        queries: {
-          allChars: ['util:flatMap', {
-            on: '$.given.words',
-            service: ['fastSplit:chars', {word: '@'}]
+        phases: {
+          allChars: ['GET [util]/each', {
+            flatten: true,
+            on: '$given.words',
+            service: ['GET [fastSplit]/chars', {word: '@'}]
           }]
         },
-        select: 'allChars'
+        select: '$allChars'
       })
 
       assert.strictEqual(result.length, 5)
@@ -144,7 +145,7 @@ describe('NoTimeout Tests', () => {
       // Test that setting an explicit timeout on a _noTimeout service should apply the timeout
       const services2 = {
         slowIterator: {
-          async process({items}) {
+          async '/process'({items}) {
             // This service has _noTimeout but we'll override it
             await new Promise(resolve => setTimeout(resolve, 100))
             return items.map(item => ({processed: item}))
@@ -157,13 +158,13 @@ describe('NoTimeout Tests', () => {
         query({
           given: {items: ['a']},
           services: services2,
-          queries: {
-            results: ['slowIterator:process', {
-              items: '$.given.items',
+          phases: {
+            results: ['GET [slowIterator]/process', {
+              items: '$given.items',
               timeout: 50 // Explicit timeout should override _noTimeout
             }]
           },
-          select: 'results'
+          select: '$results'
         }),
         /Timed out after 50ms/
       )
@@ -174,7 +175,7 @@ describe('NoTimeout Tests', () => {
     it('should timeout for non-iterator services with global timeout', async () => {
       const services = {
         slow: {
-          async process({value}) {
+          async '/process'({value}) {
             await new Promise(resolve => setTimeout(resolve, 100))
             return {processed: value}
           }
@@ -188,10 +189,10 @@ describe('NoTimeout Tests', () => {
           settings: {
             timeout: 50
           },
-          queries: {
-            result: ['slow:process', {value: '$.given.value'}]
+          phases: {
+            result: ['GET [slow]/process', {value: '$given.value'}]
           },
-          select: 'result'
+          select: '$result'
         }),
         /Timed out after 50ms/
       )

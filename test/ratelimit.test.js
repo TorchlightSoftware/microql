@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query from '../query.js'
+import query from '../node.js'
 
 describe('Rate Limit Tests', () => {
   describe('Basic Rate Limiting', () => {
@@ -10,7 +10,7 @@ describe('Rate Limit Tests', () => {
 
       const services = {
         claude: {
-          async process({input}) {
+          async '/process'({input}) {
             callTimes.push(Date.now() - startTime)
             return {processed: input, callNumber: callTimes.length}
           }
@@ -25,12 +25,12 @@ describe('Rate Limit Tests', () => {
             claude: 100 // 100ms between calls
           }
         },
-        queries: {
-          result1: ['claude:process', {input: '$.given.values[0]'}],
-          result2: ['claude:process', {input: '$.given.values[1]'}],
-          result3: ['claude:process', {input: '$.given.values[2]'}]
+        phases: {
+          result1: ['GET [claude]/process', {input: '$given.values[0]'}],
+          result2: ['GET [claude]/process', {input: '$given.values[1]'}],
+          result3: ['GET [claude]/process', {input: '$given.values[2]'}]
         },
-        select: ['result1', 'result2', 'result3']
+        select: ['$result1', '$result2', '$result3']
       })
 
       // Verify all calls completed
@@ -59,13 +59,13 @@ describe('Rate Limit Tests', () => {
 
       const services = {
         fast: {
-          async process({input}) {
+          async '/process'({input}) {
             callTimes.push(Date.now() - startTime)
             return {processed: input}
           }
         },
         claude: {
-          async process({input}) {
+          async '/process'({input}) {
             callTimes.push(Date.now() - startTime)
             return {processed: input}
           }
@@ -80,13 +80,13 @@ describe('Rate Limit Tests', () => {
             claude: 100 // Only claude is rate limited
           }
         },
-        queries: {
+        phases: {
           // Multiple calls to non-rate-limited service should be fast
-          fast1: ['fast:process', {input: '$.given.value'}],
-          fast2: ['fast:process', {input: '$.given.value'}],
-          fast3: ['fast:process', {input: '$.given.value'}]
+          fast1: ['GET [fast]/process', {input: '$given.value'}],
+          fast2: ['GET [fast]/process', {input: '$given.value'}],
+          fast3: ['GET [fast]/process', {input: '$given.value'}]
         },
-        select: ['fast1', 'fast2', 'fast3']
+        select: ['$fast1', '$fast2', '$fast3']
       })
 
       // All calls should complete quickly (no rate limiting)
@@ -103,13 +103,13 @@ describe('Rate Limit Tests', () => {
 
       const services = {
         serviceA: {
-          async process({input}) {
+          async '/process'({input}) {
             callTimesA.push(Date.now() - startTime)
             return {service: 'A', processed: input}
           }
         },
         serviceB: {
-          async process({input}) {
+          async '/process'({input}) {
             callTimesB.push(Date.now() - startTime)
             return {service: 'B', processed: input}
           }
@@ -125,13 +125,13 @@ describe('Rate Limit Tests', () => {
             serviceB: 150 // 150ms between calls
           }
         },
-        queries: {
-          a1: ['serviceA:process', {input: '1'}],
-          b1: ['serviceB:process', {input: '1'}],
-          a2: ['serviceA:process', {input: '2'}],
-          b2: ['serviceB:process', {input: '2'}]
+        phases: {
+          a1: ['GET [serviceA]/process', {input: '1'}],
+          b1: ['GET [serviceB]/process', {input: '1'}],
+          a2: ['GET [serviceA]/process', {input: '2'}],
+          b2: ['GET [serviceB]/process', {input: '2'}]
         },
-        select: ['a1', 'a2', 'b1', 'b2']
+        select: ['$a1', '$a2', '$b1', '$b2']
       })
 
       // Verify results
@@ -157,7 +157,7 @@ describe('Rate Limit Tests', () => {
 
       const services = {
         validated: {
-          async process({value}) {
+          async '/process'({value}) {
             callTimes.push(Date.now() - startTime)
             return {processed: value, timestamp: Date.now()}
           }
@@ -165,7 +165,7 @@ describe('Rate Limit Tests', () => {
       }
 
       // Skip validation for now to isolate the issue
-      // services.validated.process._validators = {
+      // services.validated['/process']._validators = {
       //   precheck: {
       //     service: {value: ['string']}
       //   },
@@ -182,11 +182,11 @@ describe('Rate Limit Tests', () => {
             validated: 100
           }
         },
-        queries: {
-          result1: ['validated:process', {value: '$.given.values[0]'}],
-          result2: ['validated:process', {value: '$.given.values[1]'}]
+        phases: {
+          result1: ['GET [validated]/process', {value: '$given.values[0]'}],
+          result2: ['GET [validated]/process', {value: '$given.values[1]'}]
         },
-        select: ['result1', 'result2']
+        select: ['$result1', '$result2']
       })
 
       // Verify validation passed and rate limiting worked
@@ -202,7 +202,7 @@ describe('Rate Limit Tests', () => {
 
       const services = {
         flaky: {
-          async process({input}) {
+          async '/process'({input}) {
             callTimes.push(Date.now() - startTime)
             callCount++
             if (callCount === 2) {
@@ -221,11 +221,11 @@ describe('Rate Limit Tests', () => {
             flaky: 100
           }
         },
-        queries: {
-          result1: ['flaky:process', {input: '$.given.values[0]'}],
-          result2: ['flaky:process', {input: '$.given.values[1]', retry: 2}]
+        phases: {
+          result1: ['GET [flaky]/process', {input: '$given.values[0]'}],
+          result2: ['GET [flaky]/process', {input: '$given.values[1]', retry: 2}]
         },
-        select: ['result1', 'result2']
+        select: ['$result1', '$result2']
       })
 
       // First call succeeds immediately
@@ -248,7 +248,7 @@ describe('Rate Limit Tests', () => {
 
       const services = {
         timed: {
-          async process({input}) {
+          async '/process'({input}) {
             callTimes.push(Date.now() - startTime)
             await new Promise(resolve => setTimeout(resolve, 50))
             return {processed: input}
@@ -264,11 +264,11 @@ describe('Rate Limit Tests', () => {
             timed: 100
           }
         },
-        queries: {
-          result1: ['timed:process', {input: '$.given.values[0]', timeout: 200}],
-          result2: ['timed:process', {input: '$.given.values[1]', timeout: 200}]
+        phases: {
+          result1: ['GET [timed]/process', {input: '$given.values[0]', timeout: 200}],
+          result2: ['GET [timed]/process', {input: '$given.values[1]', timeout: 200}]
         },
-        select: ['result1', 'result2']
+        select: ['$result1', '$result2']
       })
 
       // Both should complete successfully with rate limiting
@@ -284,7 +284,7 @@ describe('Rate Limit Tests', () => {
 
       const services = {
         errorProne: {
-          async process({input}) {
+          async '/process'({input}) {
             callCount++
             if (input === 'bad') {
               throw new Error('Bad input')
@@ -303,11 +303,11 @@ describe('Rate Limit Tests', () => {
               errorProne: 100
             }
           },
-          queries: {
-            good: ['errorProne:process', {input: 'good'}],
-            bad: ['errorProne:process', {input: 'bad'}]
+          phases: {
+            good: ['GET [errorProne]/process', {input: 'good'}],
+            bad: ['GET [errorProne]/process', {input: 'bad'}]
           },
-          select: 'bad'
+          select: '$bad'
         })
         assert.fail('Should have thrown error')
       } catch (error) {
@@ -322,7 +322,7 @@ describe('Rate Limit Tests', () => {
 
       const services = {
         sometimes: {
-          async process({input}) {
+          async '/process'({input}) {
             callTimes.push(Date.now() - startTime)
             if (input === 'fail') {
               throw new Error('Failed')
@@ -340,18 +340,19 @@ describe('Rate Limit Tests', () => {
             sometimes: 100
           }
         },
-        queries: {
-          first: ['sometimes:process', {input: 'ok'}],
-          second: ['sometimes:process', {input: 'fail', ignoreErrors: true}],
-          third: ['sometimes:process', {input: 'ok'}]
+        phases: {
+          first: ['GET [sometimes]/process', {input: 'ok'}],
+          second: ['GET [sometimes]/process', {input: 'fail', ignoreErrors: true}],
+          // a distinct input: identical calls share one result and run once
+          third: ['GET [sometimes]/process', {input: 'ok again'}]
         },
-        select: ['first', 'second', 'third']
+        select: ['$first', '$second', '$third']
       })
 
       // First and third should succeed, second should fail but be ignored
       assert.strictEqual(result.first.processed, 'ok')
       assert.strictEqual(result.second, null) // Failed but ignored
-      assert.strictEqual(result.third.processed, 'ok')
+      assert.strictEqual(result.third.processed, 'ok again')
 
       // Rate limiting should still apply
       assert(callTimes[0] < 50, 'First call should be immediate')

@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query from '../query.js'
+import query from '../node.js'
 
 describe('Service This Binding Tests', () => {
   it('should allow services to use this for internal state', async () => {
@@ -11,7 +11,7 @@ describe('Service This Binding Tests', () => {
         return 'internal-method-result'
       },
 
-      async testMethod({input}) {
+      async '/testMethod'({input}) {
         // This should refer to the service object, not AST node
         assert.strictEqual(this.internalState, 'service-internal-data')
         assert.strictEqual(this.internalMethod(), 'internal-method-result')
@@ -27,10 +27,10 @@ describe('Service This Binding Tests', () => {
     const result = await query({
       given: {value: 'test-input'},
       services: {testService},
-      queries: {
-        result: ['testService:testMethod', {input: '$.given.value'}]
+      phases: {
+        result: ['GET [testService]/testMethod', {input: '$given.value'}]
       },
-      select: 'result'
+      select: '$result'
     })
 
     assert.deepStrictEqual(result, {
@@ -45,24 +45,24 @@ describe('Service This Binding Tests', () => {
     const counterService = {
       count: 0,
 
-      async increment({by = 1}) {
+      async '/increment'({by = 1}) {
         this.count += by
         return this.count
       },
 
-      async getCount() {
+      async '/getCount'() {
         return this.count
       }
     }
 
     const result = await query({
       services: {counterService},
-      queries: {
-        first: ['counterService:increment', {by: 5}],
-        second: ['counterService:increment', {by: 3}],
-        final: ['counterService:getCount', {}]
+      phases: {
+        first: ['GET [counterService]/increment', {by: 5}],
+        second: ['GET [counterService]/increment', {by: 3}],
+        final: ['GET [counterService]/getCount', {}]
       },
-      select: ['first', 'second', 'final']
+      select: ['$first', '$second', '$final']
     })
 
     assert.deepStrictEqual(result, {

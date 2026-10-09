@@ -1,5 +1,20 @@
+import {builtinModules} from 'node:module'
 import stylistic from '@stylistic/eslint-plugin'
 import js from '@eslint/js'
+
+// Files that may use node: the node entry point (core plus the node runtime),
+// the tests, and tooling. Everything else is core, and must run on any platform.
+const NODE_FILES = ['node.js', 'test/**', 'scripts/**', 'eslint.config.js']
+
+const nodeGlobals = {
+  process: 'readonly',
+  Buffer: 'readonly',
+  __dirname: 'readonly',
+  __filename: 'readonly',
+  global: 'readonly',
+  setImmediate: 'readonly',
+  clearImmediate: 'readonly'
+}
 
 export default [
   js.configs.recommended,
@@ -9,22 +24,19 @@ export default [
   {
     files: ['**/*.js'],
     languageOptions: {
-      ecmaVersion: 2022,
+      ecmaVersion: 2024,
       sourceType: 'module',
+      // globals every runtime provides
       globals: {
-        // Node.js globals
         console: 'readonly',
-        process: 'readonly',
-        Buffer: 'readonly',
-        __dirname: 'readonly',
-        __filename: 'readonly',
-        global: 'readonly',
         setTimeout: 'readonly',
         clearTimeout: 'readonly',
         setInterval: 'readonly',
         clearInterval: 'readonly',
-        setImmediate: 'readonly',
-        clearImmediate: 'readonly'
+        crypto: 'readonly',
+        TextEncoder: 'readonly',
+        performance: 'readonly',
+        URL: 'readonly'
       }
     },
     plugins: {
@@ -78,7 +90,21 @@ export default [
         argsIgnorePattern: '^_',
         varsIgnorePattern: '^_',
         caughtErrorsIgnorePattern: '^_'
+      }],
+
+      // Core is platform-free: no node built-ins, and nothing built on them
+      'no-restricted-imports': ['error', {
+        paths: [...builtinModules, 'fs-extra'].map(name => ({
+          name,
+          message: 'Core runs on any platform; node-only code belongs in node.js'
+        })),
+        patterns: [{group: ['node:*'], message: 'Core runs on any platform; node-only code belongs in node.js'}]
       }]
     }
+  },
+  {
+    files: NODE_FILES,
+    languageOptions: {globals: nodeGlobals},
+    rules: {'no-restricted-imports': 'off'}
   }
 ]

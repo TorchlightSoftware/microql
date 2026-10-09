@@ -10,7 +10,6 @@
 
 import {z} from 'zod'
 import _ from 'lodash'
-import {inspect} from 'util'
 
 const PRIMITIVE_TYPES = ['string', 'number', 'boolean', 'date', 'any', 'unknown', 'void', 'undefined', 'null']
 const WRAPPER_TYPES = ['array', 'object', 'union', 'enum', 'nullable', 'optional', 'tuple', 'function']
@@ -44,10 +43,14 @@ const DescriptorSchema = z.lazy(() => z.union([
   z.record(z.string(), DescriptorSchema)
 ]))
 
+// How a value is shown in a validation message when no runtime inspect is given.
+const showAsJson = (value) => JSON.stringify(value)
+
 /**
- * Format Zod error messages into MicroQL error format
+ * Format Zod error messages into MicroQL error format; `show` renders a value
+ * (the runtime's inspect, at execution).
  */
-function formatError(zodError, value, settings) {
+function formatError(zodError, value, show = showAsJson) {
   const issues = zodError?.issues || []
   const errorMessages = issues.map(err => {
     // Build a more detailed path showing the exact location of the error
@@ -76,7 +79,7 @@ function formatError(zodError, value, settings) {
       }
     }
 
-    return `- ${path}: ${inspect(specificValue, settings?.inspect)} => ${message}`
+    return `- ${path}: ${show(specificValue)} => ${message}`
   })
 
   return errorMessages.join('\n')
@@ -85,14 +88,14 @@ function formatError(zodError, value, settings) {
 /**
  * Main validation function called by withValidation wrapper
  */
-export function validate(schema, value, settings, validateDescriptor = true) {
+export function validate(schema, value, show, validateDescriptor = true) {
   if (!schema) return
 
-  const zodSchema = parseSchema(schema, settings, validateDescriptor)
+  const zodSchema = parseSchema(schema, show, validateDescriptor)
   const result = zodSchema.safeParse(value)
 
   if (!result.success) {
-    throw new Error(formatError(result.error, value, settings))
+    throw new Error(formatError(result.error, value, show))
   }
 }
 
@@ -101,14 +104,14 @@ export function validate(schema, value, settings, validateDescriptor = true) {
  * during withValidations() wrapper execution.
  * The second time it just returns the already-parsed schema.
  */
-export function parseSchema(descriptor, settings, validateDescriptor = true) {
+export function parseSchema(descriptor, show, validateDescriptor = true) {
   // If already a Zod schema, return it immediately
   if (descriptor instanceof z.ZodType) {
     return descriptor
   }
 
   // Validate descriptor format itself to ensure it's of valid form
-  if (validateDescriptor) validate(DescriptorSchema, descriptor, settings, false)
+  if (validateDescriptor) validate(DescriptorSchema, descriptor, show, false)
   return parseSchemaRecursive(descriptor)
 }
 

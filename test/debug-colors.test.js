@@ -1,7 +1,7 @@
 import assert from 'node:assert'
 import {afterEach, beforeEach, describe, it} from 'node:test'
-import query from '../query.js'
-import {ANSI_COLORS} from '../common.js'
+import query from '../node.js'
+import {ANSI_COLORS} from '../node.js'
 
 describe('Debug Color Tests', () => {
   let originalWrite
@@ -24,7 +24,9 @@ describe('Debug Color Tests', () => {
     // Capture stdout.write calls
     captureState = {outputs: []}
     originalWrite = process.stdout.write
-    process.stdout.write = function (data) {
+    // Capture text; the test runner's own frames are buffers and pass through
+    process.stdout.write = function (data, ...rest) {
+      if (typeof data !== 'string') return originalWrite.call(process.stdout, data, ...rest)
       captureState.outputs.push(data)
       return true
     }
@@ -40,28 +42,28 @@ describe('Debug Color Tests', () => {
       settings: {debug: true},
       services: {
         serviceA: {
-          async test() {
+          async '/test'() {
             await new Promise(resolve => setTimeout(resolve, 10))
             return 'resultA'
           }
         },
         serviceB: {
-          async test() {
+          async '/test'() {
             await new Promise(resolve => setTimeout(resolve, 20))
             return 'resultB'
           }
         },
         serviceC: {
-          async test() {
+          async '/test'() {
             await new Promise(resolve => setTimeout(resolve, 30))
             return 'resultC'
           }
         }
       },
-      queries: {
-        testA: ['serviceA:test', {}],
-        testB: ['serviceB:test', {}],
-        testC: ['serviceC:test', {}]
+      phases: {
+        testA: ['GET [serviceA]/test', {}],
+        testB: ['GET [serviceB]/test', {}],
+        testC: ['GET [serviceC]/test', {}]
       }
     })
 
@@ -70,9 +72,9 @@ describe('Debug Color Tests', () => {
 
     // Should have debug logs for each service
     const output = captureState.outputs.join('')
-    assert(output.includes('[testA - serviceA:test]'), 'Should log serviceA calls')
-    assert(output.includes('[testB - serviceB:test]'), 'Should log serviceB calls')
-    assert(output.includes('[testC - serviceC:test]'), 'Should log serviceC calls')
+    assert(output.includes('[$testA.@1 - GET [serviceA]/test]'), 'Should log serviceA calls')
+    assert(output.includes('[$testB.@1 - GET [serviceB]/test]'), 'Should log serviceB calls')
+    assert(output.includes('[$testC.@1 - GET [serviceC]/test]'), 'Should log serviceC calls')
 
     // Check for ANSI color codes in the logs
     const coloredLogs = captureState.outputs.filter(log => extractColor(log) !== null)
@@ -90,23 +92,23 @@ describe('Debug Color Tests', () => {
       settings: {debug: true},
       services: {
         consistentService: {
-          async action1() { return 'r1' },
-          async action2() { return 'r2' }
+          async '/action1'() { return 'r1' },
+          async '/action2'() { return 'r2' }
         },
         differentService: {
-          async action() { return 'r3' }
+          async '/action'() { return 'r3' }
         }
       },
-      queries: {
-        q1: ['consistentService:action1', {}],
-        q2: ['differentService:action', {}],
-        q3: ['consistentService:action2', {}]
+      phases: {
+        q1: ['GET [consistentService]/action1', {}],
+        q2: ['GET [differentService]/action', {}],
+        q3: ['GET [consistentService]/action2', {}]
       }
     })
 
     // Find all logs for consistentService
     const consistentLogs = captureState.outputs.filter(log =>
-      log.includes('- consistentService:'))
+      log.includes('[consistentService]'))
     assert(consistentLogs.length >= 2, 'Should have multiple logs for consistentService')
 
     // Extract colors from logs using helper
@@ -119,7 +121,7 @@ describe('Debug Color Tests', () => {
 
     // Different service should have different color
     const differentLog = captureState.outputs.find(log =>
-      log.includes('- differentService:'))
+      log.includes('[differentService]'))
     assert(differentLog, 'Should find differentService log')
     const differentColor = extractColor(differentLog)
     assert(differentColor !== firstColor, 'Different services should have different colors')
@@ -130,13 +132,13 @@ describe('Debug Color Tests', () => {
       settings: {debug: true},
       services: {
         testService: {
-          async method() {
+          async '/method'() {
             return 'result'
           }
         }
       },
-      queries: {
-        test: ['testService:method', {}]
+      phases: {
+        test: ['GET [testService]/method', {}]
       }
     })
 

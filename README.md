@@ -1,330 +1,39 @@
 # MicroQL
 
-MicroQL is a declarative JSON-based query language for composing and orchestrating microservices. It automatically handles dependency resolution, parallel execution, error handling, and validation while providing a clean, expressive syntax for complex service interactions.
-
-## Target Audience
-
-If you're a programmer and you want to achieve the low risk/high productivity of something like Zapier or n8n, but without all the baggage that those services come with, use MicroQL.  You may 1) make yourself more productive, 2) enable a non-coder on the team to be able to compose queries, enabling a division of labor where you and other coders can focus on building out new services, or working on something else entirely.
-
-## Core Concepts
-
-### Basic Service Orchestration
+MicroQL is a declarative JSON-based query language for composing and orchestrating services: APIs, AI models, scrapers, databases, your CRM. You describe what each step needs; MicroQL works out the order, runs independent steps in parallel, retries and rate-limits the flaky ones, keeps failures from sinking the whole job, and remembers every result so an interrupted run picks up where it left off.
 
 ```javascript
 import query from 'microql'
-import users from './users.js'
-import audit from './audit.js'
+import {scraper, claude, hubspot} from './services/index.js'
 
-const result = await query({
-  given: {userId: 'user123'},
-  services: {users, audit},
-  queries: {
-    // depends on $.given, which is provided by the query definition
-    // so this will run first
-    profile: ['users', 'getProfile', {id: '$.given.userId'}],
+// Find manufacturers in the chamber of commerce directory and put them in the CRM
+const leads = await query({
+  given: {directory: 'https://chamber.example.org/member-directory'},
+  services: {scraper, claude, hubspot},
+  phases: {
+    members: ['GET [scraper]/listings', {url: '$given.directory', cache: true}],
 
-    // depends on $.profile, so MicroQL will run this after the profile query is complete
-    auditLog: ['audit', 'log', {action: 'profile_access', user: '$.profile'}]
-  }
-})
-
-console.log(result.profile) // {id: 'user123', name: 'John Doe', email: 'john@example.com'}
-console.log(result.auditLog) // {timestamp: 1642533600000, action: 'profile_access', userId: 'user123'}
-```
-
-### Data References
-
-Data references imply dependency, and MicroQL will automatically execute queries as their dependencies become available.  Circular references (unprocessable queries) are detected at query parse time and aborted.
-
-- `$` - All query results in their present state - does not depend or wait on any queries
-- `$.given.field` - Access initial input data
-- `$.queryName` - Reference results from other queries, implies dependency on that query
-- `$.queryName.foo[0].bar` - Arbitrary (and safe) nested data access - returns undefined or value
-- `@` - Current context: May be a chain (result of previous step), an iterator value, or the error for an `onError` handler
-- `@@` - Parent context, `@@@` - grandparent context
-- `@.foo[0].bar` - nested paths work on context
-
-### Service Implementation
-
-Services are just objects containing asynchronous methods.  They take an object containing named args and return a promise, with data up to the service's discretion.  This allows you to easily wrap many kinds of API calls, databases, etc. and make them available to be orchestrated within a MicroQL query.  If your target is well formed e.g. REST, perhaps you can programmatically create the service wrapper.
-
-```javascript
-services: {
-  users: {
-    async getProfile({id}) {
-      return {id, name: 'John Doe', email: 'john@example.com'}
-    }
-  },
-  audit: {
-    async log({action, user}) {
-      return {timestamp: Date.now(), action, userId: user.id}
-    }
-  }
-},
-```
-
-### Data Transformation Chains
-
-You can 'pipe' values through chains, using '@' context, which in this case will refer to the previous value in the chain.  Steps in a chain will run sequentially, but any paths referenced by the entire query tree (including the chain) will be considered dependencies of that query, and will determine the execution sequence of queries.
-
-```javascript
-const result = await query({
-  given: {data: [1, 2, 3, 4, 5]},
-
-  // these are typically in other files, not inline, but presented here for a complete example
-  services: {
-    math: {
-      async double({values}) {
-        return values.map(x => x * 2)
-      },
-      async sum({values}) {
-        return values.reduce((a, b) => a + b, 0)
-      }
-    }
-  },
-  queries: {
-    // Sequential chain: double the numbers, then sum them
-    result: [
-      ['math', 'double', {values: '$.given.data'}],
-      ['math', 'sum', {values: '@'}] // @ refers to return of 'math:double'
-    ]
-  }
-})
-
-console.log(result.result) // 30 (sum of [2, 4, 6, 8, 10])
-```
-
-### First Class Services
-
-A service can be passed as an argument to another service.  Services that support other services as arguments have arg defined with `{type: 'service'}`.
-
-```javascript
-util.map._argtypes = {
-  service: {type: 'service'},
-}
-```
-
-This means the argument is expecting a service definition.  The child service (`stringLib:toUppercase` in this case) will have access to '@' context - this is how it accesses the iteration value.
-
-```javascript
-    uppercase: ['util', 'map', {
-        on: '$.filtered',
-        service: ['stringLib', 'toUppercase', {on: '@'}]
-    }],
-```
-
-Remember: `{type: 'service'}` declared on the service is MicroQL's cue to compile the argument as a service descriptor.  Otherwise the same argument will be interpreted as an array with some strings and an object in it - no compilation and no service lookup.
-
-The syntax used here can be further condensed; read below for method syntax.
-
-### Method Syntax
-
-MicroQL supports 'infix' notation where the first argument appears on the left.
-
-```javascript
-['$.filtered', 'util:map', {service: ['@', 'stringLib:toUppercase']}],
-```
-
-Services that support method syntax have an arg defined with `{argOrder: 0}`.  By convention we typically use `on` for `{argOrder: 0}`:
-
-```javascript
-util.map._argtypes = {
-  on: {argOrder: 0}
-}
-```
-
-Method syntax is transformed into the equivalent service definitions, and then compiled and executed in the same way.  So it's purely for user convenience and has the same semantics.
-
-```javascript
-// method syntax:
-['$.filtered', 'util:map', {service: ['@', 'stringLib:toUppercase']}],
-
-// is transformed into standard service calls
-['util', 'map', {
-    on: '$.filtered',
-    service: ['stringLib', 'toUppercase', {on: '@'}]}],
-
-// and then the service lookups are performed and these become functions which get called by the execution engine
-
-```
-
-## Features
-
-- **Declarative Query Language**: Express complex service orchestration with simple JSON
-- **Automatic Dependency Resolution**: Infers execution order from data dependencies
-- **Parallel Execution**: Runs independent operations concurrently for optimal performance
-- **Context Chaining**: Pass data between services using `@` and `$` references
-- **Method Syntax**: Concise `service:method` notation for transformations
-- **Sequential Chains**: Execute multi-step workflows with automatic data flow
-- **Validation System**: Built-in Zod-based validation for inputs and outputs
-- **Error Handling**: Comprehensive error recovery with `onError` chains
-- **Retry & Timeout**: Built-in resilience patterns for unreliable services
-- **Circular Dependency Detection**: Prevents infinite loops at compile time
-
-## Advanced Features
-
-### Validation
-
-`precheck` and `postcheck` validations can be created at both the service and query level. See [Validation Guide](docs/validation.md) for details.
-
-```javascript
-const userService = {
-  async createUser(args) {
-    return {id: generateId(), ...args.userData}
-  }
-}
-
-// service level validation
-userService.createUser._validators = {
-  precheck: {
-    userData: {
-      name: ['string'],
-      email: ['string', 'email'],
-      age: ['number', 'positive']
-    }
-  },
-  postcheck: {
-    id: ['string', 'uuid'],
-    name: ['string'],
-    email: ['string', 'email']
-  }
-}
-```
-
-### Error Handling
-
-All service calls support an `onError` handler, and optional `ignoreErrors: true`.  Error handlers are just regular services.  The builtin `util` service has a `print` action that can be useful for this.
-
-```javascript
-const queries = {
-  user: ['users', 'getUser', {
-    id: '$.given.userId',
-    onError: ['@', 'util:print'],
-    ignoreErrors: true,
-  }]
-}
-```
-
-### Built-in Utilities
-
-MicroQL includes utility functions for common data operations:
-
-```javascript
-import {util} from 'microql/services'
-
-const queries = {
-  // Filter, map, reduce operations
-  filtered: ['util', 'filter', {on: '$.data', service: ['data', 'isActive', {item: '@'}]}],
-  mapped: ['util', 'map', {on: '$.filtered', service: ['data', 'getName', {item: '@'}]}],
-
-  // Map/flatMap with automatic error handling
-  clean: ['$.data', 'util:map', {
-    service: ['service:process', {item: '@', ignoreErrors: true}],
-    skipInputErrors: true,   // Skip null/Error items in input
-    skipOutputErrors: true   // Remove null/Error items from output
-  }],
-
-  // Conditional logic
-  result: ['util', 'when', {
-    condition: '$.user.isAdmin',
-    then: ['admin', 'getAdminData'],
-    else: ['user', 'getRegularData']
-  }],
-
-  // Error handling utilities
-  // When using ignoreErrors: true, failed items become null or Error objects
-  cleanResults: ['$.processed', 'util:removeErrors'],    // Remove both nulls and Errors
-  noNulls: ['$.processed', 'util:removeNulls'],          // Remove nulls, keep Errors for inspection
-  onlyFailures: ['$.processed', 'util:removeSuccesses'], // Keep only nulls and Errors
-
-  // Partition for batch processing
-  separated: ['$.processed', 'util:partitionErrors']     // Returns {successes: [], failures: []}
-}
-```
-
-#### Map and FlatMap Error Skipping
-
-`util:map` and `util:flatMap` support automatic error filtering through optional parameters:
-
-- **`skipInputErrors: true`** - Automatically removes Error objects and null values from the input array before processing
-- **`skipOutputErrors: true`** - Automatically removes Error objects and null values from the output array after processing
-
-This is particularly useful when processing arrays where some items may have failed in previous steps:
-
-```javascript
-const queries = {
-  // Fetch data for multiple URLs, some may fail
-  responses: ['$.urls', 'util:map', {
-    service: ['http:fetch', {url: '@', ignoreErrors: true}]
-  }],
-
-  // Process only successful responses, skip nulls from failures
-  processed: ['$.responses', 'util:map', {
-    service: ['data:transform', {item: '@'}],
-    skipInputErrors: true  // Skips null values from failed fetches
-  }]
-}
-```
-
-#### Error Removal Utilities
-
-When processing arrays with `ignoreErrors: true`, failed service calls return either `null` (no error handler) or the Error object (with error handler). These utilities help clean up results:
-
-- **`util:removeErrors`** - Removes both Error objects and null values, returning only successful results
-- **`util:removeNulls`** - Removes only null values, keeping Error objects for inspection/logging
-- **`util:removeSuccesses`** - Inverse operation, keeps only failures (nulls and Errors)
-- **`util:partitionErrors`** - Splits array into `{successes: [], failures: []}` for separate processing
-
-Example use case:
-
-```javascript
-const result = await query({
-  given: {urls: ['http://api1.com', 'http://api2.com', 'http://api3.com']},
-  services: {http, storage, util},
-  queries: {
-    // Fetch all URLs, ignoring errors
-    responses: ['$.given.urls', 'util:map', {
-      service: ['http:fetch', {
-        url: '@',
-        onError: ['util:recordFailure', {on: '@', location: 'logs/failures'}],
+    // every member is qualified in parallel; Claude calls are spaced out by the rate limit
+    qualified: ['$members', 'GET [util]/each', {
+      service: ['POST [claude]/qualify', {
+        company: '@',
+        criteria: 'manufacturing, shipping, or industrial repair',
+        cache: true,
         ignoreErrors: true
       }]
     }],
 
-    // Separate successes from failures
-    partitioned: ['$.responses', 'util:partitionErrors'],
-
-    // Store only successful responses
-    stored: ['$.partitioned.successes', 'storage:bulkInsert']
-  }
-})
-
-// Result contains:
-// - partitioned.successes: successful API responses
-// - partitioned.failures: null values (errors were recorded to disk)
-// - stored: confirmation of successful storage
-```
-
-### Settings & Configuration
-
-Configure global behavior:
-
-```javascript
-const result = await query({
-  settings: {
-    debug: true,           // Enable debug logging
-    timeout: 30000,        // Set a default timeout (30s)
-    retry: 2,             // Set a default retry count
-    onError: ['@', 'util:print']  // Set a global error handler
+    contacts: ['$qualified', 'GET [util]/filter', {service: ['GET [util]/exists', {value: '@.fit'}]}],
+    created: ['$contacts', 'POST [hubspot]/companies']
   },
-  // ... services and queries
+  settings: {rateLimit: {claude: 1000}, retry: 2},
+  select: '$created'
 })
 ```
 
-## Documentation
+## Target Audience
 
-- **[Service Development Guide](docs/service_guide.md)** - How to write and structure services
-- **[Validation System](docs/validation.md)** - Type validation and contracts
+If you're a programmer and you want to achieve the low risk/high productivity of something like Zapier or n8n, but without all the baggage that those services come with, use MicroQL.  You may 1) make yourself more productive, 2) enable a non-coder on the team to be able to compose queries, enabling a division of labor where you and other coders can focus on building out new services, or working on something else entirely.
 
 ## Installation
 
@@ -332,62 +41,259 @@ const result = await query({
 npm install microql
 ```
 
+MicroQL needs Node.js 22 or later. It also runs on Cloudflare Workers; see [Runtime Integration](docs/runtime-integration.md).
+
+## Core Concepts
+
+### Phases
+
+A Query's named nodes are **phases**. Each phase is a service call, or a chain of them. `$name` refers to a phase's result, and that reference is how MicroQL knows the order: a phase runs as soon as everything it references is ready, and phases that don't depend on each other run at the same time.
+
+```javascript
+phases: {
+  post: ['GET [cms]/post', {slug: '$given.slug'}],
+
+  // these three only need the post, so they're written in parallel
+  linkedin: ['POST [claude]/write', {format: 'linkedin', source: '$post'}],
+  thread: ['POST [claude]/write', {format: 'x-thread', source: '$post'}],
+  newsletter: ['POST [claude]/write', {format: 'newsletter', source: '$post'}],
+
+  // and this waits for all three
+  scheduled: ['POST [buffer]/schedule', {posts: ['$linkedin', '$thread'], email: '$newsletter'}]
+}
+```
+
+Circular references are caught before anything runs.
+
+### Service Keys
+
+A call is named by its **service key**, `METHOD [service]/resource`: `POST [claude]/write` calls the `/write` resource of the `claude` service with `POST`. Services are passed in through `services`; a key naming a service, resource or method that doesn't exist is an error before anything runs.
+
+### References
+
+| Form | Means |
+|---|---|
+| `$name.path` | A phase's result, or `$given` — the inputs you supply |
+| `@` / `@.path` | The value flowing in: the previous call in a chain, the current item of an `each` |
+| `@name.path` | The current item of the enclosing iteration named `name` by `as:` |
+| `@err.path` | The error, inside an `onError` handler (`@@err` for the one outside it) |
+
+Paths are `.field` and `[index]` segments: `$listings[0].images[1].src`. A path that names nothing gives `undefined`.
+
+Every string beginning with `$` or `@` is a reference. A literal like `"$5.00"` is supplied through `given`. Mistakes — an unknown name, `@` where nothing flows in, the 0.x `$.name` form — are reported with the call's address before anything runs.
+
+### Services
+
+Services are just objects of async functions, one per resource. Each takes an object of named arguments and returns a promise. Wrapping an API, a model or a database takes a few lines:
+
+```javascript
+const headers = {Authorization: `Bearer ${process.env.HUBSPOT_TOKEN}`, 'Content-Type': 'application/json'}
+
+export const hubspot = {
+  '/companies': {
+    async GET({domain}) {
+      const response = await fetch(`https://api.hubapi.com/crm/v3/objects/companies/${domain}?idProperty=domain`, {headers})
+      return response.json()
+    },
+    async POST({on: companies}) {
+      const response = await fetch('https://api.hubapi.com/crm/v3/objects/companies/batch/upsert', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({inputs: companies.map(c => ({idProperty: 'domain', id: c.domain, properties: c}))})
+      })
+      return response.json()
+    }
+  }
+}
+hubspot['/companies'].POST._argtypes = {on: {argOrder: 0}}
+```
+
+A resource with several methods is an object with one function per method; a resource given as a plain function answers `GET`. See the [Service Development Guide](docs/service_guide.md).
+
+### Chains
+
+A chain runs its calls in order, each receiving the previous one's result as `@`. The first call of a chain receives nothing.
+
+```javascript
+summary: [
+  ['GET [reviews]/google', {placeId: '$given.placeId'}],
+  ['POST [claude]/summarize', {reviews: '@', focus: 'complaints'}],
+  ['@', 'POST [slack]/post', {channel: '#customer-experience'}]
+]
+```
+
+### Iterating with each
+
+`GET [util]/each` runs a service for every item of a list, in parallel. A lone call receives the item as `@`; name the item with `as:` to reach it from a chain or a nested iteration:
+
+```javascript
+ocr: ['$listings', 'GET [util]/each', {as: 'listing', flatten: true,
+  service: ['@listing.images', 'GET [util]/each', {as: 'image', service: [
+    ['POST [claude]/ocr', {imageUrl: '@image.src', lookFor: ['name', 'phone', 'website']}],
+    ['@', 'GET [util]/merge', {with: {industry: '@listing.industry'}}]
+  ]}]
+}],
+```
+
+`flatten: true` concatenates the results. Iteration names are used once per Query, so `@listing` always means the same thing.
+
+### Method Syntax
+
+The first argument may be written on the left: `['$members', 'GET [util]/each', {...}]` is `['GET [util]/each', {on: '$members', ...}]`. Services opt in by declaring which argument comes first: `{on: {argOrder: 0}}`.
+
+## Handling Failure
+
+Real pipelines fail: a page won't load, a model returns junk, an API rate-limits you. Every call takes these settings:
+
+| Setting | Effect |
+|---|---|
+| `retry: 3` | Try again, up to 3 more times — including when the result fails its `postcheck` |
+| `timeout: 30000` | Fail after 30s |
+| `postcheck: {...}` | Treat a wrong-shaped success as a failure — see [Validation](docs/validation.md) |
+| `onError: [...]` | Run a handler with the error as `@` (in a chain, `@err`) |
+| `ignoreErrors: true` | Carry on: the call returns the handler's result, or `null` |
+
+```javascript
+listings: ['$categories', 'GET [util]/each', {as: 'category', flatten: true,
+  service: ['GET [scraper]/extract', {
+    url: '@category.href',
+    postcheck: {images: ['array', ['object'], {min: 1}]},
+    onError: ['@', 'GET [util]/recordFailure', {location: 'failed/listings'}],
+    ignoreErrors: true
+  }]
+}],
+// drop the pages that failed, keep going with the rest
+found: ['$listings', 'GET [util]/removeErrors'],
+```
+
+An error names the call that raised it by its address: `[$listings.@1a1 - GET [scraper]/extract] Timed out after 30000ms`.
+
+`settings.onError` is a handler for the Run as a whole.
+
+## Built-in Utilities
+
+The `util` service is always available:
+
+| Resource | Does |
+|---|---|
+| `/each` | Run a service for every item; `flatten`, `skipInputErrors`, `skipOutputErrors` |
+| `/filter` | Keep the items a service is truthy for; `mode: 'remove'` removes them |
+| `/when` | `then` when `test` is truthy, otherwise `otherwise` |
+| `/removeErrors`, `/removeNulls`, `/removeSuccesses`, `/partitionErrors` | Sort out the results of `ignoreErrors` |
+| `/concat`, `/pick`, `/merge`, `/template` | Shape data |
+| `/eq`, `/gt`, `/lt`, `/exists`, `/length` | Tests |
+| `/print`, `/recordFailure` | Output and failure logs |
+
+## Settings
+
+```javascript
+settings: {
+  timeout: 30000,             // default for every call
+  retry: 2,                   // default for every call
+  rateLimit: {claude: 1000},  // at most one call per second to claude
+  concurrency: 6,             // at most 6 calls in flight at once
+  cache: {ttl: '30D'},        // how long cached results last (default 7D)
+  debug: true                 // print every call, its arguments and its result
+}
+```
+
+Per call, `cache: true` (or `cache: {ttl: '1D'}`) reuses the result across runs while the inputs match, so you pay for an expensive scrape or model call once.
+
+`select` picks what the Query returns: `select: '$created'`, or `select: ['$created', '$found']`.
+
+## Running from the Command Line
+
+A Query is an ordinary module, so a script is all a command needs. Pass a Run State and an interrupted run resumes without repeating finished work — the scrape you already paid for isn't paid for again:
+
+```javascript
+#!/usr/bin/env -S node --env-file=.env
+// queries/lead-gen.js
+import query, {fileStore} from 'microql'
+import {scraper, claude, hubspot} from '../services/index.js'
+
+const today = new Date().toISOString().split('T')[0]
+const directory = process.argv[2] ?? 'https://chamber.example.org/member-directory'
+
+const created = await query({
+  given: {directory},
+  services: {scraper, claude, hubspot},
+  phases: {/* as above */},
+  select: '$created'
+}, {runState: fileStore(`runs/lead-gen-${today}`)})
+
+console.log(`Created ${created.length} companies`)
+process.exit(0) // HTTP clients may keep connections alive
+```
+
+```bash
+chmod +x queries/lead-gen.js
+./queries/lead-gen.js https://www.example-chamber.org/directory
+```
+
+Run it again the same day and every finished call is read back from `runs/`; start a new run by using a new directory. Failures recorded with `util/recordFailure` land in JSON files you can inspect and replay.
+
 ## Examples
 
-### API Orchestration
+### Review monitoring
+
+Pull reviews from several sources at once, flag the unhappy ones, and open a ticket for each:
 
 ```javascript
-// Orchestrate multiple API calls with dependency resolution
-const result = await query({
-  given: {customerId: 'cust_123'},
-  services: {api, cache, notifications},
-  queries: {
-    // These run in parallel since they're independent
-    customer: ['api', 'getCustomer', {id: '$.given.customerId'}],
-    preferences: ['api', 'getPreferences', {id: '$.given.customerId'}],
+await query({
+  given: {business: {googlePlaceId: 'ChIJ...', yelpId: 'acme-bakery'}},
+  services: {google, yelp, claude, zendesk, slack},
+  phases: {
+    google: ['GET [google]/reviews', {placeId: '$given.business.googlePlaceId', since: '7d'}],
+    yelp: ['GET [yelp]/reviews', {businessId: '$given.business.yelpId', since: '7d'}],
 
-    // This waits for customer data
-    orders: ['api', 'getOrders', {customerId: '$.customer.id'}],
+    scored: [
+      [['$google', '$yelp'], 'GET [util]/concat'],
+      ['@', 'GET [util]/each', {service: ['POST [claude]/sentiment', {review: '@', cache: true}]}]
+    ],
+    unhappy: ['$scored', 'GET [util]/filter', {service: ['GET [util]/lt', {l: '@.score', r: 3}]}],
 
-    // Cache the complete customer profile
-    profile: ['cache', 'store', {
-      key: 'profile_$.customer.id',
-      data: {
-        customer: '$.customer',
-        preferences: '$.preferences',
-        recentOrders: '$.orders'
-      }
+    tickets: ['$unhappy', 'GET [util]/each', {service: ['POST [zendesk]/ticket', {
+      subject: '@.summary', body: '@.text', priority: 'high'
+    }]}],
+    digest: ['POST [slack]/post', {channel: '#reviews', scored: '$scored', tickets: '$tickets'}]
+  }
+})
+```
+
+### Content repurposing
+
+Turn one blog post into a LinkedIn post, an X thread and a newsletter, written in parallel, each checked before anything is scheduled:
+
+```javascript
+await query({
+  given: {slug: 'why-we-switched-to-four-day-weeks'},
+  services: {cms, claude, buffer, mailchimp},
+  phases: {
+    post: ['GET [cms]/post', {slug: '$given.slug'}],
+
+    linkedin: ['POST [claude]/write', {
+      format: 'linkedin', voice: 'warm, plain-spoken', source: '$post',
+      postcheck: {text: ['string', {max: 3000}]}, retry: 2
     }],
+    thread: ['POST [claude]/write', {
+      format: 'x-thread', source: '$post',
+      postcheck: {posts: ['array', ['string', {max: 280}], {max: 8}]}, retry: 2
+    }],
+    newsletter: ['POST [claude]/write', {format: 'newsletter', source: '$post'}],
 
-    // Send notification after everything is cached
-    notification: ['notifications', 'send', {
-      to: '$.customer.email',
-      template: 'welcome',
-      data: '$.profile'
-    }]
+    social: ['POST [buffer]/schedule', {posts: ['$linkedin', '$thread'], at: 'next weekday 9am'}],
+    email: ['POST [mailchimp]/draftCampaign', {content: '$newsletter', list: 'subscribers'}]
   }
 })
 ```
 
-### Data Processing Pipeline
+A draft that fails its `postcheck` — a thread entry over 280 characters — is rewritten, up to twice. If it still fails, the Run stops before anything is scheduled, with the call's address in the error; run it again with the same Run State (see [Running from the Command Line](#running-from-the-command-line)) and only that draft is rewritten, while the post and the drafts that passed are read back.
 
-```javascript
-// Transform and validate data through multiple steps
-const result = await query({
-  given: {csvData: "name,age,email\nJohn,25,john@example.com\n..."},
-  services: {parser, validator, transformer, storage},
-  queries: {
-    // Chain: parse → validate → transform → store
-    // uses method syntax to implicitly pass to {argOrder: 0}
-    processed: [
-      ['$.given.csvData', 'parser:parseCsv'],
-      ['@', 'validator:validateRows'],
-      ['@', 'transformer:enrichData'],
-      ['@', 'storage:bulkInsert']
-    ]
-  }
-})
-```
+## Documentation
+
+- **[Service Development Guide](docs/service_guide.md)** - How to write and structure services
+- **[Validation System](docs/validation.md)** - Type validation and contracts
+- **[Runtime Integration](docs/runtime-integration.md)** - Embedding MicroQL in your own platform: planning, partial runs, progress updates, storage and Workers
 
 ## Testing
 
@@ -401,7 +307,7 @@ npm test
 
 GraphQL is primarily developed for field extraction, whereas MicroQL was designed for service orchestration.  You can do service orchestration with GraphQL but it requires that you put a lot more leg work into resolvers and that you manually think about dependency resolution.  MicroQL infers dependency resolution and parallelism from the paths that are referenced.  MicroQL also doesn't invent a completely new syntax - it's mostly a subset of JSON.  We found ways to do that without being pedantic and verbose.
 
-The MicroQL codebase is also small (<1000 lines), dependencies `lodash` and `zod`.
+The MicroQL codebase is also small, dependencies `lodash`, `zod` and `@tlsft/service-key`.
 
 [See here for a more detailed comparison](docs/comparison-graphql.md).
 

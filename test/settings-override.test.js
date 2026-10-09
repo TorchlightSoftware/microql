@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import {afterEach, beforeEach, describe, it} from 'node:test'
-import query from '../query.js'
+import query from '../node.js'
 import util from '../services/util.js'
 
 describe('Settings Override Tests', () => {
@@ -11,7 +11,9 @@ describe('Settings Override Tests', () => {
     // Capture stdout.write calls
     capturedOutput = []
     originalWrite = process.stdout.write
-    process.stdout.write = (data) => {
+    // Capture text; the test runner's own frames are buffers and pass through
+    process.stdout.write = (data, ...rest) => {
+      if (typeof data !== 'string') return originalWrite.call(process.stdout, data, ...rest)
       capturedOutput.push(data)
       return true
     }
@@ -35,11 +37,11 @@ describe('Settings Override Tests', () => {
           colors: false
         }
       },
-      queries: {
+      phases: {
         result: [
-          'util:print',
+          'GET [util]/print',
           {
-            on: '$.given',
+            on: '$given',
             color: 'blue',
             ts: false,
             settings: {
@@ -87,11 +89,11 @@ describe('Settings Override Tests', () => {
           colors: false
         }
       },
-      queries: {
+      phases: {
         result: [
-          'util:print',
+          'GET [util]/print',
           {
-            on: '$.given',
+            on: '$given',
             ts: false,
             settings: {
               inspect: {
@@ -127,11 +129,11 @@ describe('Settings Override Tests', () => {
         },
         debug: false
       },
-      queries: {
+      phases: {
         result: [
-          'util:print',
+          'GET [util]/print',
           {
-            on: '$.given',
+            on: '$given',
             ts: false,
             settings: {
               inspect: {
@@ -158,11 +160,11 @@ describe('Settings Override Tests', () => {
           depth: 1
         }
       },
-      queries: {
+      phases: {
         result: [
-          'util:print',
+          'GET [util]/print',
           {
-            on: '$.given',
+            on: '$given',
             ts: false,
             settings: {
               inspect: {

@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query from '../query.js'
+import query from '../node.js'
 
 describe('TearDown Tests', () => {
   it('should call tearDown on services that have it', async () => {
@@ -8,7 +8,7 @@ describe('TearDown Tests', () => {
 
     // Mock service with tearDown method
     const mockService = {
-      async testAction() {
+      async '/testAction'() {
         return 'test result'
       },
 
@@ -19,8 +19,8 @@ describe('TearDown Tests', () => {
 
     await query({
       services: {mockService},
-      queries: {
-        test: ['mockService:testAction', {}]
+      phases: {
+        test: ['GET [mockService]/testAction', {}]
       }
     })
 
@@ -30,7 +30,7 @@ describe('TearDown Tests', () => {
   it('should not fail if service does not have tearDown', async () => {
     // Service without tearDown method
     const serviceWithoutTearDown = {
-      async testAction() {
+      async '/testAction'() {
         return 'test result'
       }
     }
@@ -38,8 +38,8 @@ describe('TearDown Tests', () => {
     // This should not throw an error
     const result = await query({
       services: {serviceWithoutTearDown},
-      queries: {
-        test: ['serviceWithoutTearDown:testAction', {}]
+      phases: {
+        test: ['GET [serviceWithoutTearDown]/testAction', {}]
       }
     })
 
@@ -50,7 +50,7 @@ describe('TearDown Tests', () => {
     const tearDownCalls = []
 
     const service1 = {
-      async action() {
+      async '/action'() {
         return 'result1'
       },
       async tearDown() {
@@ -59,7 +59,7 @@ describe('TearDown Tests', () => {
     }
 
     const service2 = {
-      async action() {
+      async '/action'() {
         return 'result2'
       },
       async tearDown() {
@@ -69,9 +69,9 @@ describe('TearDown Tests', () => {
 
     await query({
       services: {service1, service2},
-      queries: {
-        test1: ['service1:action', {}],
-        test2: ['service2:action', {}]
+      phases: {
+        test1: ['GET [service1]/action', {}],
+        test2: ['GET [service2]/action', {}]
       }
     })
 
@@ -94,7 +94,7 @@ describe('TearDown Tests', () => {
     let tearDownCalled = false
 
     const serviceWithError = {
-      async failingAction() {
+      async '/failingAction'() {
         throw new Error('Test error')
       },
 
@@ -106,8 +106,8 @@ describe('TearDown Tests', () => {
     try {
       await query({
         services: {serviceWithError},
-        queries: {
-          test: ['serviceWithError:failingAction', {}]
+        phases: {
+          test: ['GET [serviceWithError]/failingAction', {}]
         }
       })
       assert.fail('Query should have thrown an error')
@@ -127,13 +127,13 @@ describe('TearDown Tests', () => {
     let tearDownCalled = false
 
     const usedService = {
-      async action() {
+      async '/action'() {
         return 'result'
       }
     }
 
     const unusedService = {
-      async action() {
+      async '/action'() {
         return 'unused'
       },
       async tearDown() {
@@ -143,8 +143,8 @@ describe('TearDown Tests', () => {
 
     await query({
       services: {usedService, unusedService},
-      queries: {
-        test: ['usedService:action', {}]
+      phases: {
+        test: ['GET [usedService]/action', {}]
       }
     })
 
@@ -159,7 +159,7 @@ describe('TearDown Tests', () => {
     const _queryCompleted = false
 
     const serviceWithBadTearDown = {
-      async action() {
+      async '/action'() {
         return 'result'
       },
       async tearDown() {
@@ -170,8 +170,8 @@ describe('TearDown Tests', () => {
     // Should not throw despite tearDown error
     const result = await query({
       services: {serviceWithBadTearDown},
-      queries: {
-        test: ['serviceWithBadTearDown:action', {}]
+      phases: {
+        test: ['GET [serviceWithBadTearDown]/action', {}]
       }
     })
 

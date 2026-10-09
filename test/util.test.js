@@ -1,8 +1,8 @@
 import assert from 'node:assert'
 import {describe, it, beforeEach, afterEach} from 'node:test'
-import query from '../query.js'
+import query from '../node.js'
 import util from '../services/util.js'
-import {ANSI_COLORS} from '../common.js'
+import {ANSI_COLORS} from '../node.js'
 
 describe('Util Service Tests', () => {
   // Test data
@@ -36,16 +36,16 @@ describe('Util Service Tests', () => {
       async getAge(args) {
         return args.person.age
       },
-      async isEngineer(args) {
+      async '/isEngineer'(args) {
         return args.person.department === 'Engineering'
       },
-      async formatName(args) {
+      async '/formatName'(args) {
         return args.person.name.toUpperCase()
       },
-      async getCategories(args) {
+      async '/getCategories'(args) {
         return args.product.categories
       },
-      async calculateTotal(args) {
+      async '/calculateTotal'(args) {
         return args.items.reduce((sum, id) => {
           const product = args.products.find((p) => p.id === id)
           return sum + (product ? product.price : 0)
@@ -56,7 +56,7 @@ describe('Util Service Tests', () => {
 
   describe('Direct Service Usage', () => {
     it('should map with function', async () => {
-      const result = await util.map({
+      const result = await util['/each']({
         on: testData.people,
         service: async (person) => ({
           fullName: person.name,
@@ -72,7 +72,7 @@ describe('Util Service Tests', () => {
     })
 
     it('should concat arrays', async () => {
-      const result = await util.concat({
+      const result = await util['/concat']({
         args: [['a', 'b'], ['c', 'd'], ['e']]
       })
 
@@ -80,16 +80,16 @@ describe('Util Service Tests', () => {
     })
 
     it('should handle when with boolean condition', async () => {
-      const resultTrue = await util.when({
+      const resultTrue = await util['/when']({
         test: true,
         then: 'success',
-        or: 'failure'
+        otherwise: 'failure'
       })
 
-      const resultFalse = await util.when({
+      const resultFalse = await util['/when']({
         test: false,
         then: 'success',
-        or: 'failure'
+        otherwise: 'failure'
       })
 
       assert.strictEqual(resultTrue, 'success')
@@ -97,21 +97,21 @@ describe('Util Service Tests', () => {
     })
 
     it('should handle comparison functions', async () => {
-      assert.strictEqual(await util.eq({l: 5, r: 5}), true)
-      assert.strictEqual(await util.eq({l: 5, r: 3}), false)
-      assert.strictEqual(await util.gt({l: 10, r: 5}), true)
-      assert.strictEqual(await util.lt({l: 3, r: 8}), true)
+      assert.strictEqual(await util['/eq']({l: 5, r: 5}), true)
+      assert.strictEqual(await util['/eq']({l: 5, r: 3}), false)
+      assert.strictEqual(await util['/gt']({l: 10, r: 5}), true)
+      assert.strictEqual(await util['/lt']({l: 3, r: 8}), true)
     })
 
     it('should handle exists and length', async () => {
-      assert.strictEqual(await util.exists({value: 'hello'}), true)
-      assert.strictEqual(await util.exists({value: null}), false)
-      assert.strictEqual(await util.length({value: 'hello'}), 5)
-      assert.strictEqual(await util.length({value: [1, 2, 3]}), 3)
+      assert.strictEqual(await util['/exists']({value: 'hello'}), true)
+      assert.strictEqual(await util['/exists']({value: null}), false)
+      assert.strictEqual(await util['/length']({value: 'hello'}), 5)
+      assert.strictEqual(await util['/length']({value: [1, 2, 3]}), 3)
     })
 
     it('should pick fields from objects', async () => {
-      const result = await util.pick({
+      const result = await util['/pick']({
         on: {
           name: 'Alice',
           age: 30,
@@ -128,7 +128,7 @@ describe('Util Service Tests', () => {
     })
 
     it('should merge objects together', async () => {
-      const result = await util.merge({
+      const result = await util['/merge']({
         on: {
           name: 'Alice',
           age: 30,
@@ -158,7 +158,7 @@ describe('Util Service Tests', () => {
       const original = {name: 'Alice', age: 30}
       const toMerge = {age: 31, city: 'NYC'}
 
-      const result = await util.merge({
+      const result = await util['/merge']({
         on: original,
         with: toMerge
       })
@@ -180,12 +180,12 @@ describe('Util Service Tests', () => {
     it('should handle util.map with template in MicroQL', async () => {
       const result = await query({
         given: {people: testData.people},
-        queries: {
-          summary: ['$.given.people', 'util:map', {
+        phases: {
+          summary: ['$given.people', 'GET [util]/each', {
             service: {name: '@.name', info: '@.department'}
           }]
         },
-        select: 'summary'
+        select: '$summary'
       })
 
       assert.deepStrictEqual(result, [
@@ -200,12 +200,12 @@ describe('Util Service Tests', () => {
       const result = await query({
         given: {people: testData.people},
         services: mockServices,
-        queries: {
-          formatted: ['$.given.people', 'util:map', {
-            service: ['data:formatName', {person: '@'}]
+        phases: {
+          formatted: ['$given.people', 'GET [util]/each', {
+            service: ['GET [data]/formatName', {person: '@'}]
           }]
         },
-        select: 'formatted'
+        select: '$formatted'
       })
 
       assert.deepStrictEqual(result, ['ALICE', 'BOB', 'CHARLIE', 'DIANA'])
@@ -215,12 +215,12 @@ describe('Util Service Tests', () => {
       const result = await query({
         given: {people: testData.people},
         services: mockServices,
-        queries: {
-          engineers: ['$.given.people', 'util:filter', {
-            service: ['data:isEngineer', {person: '@'}]
+        phases: {
+          engineers: ['$given.people', 'GET [util]/filter', {
+            service: ['GET [data]/isEngineer', {person: '@'}]
           }]
         },
-        select: 'engineers'
+        select: '$engineers'
       })
 
       assert.deepStrictEqual(
@@ -233,12 +233,13 @@ describe('Util Service Tests', () => {
       const result = await query({
         given: {products: testData.products},
         services: mockServices,
-        queries: {
-          allCategories: ['$.given.products', 'util:flatMap', {
-            service: ['data:getCategories', {product: '@'}]
+        phases: {
+          allCategories: ['$given.products', 'GET [util]/each', {
+            flatten: true,
+            service: ['GET [data]/getCategories', {product: '@'}]
           }]
         },
-        select: 'allCategories'
+        select: '$allCategories'
       })
 
       assert.deepStrictEqual(result, [
@@ -251,22 +252,23 @@ describe('Util Service Tests', () => {
       ])
     })
 
-    it('should handle util.when with service call condition', async () => {
+    it('should handle util.when with a condition computed by another phase', async () => {
       const result = await query({
         given: {person: {name: 'Alice', age: 30}},
         services: {
           age: {
-            isAdult({person}) {return person.age >= 18}
+            '/isAdult'({person}) {return person.age >= 18}
           }
         },
-        queries: {
-          status: ['util:when', {
-            test: ['age:isAdult', {person: '$.given.person'}],
+        phases: {
+          adult: ['GET [age]/isAdult', {person: '$given.person'}],
+          status: ['GET [util]/when', {
+            test: '$adult',
             then: 'Adult',
-            or: 'Minor'
+            otherwise: 'Minor'
           }]
         },
-        select: 'status'
+        select: '$status'
       })
 
       assert.strictEqual(result, 'Adult')
@@ -275,12 +277,12 @@ describe('Util Service Tests', () => {
     it('should handle method syntax with util', async () => {
       const result = await query({
         given: {items: [{id: 1}, {id: 2}, {id: 3}]},
-        queries: {
-          processed: ['$.given.items', 'util:map', {
+        phases: {
+          processed: ['$given.items', 'GET [util]/each', {
             service: {original: '@.id', processed: true}
           }]
         },
-        select: 'processed'
+        select: '$processed'
       })
 
       assert.deepStrictEqual(result, [
@@ -297,24 +299,24 @@ describe('Util Service Tests', () => {
           products: testData.products
         },
         services: mockServices,
-        queries: {
+        phases: {
           // Calculate total for each order
-          orderTotals: ['$.given.orders', 'util:map', {
-            service: ['data:calculateTotal', {
+          orderTotals: ['$given.orders', 'GET [util]/each', {
+            service: ['GET [data]/calculateTotal', {
               items: '@.items',
               products: testData.products
             }]
           }],
 
           // Filter to orders over $30
-          bigOrders: ['$.orderTotals', 'util:filter', {
-            service: ['util:gt', {l: '@', r: 30}]
+          bigOrders: ['$orderTotals', 'GET [util]/filter', {
+            service: ['GET [util]/gt', {l: '@', r: 30}]
           }],
 
           // Count big orders
-          bigOrderCount: ['util:length', {value: '$.bigOrders'}]
+          bigOrderCount: ['GET [util]/length', {value: '$bigOrders'}]
         },
-        select: 'bigOrderCount'
+        select: '$bigOrderCount'
       })
 
       assert.strictEqual(result, 2) // Orders B456 and C789 are over $30
@@ -325,12 +327,12 @@ describe('Util Service Tests', () => {
         given: {
           person: {name: 'Alice', age: 30}
         },
-        queries: {
-          updated: ['$.given.person', 'util:merge', {
+        phases: {
+          updated: ['$given.person', 'GET [util]/merge', {
             with: {age: 31, city: 'NYC'}
           }]
         },
-        select: 'updated'
+        select: '$updated'
       })
 
       assert.deepStrictEqual(result, {
@@ -349,14 +351,14 @@ describe('Util Service Tests', () => {
           ],
           category: 'tools'
         },
-        queries: {
-          enriched: ['$.given.items', 'util:map', {
-            service: ['@', 'util:merge', {
-              with: {category: '$.given.category'}
+        phases: {
+          enriched: ['$given.items', 'GET [util]/each', {
+            service: ['@', 'GET [util]/merge', {
+              with: {category: '$given.category'}
             }]
           }]
         },
-        select: 'enriched'
+        select: '$enriched'
       })
 
       assert.deepStrictEqual(result, [
@@ -373,14 +375,14 @@ describe('Util Service Tests', () => {
             {id: 2, text: 'normal'}
           ]
         },
-        queries: {
-          enriched: ['$.given.items', 'util:map', {
-            service: ['@', 'util:merge', {
+        phases: {
+          enriched: ['$given.items', 'GET [util]/each', {
+            service: ['@', 'GET [util]/merge', {
               with: {category: '@.text'}
             }]
           }]
         },
-        select: 'enriched'
+        select: '$enriched'
       })
 
       assert.deepStrictEqual(result, [
@@ -394,14 +396,14 @@ describe('Util Service Tests', () => {
         given: {
           base: {name: 'Alice', age: 30}
         },
-        queries: {
+        phases: {
           result: [
-            ['$.given.base', 'util:merge', {with: {city: 'NYC'}}],
-            ['util:merge', {on: '@', with: {role: 'Engineer'}}],
-            ['util:pick', {on: '@', fields: ['name', 'city', 'role']}]
+            ['$given.base', 'GET [util]/merge', {with: {city: 'NYC'}}],
+            ['GET [util]/merge', {on: '@', with: {role: 'Engineer'}}],
+            ['GET [util]/pick', {on: '@', fields: ['name', 'city', 'role']}]
           ]
         },
-        select: 'result'
+        select: '$result'
       })
 
       assert.deepStrictEqual(result, {
@@ -418,14 +420,13 @@ describe('Util Service Tests', () => {
     const item2 = {id: 2, value: 'b'}
     const item3 = {id: 3, value: 'c'}
     const err1 = new Error('error1')
-    const err2 = new Error('error2')
 
     // Service that doubles the id
     const doubleService = {
-      async double({item}) {
+      async '/double'({item}) {
         return {id: item.id * 2, value: item.value}
       },
-      async mayFail({item}) {
+      async '/mayFail'({item}) {
         if (item.shouldFail) {
           throw new Error(`Failed ${item.id}`)
         }
@@ -464,14 +465,14 @@ describe('Util Service Tests', () => {
           given: {items: input},
           services: {doubleService, util},
           settings: {debug: false},
-          queries: {
-            result: ['$.given.items', 'util:map', {
-              service: ['doubleService:double', {item: '@'}],
+          phases: {
+            result: ['$given.items', 'GET [util]/each', {
+              service: ['GET [doubleService]/double', {item: '@'}],
               skipInputErrors,
               skipOutputErrors
             }]
           },
-          select: 'result'
+          select: '$result'
         })
 
         assert.deepStrictEqual(result, expected)
@@ -490,16 +491,16 @@ describe('Util Service Tests', () => {
         given: {items: input},
         services: {doubleService, util},
         settings: {debug: false},
-        queries: {
-          result: ['$.given.items', 'util:map', {
-            service: ['doubleService:mayFail', {
+        phases: {
+          result: ['$given.items', 'GET [util]/each', {
+            service: ['GET [doubleService]/mayFail', {
               item: '@',
               ignoreErrors: true
             }],
             skipOutputErrors: true
           }]
         },
-        select: 'result'
+        select: '$result'
       })
 
       assert.deepStrictEqual(result, [
@@ -522,9 +523,9 @@ describe('Util Service Tests', () => {
         given: {items: input},
         services: {doubleService, util},
         settings: {debug: false},
-        queries: {
-          result: ['$.given.items', 'util:map', {
-            service: ['doubleService:mayFail', {
+        phases: {
+          result: ['$given.items', 'GET [util]/each', {
+            service: ['GET [doubleService]/mayFail', {
               item: '@',
               ignoreErrors: true
             }],
@@ -532,7 +533,7 @@ describe('Util Service Tests', () => {
             skipOutputErrors: true
           }]
         },
-        select: 'result'
+        select: '$result'
       })
 
       assert.deepStrictEqual(result, [
@@ -544,7 +545,7 @@ describe('Util Service Tests', () => {
     // FlatMap tests
     it('flatMap: skipInputErrors works with flatMap', async () => {
       const arrayService = {
-        async makeArray({item}) {
+        async '/makeArray'({item}) {
           return [item.id, item.id + 10]
         }
       }
@@ -555,13 +556,14 @@ describe('Util Service Tests', () => {
         given: {items: input},
         services: {arrayService, util},
         settings: {debug: false},
-        queries: {
-          result: ['$.given.items', 'util:flatMap', {
-            service: ['arrayService:makeArray', {item: '@'}],
+        phases: {
+          result: ['$given.items', 'GET [util]/each', {
+            flatten: true,
+            service: ['GET [arrayService]/makeArray', {item: '@'}],
             skipInputErrors: true
           }]
         },
-        select: 'result'
+        select: '$result'
       })
 
       assert.deepStrictEqual(result, [1, 11, 2, 12, 3, 13])
@@ -569,7 +571,7 @@ describe('Util Service Tests', () => {
 
     it('flatMap: skipOutputErrors works with flatMap', async () => {
       const arrayService = {
-        async makeArrayOrFail({item}) {
+        async '/makeArrayOrFail'({item}) {
           if (item.shouldFail) {
             throw new Error(`Failed ${item.id}`)
           }
@@ -587,16 +589,17 @@ describe('Util Service Tests', () => {
         given: {items: input},
         services: {arrayService, util},
         settings: {debug: false},
-        queries: {
-          result: ['$.given.items', 'util:flatMap', {
-            service: ['arrayService:makeArrayOrFail', {
+        phases: {
+          result: ['$given.items', 'GET [util]/each', {
+            flatten: true,
+            service: ['GET [arrayService]/makeArrayOrFail', {
               item: '@',
               ignoreErrors: true
             }],
             skipOutputErrors: true
           }]
         },
-        select: 'result'
+        select: '$result'
       })
 
       assert.deepStrictEqual(result, [1, 11, 3, 13])
@@ -608,10 +611,11 @@ describe('Util Service Tests', () => {
     let capturedOutput
 
     beforeEach(() => {
-      // Capture stdout.write calls
+      // Capture text; the test runner's own frames are buffers and pass through
       capturedOutput = []
       originalWrite = process.stdout.write
-      process.stdout.write = (data) => {
+      process.stdout.write = (data, ...rest) => {
+        if (typeof data !== 'string') return originalWrite.call(process.stdout, data, ...rest)
         capturedOutput.push(data)
         return true
       }
@@ -624,9 +628,9 @@ describe('Util Service Tests', () => {
 
     it('should print basic values', async () => {
       const result = await query({
-        queries: {
+        phases: {
           printed: [
-            'util:print',
+            'GET [util]/print',
             {
               on: 'Hello World',
               color: 'blue',
@@ -634,7 +638,7 @@ describe('Util Service Tests', () => {
             }
           ]
         },
-        select: 'printed'
+        select: '$printed'
       })
 
       // Should return the printed value for chaining
@@ -683,10 +687,10 @@ describe('Util Service Tests', () => {
             maxStringLength: 20
           }
         },
-        queries: {
-          printed: ['util:print', {on: '$.given.users', color: 'blue', ts: false}]
+        phases: {
+          printed: ['GET [util]/print', {on: '$given.users', color: 'blue', ts: false}]
         },
-        select: 'printed'
+        select: '$printed'
       })
 
       // Should return the printed value for chaining
@@ -715,8 +719,8 @@ describe('Util Service Tests', () => {
         given: {
           message: 'This is a very long string that should be truncated based on settings'
         },
-        queries: {
-          result: ['$.given.message', 'util:print', {
+        phases: {
+          result: ['$given.message', 'GET [util]/print', {
             settings: {inspect: {maxStringLength: 30}},
             color: 'green',
             ts: false
@@ -739,104 +743,8 @@ describe('Util Service Tests', () => {
     })
   })
 
-  describe('Snapshot Function Tests', () => {
-    const testSnapshotPath = './test-snapshot.json'
-
-    afterEach(async () => {
-      // Clean up test snapshot
-      const fs = await import('fs-extra')
-      try {
-        await fs.default.remove(testSnapshotPath)
-      } catch (_error) {
-        // Ignore cleanup errors
-      }
-    })
-
-    it('should create snapshot with results format', async () => {
-      const testQuery = {
-        given: {value: 42},
-        settings: {debug: false},
-        queries: {
-          doubled: ['util:when', {test: true, then: 84, or: 0}],
-          snapshot: ['$.doubled', 'util:snapshot', {capture: '$', out: testSnapshotPath}]
-        }
-      }
-
-      const _results = await query(testQuery)
-
-      // Verify snapshot file was created
-      const fs = await import('fs-extra')
-      assert(await fs.default.pathExists(testSnapshotPath))
-
-      // Verify snapshot content has results format
-      const snapshot = JSON.parse(
-        await fs.default.readFile(testSnapshotPath, 'utf8')
-      )
-      assert(snapshot.timestamp)
-      assert(snapshot.results)
-      assert.strictEqual(snapshot.results.given.value, 42)
-      assert.strictEqual(snapshot.results.doubled, 84)
-    })
-
-    it('should save execution state correctly in snapshot', async () => {
-      const testQuery = {
-        given: {start: 1},
-        settings: {debug: false},
-        queries: {
-          step1: ['util:pick', {on: '$.given', fields: ['start']}],
-          snapshot: [
-            '$.step1',
-            'util:snapshot',
-            {capture: '$', out: testSnapshotPath}
-          ]
-        }
-      }
-
-      await query(testQuery)
-
-      const fs = await import('fs-extra')
-      const snapshot = JSON.parse(
-        await fs.default.readFile(testSnapshotPath, 'utf8')
-      )
-
-      // Verify that completed queries are saved in results
-      assert(snapshot.results.step1)
-      assert.strictEqual(snapshot.results.step1.start, 1)
-      assert(snapshot.results.given)
-      assert.strictEqual(snapshot.results.given.start, 1)
-    })
-
-    it('should work with different capture options', async () => {
-      const testQuery = {
-        given: {data: [1, 2, 3]},
-        settings: {debug: false},
-        queries: {
-          result: [
-            ['util:map', {on: '$.given.data', service: {doubled: '@'}}],
-            ['util:snapshot', {on: '@', out: testSnapshotPath}],
-            ['util:map', {on: '@', service: {tripled: '@.doubled'}}]
-          ]
-        }
-      }
-
-      await query(testQuery)
-
-      const fs = await import('fs-extra')
-      const snapshot = JSON.parse(
-        await fs.default.readFile(testSnapshotPath, 'utf8')
-      )
-
-      // Verify current context is captured (not full $ state)
-      assert(snapshot.results)
-      assert(Array.isArray(snapshot.results))
-      assert.strictEqual(snapshot.results[0].doubled, 1)
-      assert.strictEqual(snapshot.results[1].doubled, 2)
-      assert.strictEqual(snapshot.results[2].doubled, 3)
-    })
-  })
-
   describe('RecordFailure Function Tests', () => {
-    const testFailurePath = './test-failures'
+    const testFailurePath = './test-failures/util-record-failure'
 
     afterEach(async () => {
       // Clean up test failures directory
@@ -850,7 +758,7 @@ describe('Util Service Tests', () => {
 
     it('should record error with message correctly', async () => {
       const testService = {
-        async failing() {
+        async '/failing'() {
           throw new Error('Test error message')
         }
       }
@@ -858,16 +766,16 @@ describe('Util Service Tests', () => {
       const result = await query({
         services: {testService, util},
         settings: {debug: false},
-        queries: {
-          result: ['testService:failing', {
-            onError: ['util:recordFailure', {
+        phases: {
+          result: ['GET [testService]/failing', {
+            onError: ['GET [util]/recordFailure', {
               on: '@',
               location: testFailurePath
             }],
             ignoreErrors: true
           }]
         },
-        select: 'result'
+        select: '$result'
       })
 
       // Verify that recordFailure returned the error context
@@ -892,14 +800,13 @@ describe('Util Service Tests', () => {
         /Test error message/,
         'Should contain the original error message'
       )
-      assert.strictEqual(failureRecord.serviceName, 'testService')
-      assert.strictEqual(failureRecord.action, 'failing')
-      assert.strictEqual(failureRecord.queryName, 'result')
+      assert.strictEqual(failureRecord.key, 'GET [testService]/failing')
+      assert.strictEqual(failureRecord.address, '$result.@1')
     })
 
     it('should handle recordFailure in a map operation', async () => {
       const testService = {
-        async processItem({item}) {
+        async '/processItem'({item}) {
           if (item.shouldFail) {
             throw new Error(`Failed to process item ${item.id}`)
           }
@@ -917,11 +824,11 @@ describe('Util Service Tests', () => {
         given: {items},
         services: {testService, util},
         settings: {debug: false},
-        queries: {
-          results: ['$.given.items', 'util:map', {
-            service: ['testService:processItem', {
+        phases: {
+          results: ['$given.items', 'GET [util]/each', {
+            service: ['GET [testService]/processItem', {
               item: '@',
-              onError: ['util:recordFailure', {
+              onError: ['GET [util]/recordFailure', {
                 on: '@',
                 location: testFailurePath
               }],
@@ -929,7 +836,7 @@ describe('Util Service Tests', () => {
             }]
           }]
         },
-        select: 'results'
+        select: '$results'
       })
 
       // Should have 3 results: 2 successful, 1 error context
@@ -969,13 +876,13 @@ describe('Util Service Tests', () => {
 
     // Shared service for integration tests
     const testService = {
-      async processItem({item}) {
+      async '/processItem'({item}) {
         if (item.shouldFail) {
           throw new Error(`Failed ${item.id}`)
         }
         return {id: item.id, processed: true}
       },
-      async passthrough({on}) {
+      async '/passthrough'({on}) {
         return on
       }
     }
@@ -986,8 +893,8 @@ describe('Util Service Tests', () => {
         given: {items},
         services: {util},
         settings: {debug: false},
-        queries: {result: ['$.given.items', `util:${utilFunc}`]},
-        select: 'result'
+        phases: {result: ['$given.items', `GET [util]/${utilFunc}`]},
+        select: '$result'
       })
     }
 
@@ -1117,20 +1024,20 @@ describe('Util Service Tests', () => {
     integrationTests.forEach(({util: utilFunc, name, items, useErrorHandler, expected}) => {
       it(`${utilFunc}: ${name}`, async () => {
         const errorHandler = useErrorHandler
-          ? {onError: ['testService:passthrough', {on: '@'}], ignoreErrors: true}
+          ? {onError: ['GET [testService]/passthrough', {on: '@'}], ignoreErrors: true}
           : {ignoreErrors: true}
 
         const result = await query({
           given: {items},
           services: {testService, util},
           settings: {debug: false},
-          queries: {
-            processed: ['$.given.items', 'util:map', {
-              service: ['testService:processItem', {item: '@', ...errorHandler}]
+          phases: {
+            processed: ['$given.items', 'GET [util]/each', {
+              service: ['GET [testService]/processItem', {item: '@', ...errorHandler}]
             }],
-            filtered: ['$.processed', `util:${utilFunc}`]
+            filtered: ['$processed', `GET [util]/${utilFunc}`]
           },
-          select: 'filtered'
+          select: '$filtered'
         })
 
         assert.deepStrictEqual(result, expected)
@@ -1149,13 +1056,13 @@ describe('Util Service Tests', () => {
         given: {items},
         services: {testService, util},
         settings: {debug: false},
-        queries: {
-          processed: ['$.given.items', 'util:map', {
-            service: ['testService:processItem', {item: '@', ignoreErrors: true}]
+        phases: {
+          processed: ['$given.items', 'GET [util]/each', {
+            service: ['GET [testService]/processItem', {item: '@', ignoreErrors: true}]
           }],
-          partitioned: ['$.processed', 'util:partitionErrors']
+          partitioned: ['$processed', 'GET [util]/partitionErrors']
         },
-        select: 'partitioned'
+        select: '$partitioned'
       })
 
       assert.deepStrictEqual(result.successes, [

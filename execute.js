@@ -1,48 +1,44 @@
 /**
  * @fileoverview MicroQL Execution Engine
  *
- * Pure execution engine that takes a compiled execution plan and executes it.
- * Handles dependency resolution and service method invocation.
+ * Runs a compiled Query: phases column by column, the phases of a column in
+ * parallel, each phase's chain in order. Every call's result is written to the
+ * Run State by (form hash, input hash) as it goes, and a call whose result the
+ * Run State already holds is not run again — that one rule is resume after an
+ * interruption.
+ *
+ * Scope: a call sees `{flow, bindings, errors}` — the value flowing in (`@`),
+ * the values its enclosing iterations named with `as:` (`@name`), and the
+ * errors of its enclosing onError handlers (`@err`, `@@err`).
  */
+
 import _ from 'lodash'
-import lodashDeep from 'lodash-deep'
-_.mixin(lodashDeep)
+import {columnsOf, upstreamOf} from './graph.js'
+import {formsOf} from './forms.js'
+import {memoryStore, defaultRuntime} from './runtime.js'
+import {wrap} from './wrappers.js'
+import {rootScope, enterPosition} from './reference.js'
+import RateLimitedQueue from './ratelimit.js'
+import {concurrencyLimit} from './concurrency.js'
 
-import ContextStack from './context.js'
+// The runtime each service last received at init. A service is initialized
+// at most once per runtime; a service shared between runtimes is initialized
+// again when the runtime it is used with changes.
+const initializedWith = new WeakMap()
 
-async function executeNode(node, results, contextStack, usedServices) {
-  // Execute a service
-  if (node.type === 'service') {
-    // Track service usage
-    usedServices.add(node.serviceName)
-    return node.service(results, contextStack)
-
-  // Execute each chain step, storing result in contextStack
-  } else if (node.type === 'chain') {
-
-    // add a blank contextStack as a placeholder for the first chain step
-    contextStack = contextStack.extend(null)
-
-    for (const step of node.steps) {
-      //const {queryName, serviceName, action} = step
-      //console.log(`[${queryName} - ${serviceName}:${action}] EXECUTE provide stack:\n`, contextStack.stack)
-
-      // Track service usage for chain steps
-      usedServices.add(step.serviceName)
-      const result = await step.service(results, contextStack)
-      contextStack.setCurrent(result)
+async function initServices(services, runtime) {
+  for (const service of services) {
+    if (typeof service.init === 'function' && initializedWith.get(service) !== runtime) {
+      await service.init(runtime)
+      initializedWith.set(service, runtime)
     }
-
-    return contextStack.getCurrent()
   }
-
 }
 
-// Call tearDown on used services
-async function callTearDown(services, usedServices) {
-  for (const serviceName of usedServices) {
-    const service = services[serviceName]
-    if (service && typeof service.tearDown === 'function') {
+// Call tearDown on the services a Run used
+async function callTearDown(services) {
+  for (const [serviceName, service] of services) {
+    if (typeof service.tearDown === 'function') {
       try {
         await service.tearDown()
       } catch (error) {
@@ -53,63 +49,144 @@ async function callTearDown(services, usedServices) {
   }
 }
 
-/**
- * Execute a prepared execution plan on the provided queryTree
- * @param {Object} plan - Staged execution plan
- * @param {Array} plan.stages - Array of stages, each containing query plans to execute in parallel
- * @param {Object} queryTree.given - given data
- * @param {Object} queryTree.services - Service objects
- * @param {Object} queryTree.queries - All query AST nodes (for snapshot handling)
- * @returns {Object} Execution results
- */
-export async function execute(plan, queryTree) {
-  const {given, services, queries, settings = {}} = queryTree
+// Runs a phase or position's steps in order: each step's result flows into the next.
+async function runSteps(steps, scope, run) {
+  let flow = scope.flow
+  for (const step of steps) {
+    flow = await invoke(step, {...scope, flow}, run)
+  }
+  return flow
+}
 
-  const results = {}
-  const usedServices = new Set()
+// Runs a position's steps for one input.
+function runPosition(position, scope, input, run) {
+  return runSteps(position.steps, enterPosition(position, scope, input), run)
+}
 
-  // Add given data
-  if (given) results.given = given
+function invoke(call, scope, run) {
+  run.usedServices.set(call.parts.service, call.service)
+  const pending = wrap(call, run)(call.args, {call, scope, run})
+  run.pending.add(pending)
+  return pending.finally(() => run.pending.delete(pending))
+}
 
-  // Add pre-completed queries (from snapshot loading)
-  for (const [queryName, queryNode] of Object.entries(queries)) {
-    if (queryNode.completed && queryNode.value !== undefined) {
-      results[queryName] = queryNode.value
+// Waits for every call the Run started, including those a failure left
+// running, so their results reach the Run State before the Run reports.
+async function settle(run) {
+  while (run.pending.size) await Promise.allSettled(run.pending)
+}
+
+// Hands an update to the host. Reporting never fails a Run: an onUpdate
+// that throws is logged, and the Run carries on.
+function report(run, update) {
+  try {
+    run.onUpdate(update)
+  } catch (error) {
+    console.error(`onUpdate failed on ${update.kind} ${update.name} ${update.status}:`, error.message)
+  }
+}
+
+// Runs one phase, reporting it running, then done or failed. A running phase
+// reports when it started, never partial output.
+function runPhase(name, run) {
+  const startedAt = new Date()
+  const reportPhase = (status, details) =>
+    report(run, {kind: 'phase', name, status, startedAt: startedAt.toISOString(), ...details})
+  const duration = () => Date.now() - startedAt
+
+  reportPhase('running')
+  return runSteps(run.compiled.phases[name].steps, rootScope, run).then(
+    result => {
+      reportPhase('done', {duration: duration()})
+      return result
+    },
+    error => {
+      reportPhase('failed', {duration: duration(), error: error.message})
+      throw error
+    }
+  )
+}
+
+// The phase a target names: `$name`, which must be a phase of the Query.
+function targetPhase(compiled, target) {
+  const name = target.match(/^\$?([A-Za-z_]\w*)/)?.[1]
+  if (!name) throw new Error(`Targets are phases, named '$phase': got '${target}'`)
+  if (target !== `$${name}`) throw new Error(`Targets are phases: use '$${name}'`)
+  if (!compiled.phases[name]) throw new Error(`Unknown target '${target}': no phase named '${name}'`)
+  return name
+}
+
+// The phases a Run executes, and the calls it reruns regardless of the Run
+// State: everything for the whole Query; for a target phase, the phase and
+// what it depends on, rerunning the target's own calls.
+function scopeOfRun(compiled, target) {
+  if (!target) return {phases: Object.keys(compiled.phases), rerun: () => false}
+  const name = targetPhase(compiled, target)
+  return {
+    phases: [...upstreamOf(compiled.phases, name)],
+    rerun: (call) => call.address.startsWith(`$${name}.`)
+  }
+}
+
+// The global onError handler sees the error that ended the Run.
+async function handleGlobalError(error, settings, run) {
+  if (settings.onError) {
+    try {
+      await runPosition(settings.onError, rootScope, error, run)
+    } catch (handlerError) {
+      handlerError.message = `Global onError handler failed: ${handlerError.message}`
+      if (!settings.ignoreErrors) throw handlerError
     }
   }
+  if (!settings.ignoreErrors) throw error
+}
 
-  // Execute each stage of our execution plan
+/**
+ * Execute a compiled Query within one Run State.
+ * @param {Object} compiled - from compile()
+ * @param {Object} options - {runState, trigger, target, onUpdate}: the Run's
+ *   store, the trigger payload, the phase to run up to (default: all), and a
+ *   callback receiving each phase's updates
+ * @returns {Object} each executed phase's result, by name
+ */
+export async function execute(compiled, {runState = memoryStore(), trigger, target, onUpdate = () => {}} = {}) {
+  const runtime = compiled.runtime ?? defaultRuntime
+  const {settings} = compiled
+  const {phases, rerun} = scopeOfRun(compiled, target)
+
+  const run = {
+    compiled,
+    runtime,
+    runState,
+    forms: await formsOf(compiled, {trigger}),
+    nodes: {given: compiled.given, trigger},
+    inflight: new Map(),
+    pending: new Set(),
+    usedServices: new Map(),
+    rateLimiters: _.mapValues(settings.rateLimit ?? {}, interval => new RateLimitedQueue(interval)),
+    limit: settings.concurrency ? concurrencyLimit(settings.concurrency) : undefined,
+    rerun,
+    onUpdate,
+    runPosition: (position, scope, input) => runPosition(position, scope, input, run)
+  }
+
+  await initServices(new Set(compiled.calls.map(call => call.service)), runtime)
+
   try {
-    for (const stage of plan) {
-      await Promise.all(stage.map(async (queryNode) => {
-        results[queryNode.queryName] = await executeNode(queryNode, results, new ContextStack(), usedServices)
+    for (const column of columnsOf(_.pick(compiled.phases, phases))) {
+      await Promise.all(column.map(async (name) => {
+        run.nodes[name] = await runPhase(name, run)
       }))
     }
   } catch (error) {
-
-    // Handle global error settings
-    if (settings.onError) {
-      try {
-        const errorContext = new ContextStack().extend(error)
-        await settings.onError(results, errorContext)
-      } catch (handlerError) {
-        handlerError.message = `Global onError handler failed: ${handlerError.message}`
-        if (!settings.ignoreErrors) {
-          throw handlerError
-        }
-      }
-    }
-
-    if (!settings.ignoreErrors) {
-      throw error
-    }
-
+    await settle(run)
+    await handleGlobalError(error, settings, run)
   } finally {
-    // Call tearDown on used services
-    await callTearDown(services, usedServices)
+    await settle(run)
+    await callTearDown(run.usedServices)
   }
 
-  return results
+  return _.pick(run.nodes, phases)
 }
 
 export default execute

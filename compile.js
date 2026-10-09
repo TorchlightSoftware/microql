@@ -1,64 +1,94 @@
 /**
  * @fileoverview MicroQL Query Compiler
  *
- * Compiles query configurations into queryTree
- * Handles service validation and dependency extraction.
+ * Compiles a Query into a plain tree of phases and service calls. Compile is
+ * pure: it reads the Query and the service definitions, checks every reference
+ * against the scope it appears in, and assigns each call its Service Call
+ * Address. Nothing here touches the runtime; execute attaches that.
+ *
+ * Domain:
+ *   Phase     a named node of the Query; a chain of service calls (a chain of
+ *             one is just a call). `$name` refers to its result.
+ *   Call      one service call: a service key, its data arguments, its
+ *             settings, and its positions.
+ *   Position  a field that takes a service — a service-typed argument or
+ *             `onError` — holding a call or a chain of calls.
+ *   Address   a call's Service Call Address (`$listings.@1a2`): calls are
+ *             numbered, positions lettered in sorted key order, alternating.
  */
 
 import _ from 'lodash'
-import lodashDeep from 'lodash-deep'
-_.mixin(lodashDeep)
+import {parseServiceKey} from '@tlsft/service-key'
 
-import {DEP_REGEX, SERVICE_REGEX, RESERVE_ARGS} from './common.js'
-import applyWrappers from './wrappers.js'
+import {RESERVE_ARGS} from './common.js'
+import {isReference, parseReference} from './reference.js'
 import {parseSchema} from './validation.js'
+import {fieldPathOf} from './addresses.js'
 import util from './services/util.js'
-import RateLimitedQueue from './ratelimit.js'
-import Cache from './cache.js'
 
-// Detects if a descriptor is a chain (nested arrays)
-const isChain = (descriptor) => {
-  return Array.isArray(descriptor) &&
-    descriptor.length > 0 &&
-    _.every(descriptor, d => Array.isArray(d))
+// Nodes resolved before the first phase runs; never valid phase names.
+const ROOT_NODES = ['given', 'trigger']
+
+// The retired `service:action` form, recognised only to explain its replacement.
+const RETIRED_KEY = /^(\w+):(\w+)$/
+
+const LETTERS = 'abcdefghijklmnopqrstuvwxyz'
+
+const fail = (site, message) => {
+  throw new Error(`[${site.address}] ${message}`)
 }
 
-// Detects if a descriptor uses method syntax: ['target', 'service:action', args]
-const hasMethodSyntax = (descriptor) => {
-  return Array.isArray(descriptor) &&
-         descriptor.length >= 2 &&
-         typeof descriptor[1] === 'string' &&
-         SERVICE_REGEX.test(descriptor[1])
-}
+// A chain is an array of service descriptors (each itself an array).
+const isChain = (value) =>
+  Array.isArray(value) && value.length > 0 && value.every(Array.isArray)
 
-// Transforms method syntax ['target', 'service:action', args] to standard service call ['service:action', {on: target, ...args}]
-const parseServiceDescriptor = (descriptor) => {
-  // check for method descriptor
-  if (hasMethodSyntax(descriptor)) {
-    const [arg0, serviceMethod, args = {}] = descriptor
-    const [__, serviceName, action] = serviceMethod.match(SERVICE_REGEX)
-    return [serviceName, action, args, arg0]
+const isPlainObject = (value) => _.isPlainObject(value)
 
-  } else {
-    // assume normal service descriptor
-    const [serviceAction, args = {}] = descriptor
-    const match = serviceAction?.match(SERVICE_REGEX)
-    if (!match) {
-      throw new Error(`Invalid service descriptor. Expected ['service:action', {...}] format. Got: ${JSON.stringify(descriptor)}`)
-    }
-    const [, serviceName, action] = match
-    return [serviceName, action, args]
+// Splits a descriptor into its service key, arguments and the method-syntax
+// target, if any: ['KEY', {...}] or [target, 'KEY', {...}].
+function parseDescriptor(site, descriptor) {
+  const methodParts = typeof descriptor[1] === 'string' && parseServiceKey(descriptor[1])
+  if (methodParts) {
+    const [target, key, args = {}] = descriptor
+    return {key, parts: methodParts, args, target, hasTarget: true}
   }
+
+  const [key, args = {}] = descriptor
+  const parts = parseServiceKey(key)
+  if (!parts) {
+    const retired = descriptor.find(d => typeof d === 'string' && RETIRED_KEY.test(d))?.match(RETIRED_KEY)
+    if (retired) fail(site, `Service key '${retired[0]}' uses the retired service:action form. Use 'GET [${retired[1]}]/${retired[2]}'`)
+    fail(site, `Invalid service descriptor. Expected ['METHOD [service]/resource', {...}] format. Got: ${JSON.stringify(descriptor)}`)
+  }
+  return {key, parts, args, hasTarget: false}
 }
 
-// Extracts dependencies from query arguments
-const getDeps = (args) => {
-  const deps = new Set()
-  _.deepMapValues(args, (value) => {
-    let m = (typeof value === 'string') && value.match(DEP_REGEX)
-    if (m) deps.add(m[1])
-  })
-  return deps
+// The function answering a service key: the service by name, its resource,
+// then the resource's method. A resource given as a function answers GET; one
+// with several methods is an object of one function per method.
+function lookupAction(site, services, {service: serviceName, resource, method}) {
+  const service = services[serviceName]
+  if (!service) fail(site, `Service '${serviceName}' not found`)
+  if (typeof service !== 'object') {
+    fail(site, `Service '${serviceName}' must be an object of resources in the form: {'/resource': async (args) => result}`)
+  }
+
+  const entry = service[resource]
+  if (!entry) fail(site, `Resource '${resource}' not found on service '${serviceName}'`)
+
+  const methods = typeof entry === 'function' ? {GET: entry} : entry
+  const action = methods[method]
+  if (typeof action !== 'function') {
+    fail(site, `Method '${method}' is not declared by [${serviceName}]${resource} (declares ${Object.keys(methods).join(', ')})`)
+  }
+  return {service, action}
+}
+
+// Method syntax puts its target in the argument declared {argOrder: 0}.
+function targetField(site, argtypes, key) {
+  const [field] = Object.entries(argtypes).find(([, info]) => info.argOrder === 0) || []
+  if (!field) fail(site, `Method syntax was used for ${key} but no {argOrder: 0} was defined.`)
+  return field
 }
 
 function parseSchemaWithErrorContext(designation, order, schema) {
@@ -70,7 +100,7 @@ function parseSchemaWithErrorContext(designation, order, schema) {
   }
 }
 
-// weave the schema compilation with proper context for error reporting
+// The Query's checks (from the call's arguments) woven with the service's own.
 const compileValidators = (args, validators) => {
   const order = {
     precheck: {query: args.precheck, service: validators.precheck},
@@ -78,225 +108,238 @@ const compileValidators = (args, validators) => {
   }
   let hasValidators = false
   for (const o in order) {
-    for (const d in order[o])
+    for (const d in order[o]) {
       if (order[o][d]) {
         hasValidators = true
         order[o][d] = parseSchemaWithErrorContext(d, o, order[o][d])
       }
+    }
   }
   return hasValidators ? order : undefined
 }
 
-// settings are merged from query level settings and service level settings
-// they are placed in their own `settings` key on the compiled service definition
-const compileSettings = (queryName, serviceName, args, argtypes, config) => {
-  const reserveArgs = _.pick(args, RESERVE_ARGS)
-  // get args with their argtypes set to 'settings'
+// A call's settings: its own reserve args, then any settings-typed arguments,
+// then the Query's global settings (except those that only apply globally).
+const compileSettings = (serviceName, args, argtypes, querySettings) => {
+  const ownSettings = _.omit(_.pick(args, RESERVE_ARGS), ['onError', 'precheck', 'postcheck'])
   const settingsArgs = _.pickBy(args, (a, k) => argtypes[k]?.type === 'settings')
-
-  // exclude some global settings from being merged with the service
-  const globalSettings = config.settings ?
-    _.omit(config.settings, ['onError', 'ignoreErrors', 'cache']) : {}
-  const settings = _.defaults({}, reserveArgs, ...Object.values(settingsArgs), globalSettings)
-
-  // compile onError if we have it
-  if (settings.onError) {
-    settings.onError = compileServiceOrChain(queryName, settings.onError, config)
-  }
-
-  // rate limit is defined globally for the service
-  settings.rateLimit = config.settings?.rateLimit?.[serviceName]
-
+  const globalSettings = _.omit(querySettings, ['onError', 'ignoreErrors', 'cache', 'rateLimit', 'concurrency'])
+  const settings = _.defaults({}, ownSettings, ...Object.values(settingsArgs), globalSettings)
+  settings.rateLimit = querySettings.rateLimit?.[serviceName]
   return settings
 }
 
-// any time we expect a service, it could instead be a chain
-const compileServiceOrChain = (queryName, value, config) => {
-  const makeFn = (descriptor) => compileServiceFunction(queryName, descriptor, config).service
-
-  // is it a chain?
-  if (isChain(value)) {
-    return value.map(makeFn)
-
-    // or a single service call?
-  } else {
-    return makeFn(value)
-  }
-}
-
-// Compile arguments based on argtypes metadata
-const compileArgs = (queryName, serviceName, args, argtypes, config, settings) => {
-  const compiled = {}
-
-  for (const [key, value] of Object.entries(args)) {
-
-    // compile object to service template
-    if (argtypes[key]?.type === 'service' && typeof value === 'object' && !Array.isArray(value)) {
-      const fn = compileServiceFunction(queryName, ['util:template', value], config)
-      compiled[key] = fn.service
-
-    // compile service descriptor
-    } else if (argtypes[key]?.type === 'service' && Array.isArray(value)) {
-      compiled[key] = compileServiceOrChain(queryName, value, config)
-
-    // reject raw JavaScript functions
-    } else if (argtypes[key]?.type === 'service' && typeof value === 'function') {
-      throw new Error(`Raw JavaScript functions are not supported in MicroQL. Use service descriptors instead of raw functions for argument '${key}' in ${serviceName}:${queryName}. Example: ['serviceName:methodName', {arg: '@'}]`)
-
-    } else if (RESERVE_ARGS.includes(key)) {
-      // exclude reserve args
-
-    } else {
-      compiled[key] = value
+// Checks every reference in a call's data arguments against its scope, and
+// returns the phases they depend on.
+function checkReferences(site, args, scope, query) {
+  const dependencies = new Set()
+  const check = (value) => {
+    if (isReference(value)) {
+      const ref = parseWithSite(site, value)
+      checkReference(site, ref, value, scope, query)
+      if (ref.sigil === '$' && !ROOT_NODES.includes(ref.name)) dependencies.add(ref.name)
+    } else if (Array.isArray(value)) {
+      value.forEach(check)
+    } else if (isPlainObject(value)) {
+      Object.values(value).forEach(check)
     }
   }
-
-  for (const [key, type] of Object.entries(argtypes)) {
-    // inject settings if requested
-    if (type?.type === 'settings') {
-      compiled[key] = _.defaults(args[key], settings)
-    }
-  }
-
-  return compiled
+  check(args)
+  return dependencies
 }
 
-// check to see if the service has an argOrder: 0 defined
-// and merge arg0 if we have it
-function mergeArgs(args, arg0, argtypes = {}, serviceName, action) {
-  if (!arg0) {
-    return
-  }
-  const [argOrder0] = Object.entries(argtypes).find(([, typeinfo]) => typeinfo.argOrder === 0) || []
-  if (!argOrder0)
-    throw new Error(`Method syntax was used for ${serviceName}:${action} but no {argOrder: 0} was defined.`)
-  args[argOrder0] = arg0
-}
-
-// Compiles a service descriptor like ['@', 'util:print', {color: 'green'}]
-// into [a compiled function, recursive dependencies]
-function compileServiceFunction(queryName, descriptor, config) {
-  const [serviceName, action, args, arg0] = parseServiceDescriptor(descriptor)
-
-  // Validate service exists and has the required method
-  const service = config.services[serviceName]
-  if (!service) {
-    throw new Error(`Service '${serviceName}' not found`)
-  }
-
-  const serviceCall = service[action]
-  if (typeof service === 'object') {
-    if (!serviceCall || typeof serviceCall !== 'function') {
-      throw new Error(`Method '${action}' not found on service '${serviceName}'`)
-    }
-  } else {
-    throw new Error(`Service '${serviceName}' must be an object with methods in the form: async (args) => result`)
-  }
-
+function parseWithSite(site, text) {
   try {
-    const argtypes = serviceCall._argtypes || {}
-    mergeArgs(args, arg0, argtypes, serviceName, action)
-    const settings = compileSettings(queryName, serviceName, args, argtypes, config)
-    const rateLimit = config.rateLimiters?.[serviceName]
-    const compiledArgs = compileArgs(queryName, serviceName, args, argtypes, config, settings)
-    const validators = compileValidators(args, serviceCall._validators || {}, queryName, serviceName, action)
-
-    // Compile function arguments based on _argtypes
-    const serviceDef = {
-      type: 'service',
-      queryName,
-      serviceName,
-      action,
-      validators,
-      settings,
-      rateLimit,
-      args: compiledArgs,
-      dependencies: getDeps(args),
-      noTimeout: serviceCall._noTimeout || false
-    }
-
-    // prepare the service with arg resolution, debugging, error handling, timeout, retry
-    serviceDef.service = applyWrappers(serviceDef, config)
-
-    return serviceDef
-
+    return parseReference(text)
   } catch (error) {
-    error.message = `[${queryName} - ${serviceName}:${action}] ${error.message}`
-    throw error
+    fail(site, error.message)
   }
 }
 
-function compileDescriptor(queryName, descriptor, config) {
-  // Handle chains - arrays of service calls
-  if (isChain(descriptor)) {
-    let allDeps = new Set()
+function checkReference(site, {sigil, name, depth}, text, scope, query) {
+  if (sigil === '$' && !query.nodeNames.has(name)) fail(site, `Unknown reference '${text}': no phase or node named '${name}'`)
+  if (depth > scope.errors) {
+    fail(site, scope.errors ? `Unknown reference '${text}': it is inside only ${scope.errors} onError` : `Unknown reference '${text}': no enclosing onError`)
+  }
+  if (sigil === '@' && name && !depth && !scope.bindings.includes(name)) fail(site, `Unknown reference '${text}': no enclosing iteration is named '${name}' by as:`)
+  if (sigil === '@' && !name && !scope.flow) fail(site, `Invalid reference '${text}': nothing flows into this call. The first call of a phase or chain receives nothing; name an iteration with as: to reach its item`)
+}
 
-    // for each step in chain, collect the service definition and the dependencies
-    const chainSteps = descriptor.map((d, i) => {
-      const def = compileServiceFunction(`${queryName}[${i}]`, d, config)
-      allDeps = allDeps.union(def.dependencies)
-      def.stepIndex = i
-      delete def.dependencies
-      return def
-    })
+// Declares an iteration name; names are Query-scoped, so each is used once.
+function declareBinding(site, name, query) {
+  if (name === 'err') fail(site, '\'err\' is reserved for the error in onError (@err); name the iteration something else')
+  if (query.bindingNames.has(name)) fail(site, `Binding name '${name}' is used more than once. Binding names are Query-scoped.`)
+  query.bindingNames.add(name)
+  if (query.nodeNames.has(name)) {
+    query.warnings.push({address: site.address, message: `Binding '@${name}' shares its name with '$${name}'`})
+  }
+}
 
-    return {
-      type: 'chain',
-      queryName,
-      steps: chainSteps,
-      dependencies: allDeps
+// The sites of a call or chain's steps: addresses numbered from 1 under an
+// address prefix, and JSON paths under the container's path.
+const sitesAt = (prefix, path) => (i, chain) => ({
+  address: `${prefix}${i + 1}`,
+  path: chain ? [...path, i] : path
+})
+
+// Compiles a call or chain at consecutive sites. Each step's flow is the
+// previous step's result; a lone call receives the container's input, if it
+// has one, and a chain's first step receives nothing.
+function compileSteps(value, siteOf, scope, hasInput, query) {
+  const chain = isChain(value)
+  const descriptors = chain ? value : [value]
+  return descriptors.map((descriptor, i) =>
+    compileCall(descriptor, siteOf(i, chain), {...scope, flow: i > 0 || (hasInput && !chain)}, query))
+}
+
+// A position: the field's call or chain, compiled in the owner's scope plus
+// its iteration name. A single call receives its input as `@`; a chain's
+// first step receives nothing, so a chain reaches its input by name only.
+// onError's input is the error, not an iteration: `as:` never names it, and
+// it is reached as @err (with one more @ for each onError it is inside).
+function compilePosition(owner, field, letter, value, scope, as, returns, query) {
+  const iteration = field === 'onError' ? undefined : as
+
+  // an object in a service position is a template of its input
+  const descriptor = isPlainObject(value) ? ['GET [util]/template', value] : value
+  const chain = isChain(descriptor)
+  if (chain && field !== 'onError' && !iteration) {
+    fail(owner, `The chain in '${field}' can't reach its input. Name it with as: and reference it as @name`)
+  }
+
+  const inner = {
+    bindings: iteration ? [...scope.bindings, iteration] : scope.bindings,
+    errors: field === 'onError' ? scope.errors + 1 : scope.errors
+  }
+  const siteOf = sitesAt(`${owner.address}${letter}`, fieldPathOf(owner, field))
+  return {
+    field,
+    chain,
+    as: iteration,
+    returns: returns && parseSchemaWithErrorContext('service', `${field} returns`, returns),
+    steps: compileSteps(descriptor, siteOf, inner, true, query)
+  }
+}
+
+// The fields of a call that take a service: service-typed arguments and onError.
+function positionFields(site, args, argtypes, key) {
+  const fields = Object.keys(args).filter(k => argtypes[k]?.type === 'service' || k === 'onError')
+  for (const field of fields) {
+    if (typeof args[field] === 'function') {
+      fail(site, `Raw JavaScript functions are not supported in MicroQL. Use service descriptors instead of raw functions for argument '${field}' in ${key}. Example: ['GET [service]/resource', {arg: '@'}]`)
     }
-  } else {
-    // Handle single service call
-    return compileServiceFunction(queryName, descriptor, config)
+  }
+  // a reference or literal in a service-typed argument stays data
+  return fields.filter(k => k === 'onError' || Array.isArray(args[k]) || isPlainObject(args[k])).sort()
+}
+
+// Compiles one service descriptor at a site, in a scope.
+function compileCall(descriptor, site, scope, query) {
+  if (!Array.isArray(descriptor)) fail(site, `Invalid service descriptor. Expected ['METHOD [service]/resource', {...}] format. Got: ${JSON.stringify(descriptor)}`)
+  const parsed = parseDescriptor(site, descriptor)
+  const {service, action} = lookupAction(site, query.services, parsed.parts)
+  const argtypes = action._argtypes || {}
+  if (!isPlainObject(parsed.args)) fail(site, `Arguments for ${parsed.key} must be an object`)
+
+  const call = {
+    address: site.address,
+    path: site.path,
+    argsPath: [...site.path, parsed.hasTarget ? 2 : 1],
+    targetField: parsed.hasTarget ? targetField(site, argtypes, parsed.key) : undefined,
+    iterates: Object.keys(argtypes).find(k => argtypes[k].argOrder === 0),
+    key: parsed.key,
+    parts: parsed.parts,
+    service,
+    action,
+    noTimeout: action._noTimeout || false,
+    ownTimeout: parsed.args.timeout !== undefined
+  }
+
+  const args = parsed.hasTarget ? {...parsed.args, [call.targetField]: parsed.target} : parsed.args
+  const {as} = args
+  const fields = positionFields(site, args, argtypes, parsed.key)
+  if (as !== undefined) {
+    if (!fields.some(f => f !== 'onError')) fail(site, `as: names an iteration, but ${parsed.key} takes no service`)
+    declareBinding(site, as, query)
+  }
+
+  const settingsFields = Object.keys(argtypes).filter(k => argtypes[k]?.type === 'settings')
+  call.args = _.omit(args, [...RESERVE_ARGS, 'as', ...fields, ...settingsFields])
+  call.settingsArgs = Object.fromEntries(settingsFields.map(field => [field, args[field] ?? {}]))
+  call.settings = compileSettings(parsed.parts.service, args, argtypes, query.settings)
+  call.checks = _.pick(args, ['precheck', 'postcheck'])
+  call.validators = compileValidators(args, action._validators || {})
+  call.dependencies = checkReferences(site, {...call.args, ...call.settingsArgs}, scope, query)
+  call.positions = Object.fromEntries(fields.map((field, i) =>
+    [field, compilePosition(call, field, LETTERS[i], args[field], scope, as, argtypes[field]?.returns, query)]))
+
+  for (const position of Object.values(call.positions)) {
+    for (const step of position.steps) call.dependencies = call.dependencies.union(step.dependencies)
+  }
+  query.calls.push(call)
+  return call
+}
+
+function compilePhase(name, descriptor, query) {
+  if (ROOT_NODES.includes(name)) throw new Error(`[$${name}] '${name}' is reserved and can't name a phase`)
+  const steps = compileSteps(descriptor, sitesAt(`$${name}.@`, ['phases', name]), {bindings: [], errors: 0}, false, query)
+  return {
+    name,
+    steps,
+    dependencies: steps.reduce((deps, step) => deps.union(step.dependencies), new Set())
   }
 }
 
+// The global onError handler receives the error that ended the Run.
+function compileGlobalOnError(value, query) {
+  const siteOf = sitesAt('settings.onError.@', ['settings', 'onError'])
+  return {field: 'onError', chain: isChain(value), steps: compileSteps(value, siteOf, {bindings: [], errors: 1}, true, query)}
+}
+
+// `select` names what the Query returns: one reference, or a list of phases.
+function compileSelect(select, query) {
+  if (select === undefined) return undefined
+  const site = {address: 'select'}
+  const refs = [].concat(select).map(text => {
+    const ref = isReference(text) ? parseWithSite(site, text) : fail(site, `select takes references: '$${text}'`)
+    if (ref.sigil !== '$' || !query.nodeNames.has(ref.name)) fail(site, `Unknown reference '${text}' in select`)
+    return ref
+  })
+  return Array.isArray(select) ? refs : refs[0]
+}
 
 /**
- * Compile a query configuration into a queryTree
- * @param {Object} config - Query configuration
- * @param {Object} config.services - Service objects
- * @param {Object} config.queries - Query definitions
- * @param {Object} config.given - given data
- * @param {boolean} config.debug - Debug logging flag
- * @returns {Object} Compiled queryTree
+ * Compile a Query into its tree of phases and calls.
+ * @returns {Object} {phases, calls, given, trigger, select, settings, services, runtime, warnings}
  */
 export function compile(config) {
-  _.defaults(config, {services: {}, queries: {}, debug: false, settings: {}})
-  const {services, queries, given, debug, settings} = config
-  _.defaults(config.services, {util})
+  const {phases = {}, given, trigger, settings = {}} = config
+  const services = _.defaults({}, config.services, {util})
 
-  // set up a cache for query results using the global settings provided
-  config.cache = new Cache(config.settings.cache)
-
-  // Create rate limiter cache to share rate limiters across queries
-  config.rateLimiters = {}
-  if (settings.rateLimit) {
-    for (const [serviceName, interval] of Object.entries(settings.rateLimit)) {
-      config.rateLimiters[serviceName] = new RateLimitedQueue(interval)
-    }
+  const query = {
+    services,
+    settings,
+    nodeNames: new Set([...Object.keys(phases), ...(given !== undefined ? ['given'] : []), ...(trigger ? ['trigger'] : [])]),
+    bindingNames: new Set(),
+    warnings: [],
+    calls: []
   }
 
-  // Build tree for each query (use config as-is for service compilation)
-  const queryTree = {}
-
-  for (const [queryName, descriptor] of Object.entries(queries)) {
-    queryTree[queryName] = compileDescriptor(queryName, descriptor, config)
-  }
-
-  // Compile global settings separately
-  const globalSettings = {...settings}
-  if (settings.onError) {
-    globalSettings.onError = compileServiceOrChain('global', settings.onError, config)
-  }
+  const compiledPhases = _.mapValues(phases, (descriptor, name) => compilePhase(name, descriptor, query))
 
   return {
-    queries: queryTree,
+    phases: compiledPhases,
+    calls: query.calls,
     given,
+    trigger,
+    select: compileSelect(config.select, query),
+    settings: {
+      ...settings,
+      onError: settings.onError ? compileGlobalOnError(settings.onError, query) : undefined
+    },
     services,
-    debug,
-    settings: globalSettings
+    runtime: config.runtime,
+    warnings: query.warnings
   }
 }
 

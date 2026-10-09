@@ -1,0 +1,139 @@
+import assert from 'node:assert/strict'
+import {describe, it} from 'node:test'
+import _ from 'lodash'
+import compile from '../compile.js'
+import {canonical, hashOf, formsOf} from '../forms.js'
+
+describe('canonical serialization', () => {
+  // [value, canonical text]
+  const cases = [
+    [{b: 1, a: [2, {d: 4, c: 3}]}, '{"a":[2,{"c":3,"d":4}],"b":1}'],
+    [{a: undefined, b: () => 1, c: null}, '{"c":null}'],
+    [Object.assign(new Error('boom'), {address: '$x.@1'}), '{"address":"$x.@1","message":"boom","name":"Error"}'],
+    [new Date('2026-01-01T00:00:00Z'), '"2026-01-01T00:00:00.000Z"'],
+    ['text', '"text"']
+  ]
+
+  for (const [value, text] of cases) {
+    it(`serializes ${text}`, () => {
+      assert.equal(canonical(value), text)
+    })
+  }
+
+  it('hashes equal values equally regardless of key order', async () => {
+    assert.equal(await hashOf({a: 1, b: 2}), await hashOf({b: 2, a: 1}))
+    assert.match(await hashOf({a: 1}), /^[0-9a-f]{64}$/)
+  })
+})
+
+describe('form hashes', () => {
+  const services = {
+    scraper: {
+      async '/extract'({url}) { return {url} },
+      async '/images'({on}) { return on }
+    }
+  }
+  services.scraper['/images']._argtypes = {on: {argOrder: 0}}
+
+  const base = {
+    given: {baseUrl: 'https://a.example', unused: 1},
+    services,
+    phases: {
+      categories: ['GET [scraper]/extract', {url: '$given.baseUrl'}],
+      listings: ['$categories', 'GET [util]/each', {
+        as: 'category',
+        service: [
+          ['GET [scraper]/extract', {url: '@category.url'}],
+          ['@', 'GET [scraper]/images']
+        ]
+      }]
+    }
+  }
+
+  const hashesOf = async (query) => {
+    const forms = await formsOf(compile(query))
+    return _.mapValues(Object.fromEntries(forms.calls), 'hash')
+  }
+
+  // [edit, addresses whose form hash changes, addresses that appear or disappear]
+  const edits = [
+    ['change an unused $given field', q => { q.given.unused = 2 }, []],
+    ['change a used $given field',
+      q => { q.given.baseUrl = 'https://b.example' },
+      ['$categories.@1', '$listings.@1', '$listings.@1a1', '$listings.@1a2']],
+    ['edit an argument inside the iteration',
+      q => { q.phases.listings[2].service[0][1].timeout = 5; q.phases.listings[2].service[0][1].selector = 'img' },
+      ['$listings.@1', '$listings.@1a1', '$listings.@1a2']],
+    ['change only operational settings', q => { q.phases.listings[2].service[0][1].retry = 3; q.phases.listings[2].service[0][1].debug = true }, []],
+    ['rename the binding', q => {
+      q.phases.listings[2].as = 'cat'
+      q.phases.listings[2].service[0][1].url = '@cat.url'
+    }, []]
+  ]
+
+  for (const [name, edit, changed] of edits) {
+    it(`${name}: changes ${changed.length ? changed.join(', ') : 'nothing'}`, async () => {
+      const before = await hashesOf(base)
+      const edited = _.cloneDeepWith(base, v => typeof v === 'function' ? v : undefined)
+      edit(edited)
+      const after = await hashesOf(edited)
+
+      assert.deepEqual(Object.keys(after).sort(), Object.keys(before).sort())
+      const actual = Object.keys(before).filter(address => before[address] !== after[address]).sort()
+      assert.deepEqual(actual, changed.sort())
+    })
+  }
+
+  it('rename a phase: addresses change, forms do not', async () => {
+    const renamed = {...base, phases: {cats: base.phases.categories, listings: ['$cats', ...base.phases.listings.slice(1)]}}
+    const before = await hashesOf(base)
+    const after = await hashesOf(renamed)
+    assert.equal(after['$cats.@1'], before['$categories.@1'])
+    assert.equal(after['$listings.@1'], before['$listings.@1'])
+  })
+
+  it('move a subtree: a new address, the same form', async () => {
+    const moved = {
+      ...base,
+      phases: {
+        categories: [
+          ['GET [util]/template', {note: 'added first'}],
+          base.phases.categories
+        ],
+        listings: base.phases.listings
+      }
+    }
+    const before = await hashesOf(base)
+    const after = await hashesOf(moved)
+    assert.equal(after['$categories.@2'], before['$categories.@1'])
+    assert.equal(after['$listings.@1a2'], before['$listings.@1a2'])
+  })
+
+  it('gives identical calls one form hash', async () => {
+    const hashes = await hashesOf({
+      given: {u: 'x'},
+      services,
+      phases: {
+        a: ['GET [scraper]/extract', {url: '$given.u'}],
+        b: ['GET [scraper]/extract', {url: '$given.u'}]
+      }
+    })
+    assert.equal(hashes['$a.@1'], hashes['$b.@1'])
+  })
+
+  it('distinguishes trigger payloads', async () => {
+    const query = {trigger: {kind: 'webhook'}, services, phases: {a: ['GET [scraper]/extract', {url: '$trigger.url'}]}}
+    const one = await formsOf(compile(query), {trigger: {url: 'one'}})
+    const two = await formsOf(compile(query), {trigger: {url: 'two'}})
+    assert.notEqual(one.calls.get('$a.@1').hash, two.calls.get('$a.@1').hash)
+    assert.notEqual(one.query, two.query)
+  })
+
+  it('returns a readable form that holds upstream hashes, not upstream forms', async () => {
+    const forms = await formsOf(compile(base))
+    const {form} = forms.calls.get('$listings.@1')
+    assert.equal(form.key, 'GET [util]/each')
+    assert.deepEqual(form.args.on, {phase: forms.calls.get('$categories.@1').hash, path: []})
+    assert.match(form.positions.service[0], /^[0-9a-f]{64}$/)
+  })
+})

@@ -1,269 +1,254 @@
-import _ from 'lodash'
-import resolveValue from './resolve.js'
-import {getServiceColorName} from './common.js'
-import {inspect} from 'util'
+/**
+ * @fileoverview Wrappers — the behaviour around every service call.
+ *
+ * Each wrapper takes the next step and returns a step of the same shape,
+ * `(args, invocation) => result`, where an invocation is {call, scope, run}.
+ * They are applied in canonical order, outermost first:
+ *
+ *   arguments → debug → error handling → run state → cache → precheck
+ *   → rate limit → concurrency → retry → postcheck → timeout → the action
+ *
+ * The Run State and the Cache sit inside error handling, so only successes
+ * are reused, and outside validation, so a reused result was already checked.
+ * A postcheck failure is retried like any other — a model's next answer may
+ * fit — while a precheck failure isn't, since no attempt changes the arguments.
+ */
 
-import utilService from './services/util.js'
+import _ from 'lodash'
+import {isReference, parseReference, resolveReference} from './reference.js'
+import {getServiceColorName} from './common.js'
+import {hashOf} from './forms.js'
 import {validate} from './validation.js'
 
-const withArgs = (fn) => {
-  return async function (args = {}) {
-    let {queryResults, contextStack} = this
+const isPlainObject = (value) => _.isPlainObject(value)
 
-    const resolveArg = (value) => {
+// A call's label in errors and logs: its address and service key.
+const labelOf = (call) => `[${call.address} - ${call.key}]`
 
-      // Recursively resolve all @ and $ references in the arguments
-      if (typeof value === 'string') {
-        const resolved = resolveValue(queryResults, contextStack, value)
-        return resolved
-      }
+// Arguments with every reference replaced by its value; a reference that
+// names nothing resolves to undefined.
+export const resolveArgs = (value, scope, nodes) => {
+  if (isReference(value)) return resolveReference(parseReference(value), scope, nodes)
+  if (Array.isArray(value)) return value.map(v => resolveArgs(v, scope, nodes))
+  if (isPlainObject(value)) return _.mapValues(value, v => resolveArgs(v, scope, nodes))
+  return value
+}
 
-      // Set up a service prepared to receive context from the calling service
-      if (typeof value === 'function') {
-        return (ctx) => {
-          return value(queryResults, contextStack.extend(ctx))
-        }
-      }
+// Resolves the call's data, injects settings-typed arguments, and hands each
+// service-typed argument over as a function of its input.
+const withArgs = (next) => async (_args, inv) => {
+  const {call, scope, run} = inv
+  const data = resolveArgs(call.args, scope, run.nodes)
+  const settingsArgs = _.mapValues(resolveArgs(call.settingsArgs, scope, run.nodes),
+    value => _.defaults({}, value, call.settings))
+  const services = _.mapValues(_.omit(call.positions, ['onError']),
+    position => (input) => run.runPosition(position, scope, input))
 
-      // is it a chain?
-      if (
-        Array.isArray(value) &&
-        value.length > 0 &&
-        _.every(value, v => typeof v === 'function')
-      ) {
-        return async (ctx) => {
-          // we need to push two layers of stack for the `fn` and the `chain`
-          // @ will refer to chain, @@ will refer to fn
-          const chainStack = contextStack.extend(ctx).extend(null)
-          for (const fn of value) {
-            chainStack.setCurrent(await fn(queryResults, chainStack))
-          }
-          return chainStack.getCurrent()
-        }
-      }
+  inv.inputs = {...data, ...settingsArgs}
+  inv.input = await hashOf(inv.inputs)
+  return next({...inv.inputs, ...services}, inv)
+}
 
-      // Let cloneDeepWith handle objects and arrays recursively
-      return undefined
-    }
+const withDebug = (next) => async (args, inv) => {
+  const {call, run} = inv
+  const {settings} = call
+  const color = getServiceColorName(call.parts.service)
+  const show = (value) => run.runtime.inspect(value, settings.inspect)
+  const startTime = Date.now()
 
-    const resolvedArgs = _.cloneDeepWith(args, resolveArg)
+  run.runtime.print(`${labelOf(call)} Called with args:\n${show(inv.inputs)}`, {color})
+  const result = await next(args, inv)
+  run.runtime.print(`${labelOf(call)} Completed in ${Date.now() - startTime}ms returning:\n${show(result)}`, {color})
+  return result
+}
 
-    // Only wrap onError once to preserve correct contextStack closure
-    if (this.settings.onError && !this.settings.onError._alreadyWrapped) {
-      this.settings.onError = resolveArg(this.settings.onError)
-      this.settings.onError._alreadyWrapped = true
-    }
+// Labels an error with the call that raised it, once: the innermost call wins.
+function labelError(error, inv) {
+  if (error.address) return
+  error.message = `${labelOf(inv.call)} ${error.message}`
+  error.address = inv.call.address
+  error.key = inv.call.key
+  error.query = inv.run.forms.query
+  error.args = inv.inputs
+}
 
-    return await fn.call(this, resolvedArgs)
+// What a failed call returns instead: onError's result with ignoreErrors,
+// null with ignoreErrors alone; otherwise the error stands.
+async function recover(error, {call, scope, run}) {
+  const {onError} = call.positions
+  const {ignoreErrors} = call.settings
+  if (!onError) {
+    if (ignoreErrors) return null
+    throw error
+  }
+
+  const handled = await run.runPosition(onError, scope, error).then(
+    result => ({result}),
+    handlerError => ({handlerError})
+  )
+  if (handled.handlerError) {
+    const message = `${labelOf(call)} onError handler failed: ${handled.handlerError.message}`
+    console.warn(message)
+    if (!ignoreErrors) throw new Error(message)
+    return null
+  }
+  if (ignoreErrors) return handled.result
+  throw error
+}
+
+const withErrorHandling = (next) => async (args, inv) => {
+  try {
+    return await next(args, inv)
+  } catch (error) {
+    labelError(error, inv)
+    return recover(error, inv)
   }
 }
 
-const withDebug = (fn) => {
-  return async function (args) {
-    const {queryName, serviceName, action, settings} = this
-    const startTime = Date.now()
-    const color = getServiceColorName(serviceName)
+// Reuses a result the Run State already holds for this form and input —
+// unless the Run reruns this call — and runs identical calls in flight once.
+const withRunState = (next) => async (args, inv) => {
+  const {call, run} = inv
+  const form = run.forms.calls.get(call.address).hash
+  const stored = run.rerun(call) ? undefined : await run.runState.get(form, inv.input)
+  if (stored?.status === 'done') return stored.output
 
-    if (settings.debug) {
-      const printArgs = inspect(args, settings.inspect)
-      utilService.print({on: `[${queryName} - ${serviceName}:${action}] Called with args:\n${printArgs}`, settings, color})
-    }
+  const key = `${form}/${inv.input}`
+  if (!run.inflight.has(key)) {
+    run.inflight.set(key, recordResult(next, args, inv, form).finally(() => run.inflight.delete(key)))
+  }
+  return run.inflight.get(key)
+}
 
-    // no try/catch - let errors be handled by withError
-    const result = await fn.call(this, args)
-
-    if (settings.debug) {
-      const duration = Date.now() - startTime
-      const printResult = inspect(result, settings.inspect)
-      utilService.print({on: `[${queryName} - ${serviceName}:${action}] Completed in ${duration}ms returning:\n${printResult}`, settings, color})
-    }
-
-    return result
+async function recordResult(next, args, inv, form) {
+  const {call, run} = inv
+  const startedAt = new Date()
+  const entry = {address: call.address, input: inv.input, inputs: inv.inputs, startedAt: startedAt.toISOString()}
+  try {
+    const output = await next(args, inv)
+    await run.runState.set(form, inv.input, {...entry, status: 'done', output, duration: Date.now() - startedAt})
+    return output
+  } catch (error) {
+    const failure = {message: error.message, attempts: error.attempts ?? 1, at: call.address}
+    await run.runState.set(form, inv.input, {...entry, status: 'failed', error: failure, duration: Date.now() - startedAt})
+    throw error
   }
 }
 
-const withCache = (fn) => async function (args) {
-  const {serviceName, action, cache} = this
-
-  // getOrCompute internally eliminates race conditions between cache, memory, disk,
-  // and concurrent calls
-  return await cache.getOrCompute(serviceName, action, args, fn.bind(this, args))
+const parseTimeUnit = (timeStr) => {
+  const match = timeStr.match(/^(\d+)([smhDM])$/)
+  if (!match) throw new Error(`Invalid time format: ${timeStr}`)
+  const [, amount, unit] = match
+  const multipliers = {s: 1000, m: 60000, h: 3600000, D: 86400000, M: 2592000000}
+  return parseInt(amount) * multipliers[unit]
 }
 
-const withRateLimit = (fn) => async function (args) {
-  return this.rateLimit.push(fn.bind(this, args))
+// How long a cached result lasts unless the call or the Query says otherwise.
+const DEFAULT_TTL = '7D'
+
+// Reuses a result across Runs while it is younger than the call's ttl. Each
+// entry records when it expires, so a store can prune without knowing ttls.
+const withCache = (next) => async (args, inv) => {
+  const {call, run} = inv
+  const store = run.runtime.cache
+  const form = run.forms.calls.get(call.address).hash
+  const ttl = parseTimeUnit(call.settings.cache.ttl ?? run.compiled.settings.cache?.ttl ?? DEFAULT_TTL)
+  const cached = await store.get(form, inv.input)
+  if (cached && Date.now() - Date.parse(cached.created) < ttl) return cached.output
+
+  const output = await next(args, inv)
+  const created = new Date()
+  const expires = new Date(created.getTime() + ttl)
+  await store.set(form, inv.input, {input: inv.input, created: created.toISOString(), expires: expires.toISOString(), output})
+  return output
 }
 
-const withRetry = (fn) => {
-  return async function (args) {
-    const {queryName, serviceName, action} = this
-    const retry = this.settings.retry || 0
-
-    let lastError
-
-    for (let attempt = 1; attempt <= retry + 1; attempt++) {
-      try {
-        return await fn.call(this, args)
-      } catch (error) {
-        lastError = error
-
-        if (attempt <= retry) {
-          console.error(
-            `[${queryName} - ${serviceName}:${action}] Failed (attempt ${attempt}/${retry + 1}), retrying...`
-          )
-        }
-      }
-    }
-
-    throw lastError
-  }
-}
-
-const withTimeout = (fn) => {
-  return async function (args) {
-    const {timeout} = this.settings
-    let timeoutId
-
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutId = setTimeout(() => {
-        reject(new Error(`Timed out after ${timeout}ms`))
-      }, timeout)
-    })
-
+// Validates a value against the call's schemas for one order (precheck or
+// postcheck), in the given designations' order.
+function check(value, order, designations, {call, run}) {
+  const show = (shown) => run.runtime.inspect(shown, call.settings.inspect)
+  for (const designation of designations) {
+    const schema = call.validators[order][designation]
+    if (!schema) continue
     try {
-      return await Promise.race([fn.call(this, args), timeoutPromise])
-    } finally {
-      clearTimeout(timeoutId)
-    }
-  }
-}
-
-
-const withErrorHandling = (fn) => {
-  return async function (args) {
-    const {queryName, serviceName, action, settings} = this
-
-    try {
-      return await fn.call(this, args)
+      validate(schema, value, show)
     } catch (error) {
-      // Only set error context properties if they haven't been set yet
-      // This preserves the innermost (original) error context
-      if (!error.wrapped) {
-        error.message = `[${queryName} - ${serviceName}:${action}] ${error.message}`
-
-        error.queryName = queryName
-        error.serviceName = serviceName
-        error.action = action
-        error.args = args
-        error.wrapped = true
-      }
-
-      // Handle with onError if provided
-      if (settings.onError) {
-        try {
-          const result = settings.onError(error)
-          if (settings.ignoreErrors) return result
-
-        } catch (handlerError) {
-          const errorMessage = `[${serviceName}:${action}] onError handler failed: ${handlerError.message}`
-          console.warn(errorMessage)
-          // Error handler failed
-          if (!settings.ignoreErrors) {
-            throw new Error(errorMessage)
-          }
-        }
-      }
-
-      if (settings.ignoreErrors) {
-        return null
-        // return error //should we?
-      }
-
-      // Re-throw original error
+      error.message = `${designation} ${order} validation failed:\n${error.message}`
       throw error
     }
   }
 }
 
-const withValidation = (fn) => {
-  return async function (args) {
-    const {validators, settings} = this
+const withPrecheck = (next) => async (args, inv) => {
+  check(args, 'precheck', ['query', 'service'], inv)
+  return next(args, inv)
+}
 
-    function runValidator(args, order, designation) {
-      const schema = validators[order][designation]
-      if (!schema) return
-      try {
-        validate(schema, args, settings)
-      } catch (error) {
-        error.message = `${designation} ${order} validation failed:\n${error.message}`
-        throw error
-      }
+const withPostcheck = (next) => async (args, inv) => {
+  const result = await next(args, inv)
+  check(result, 'postcheck', ['service', 'query'], inv)
+  return result
+}
+
+const hasChecks = (validators, order) => Object.values(validators?.[order] ?? {}).some(Boolean)
+
+const withRateLimit = (next) => async (args, inv) =>
+  inv.run.rateLimiters[inv.call.parts.service].push(() => next(args, inv))
+
+const withConcurrency = (next) => async (args, inv) =>
+  inv.run.limit(() => next(args, inv))
+
+const withRetry = (next) => async (args, inv) => {
+  const {call} = inv
+  const retry = call.settings.retry
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await next(args, inv)
+    } catch (error) {
+      error.attempts = attempt
+      if (attempt > retry) throw error
+      console.error(`${labelOf(call)} Failed (attempt ${attempt}/${retry + 1}), retrying...`)
     }
-
-    // Run prechecks
-    runValidator(args, 'precheck', 'query')
-    runValidator(args, 'precheck', 'service')
-
-    // Execute the actual service function
-    const result = await fn.call(this, args)
-
-    // Run postchecks
-    runValidator(result, 'postcheck', 'service')
-    runValidator(result, 'postcheck', 'query')
-
-    return result
   }
 }
 
-const applyWrappers = (def, config) => {
-  const {queryName, serviceName, action, args, settings, validators, rateLimit, noTimeout} = def
-  const {cache} = config
-
-  const service = config.services[serviceName]
-
-  // `this` context is preserved so service can call other sibling services
-  const serviceCall = service[action].bind(service)
-
-  // Build wrapper array in canonical order
-  // We use reduceRight on these wrappers, so they get applied last-first,
-  // and when they execute, they execute in the order listed here.
-  const wrappers = []
-
-  // 1. withArgs - resolves @ and $ references (outermost, called first)
-  wrappers.push(withArgs)
-
-  if (settings.debug) {
-    wrappers.push(withDebug)
+const withTimeout = (next) => async (args, inv) => {
+  const {timeout} = inv.call.settings
+  let timeoutId
+  const timedOut = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(`Timed out after ${timeout}ms`)), timeout)
+  })
+  try {
+    return await Promise.race([next(args, inv), timedOut])
+  } finally {
+    clearTimeout(timeoutId)
   }
-
-  wrappers.push(withErrorHandling)
-
-  if (settings.cache) {
-    wrappers.push(withCache)
-  }
-  // Add validation wrapper if validators are defined
-  if (validators) {
-    wrappers.push(withValidation)
-  }
-  if (rateLimit) {
-    wrappers.push(withRateLimit)
-  }
-  if (settings.retry > 0) {
-    wrappers.push(withRetry)
-  }
-  // Apply timeout wrapper unless _noTimeout is set AND no explicit timeout is provided
-  if (settings?.timeout > 0 && (!noTimeout || args.timeout !== undefined)) {
-    wrappers.push(withTimeout)
-  }
-  //console.log('wrappers:', wrappers.map(f => f.name))
-
-  // Apply all wrappers using functional composition
-  const wrapped = wrappers.reduceRight((fn, wrapper) => wrapper(fn), serviceCall)
-
-  // give all wrappers access to the full calling context so they don't have to fish for it
-  // allow the contextStack to be passed at execution time
-  return (queryResults, contextStack) =>
-    wrapped.call({queryName, serviceName, action, settings, validators, queryResults, contextStack, rateLimit, cache}, args)
 }
 
-export default applyWrappers
+// A call that holds other calls (an `each`) doesn't take a concurrency slot,
+// or it would starve the calls it is waiting on.
+const holdsCalls = (call) => Object.keys(call.positions).some(field => field !== 'onError')
+
+// The wrappers a call needs, in canonical order, outermost first.
+function wrappersFor(call, run) {
+  const {settings, validators, noTimeout} = call
+  return [
+    withArgs,
+    settings.debug && withDebug,
+    withErrorHandling,
+    withRunState,
+    settings.cache && withCache,
+    hasChecks(validators, 'precheck') && withPrecheck,
+    run.rateLimiters[call.parts.service] && withRateLimit,
+    run.limit && !holdsCalls(call) && withConcurrency,
+    settings.retry > 0 && withRetry,
+    hasChecks(validators, 'postcheck') && withPostcheck,
+    settings.timeout > 0 && (!noTimeout || call.ownTimeout) && withTimeout
+  ].filter(Boolean)
+}
+
+// The call's action wrapped in its behaviour: a step `(args, invocation) => result`.
+export function wrap(call, run) {
+  const action = (args) => call.action.call(call.service, args)
+  return wrappersFor(call, run).reduceRight((next, wrapper) => wrapper(next), action)
+}

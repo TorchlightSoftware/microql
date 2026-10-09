@@ -1,10 +1,12 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query from '../query.js'
+import query, {nodeRuntime, fileStore} from '../node.js'
 import {existsSync} from 'fs'
 import {rm} from 'fs/promises'
 
 const CACHEDIR = '.cache-test-cache-ratelimit'
+// the node runtime with its Cache kept in a test directory
+const runtime = {...nodeRuntime, cache: fileStore(CACHEDIR)}
 
 describe('Cache and Rate Limit Integration Tests', () => {
   const cleanup = async () => {
@@ -22,7 +24,7 @@ describe('Cache and Rate Limit Integration Tests', () => {
 
     const services = {
       heavy: {
-        async process({input}) {
+        async '/process'({input}) {
           callCount++
           callTimes.push(Date.now() - startTime)
           // Simulate heavy processing
@@ -36,19 +38,19 @@ describe('Cache and Rate Limit Integration Tests', () => {
     const result = await query({
       given: {value: 'cached'},
       services,
+      runtime,
       settings: {
-        cache: {configDir: CACHEDIR},
         rateLimit: {
           heavy: 100 // 100ms between calls
         }
       },
-      queries: {
-        result1: ['heavy:process', {input: '$.given.value', cache: {}}], // First execution
-        result2: ['heavy:process', {input: '$.given.value', cache: {}}], // Cache hit
-        result3: ['heavy:process', {input: 'different', cache: {}}], // Second execution (rate limited)
-        result4: ['heavy:process', {input: '$.given.value', cache: {}}] // Cache hit
+      phases: {
+        result1: ['GET [heavy]/process', {input: '$given.value', cache: {}}], // First execution
+        result2: ['GET [heavy]/process', {input: '$given.value', cache: {}}], // Cache hit
+        result3: ['GET [heavy]/process', {input: 'different', cache: {}}], // Second execution (rate limited)
+        result4: ['GET [heavy]/process', {input: '$given.value', cache: {}}] // Cache hit
       },
-      select: ['result1', 'result2', 'result3', 'result4']
+      select: ['$result1', '$result2', '$result3', '$result4']
     })
 
     // Verify results
@@ -80,7 +82,7 @@ describe('Cache and Rate Limit Integration Tests', () => {
     let callCount = 0
     const services = {
       heavy: {
-        async process({input}) {
+        async '/process'({input}) {
           callCount++
           await new Promise(resolve => setTimeout(resolve, 50)) // Slow operation
           return {processed: input, call: callCount}
@@ -93,11 +95,11 @@ describe('Cache and Rate Limit Integration Tests', () => {
     const result1 = await query({
       given: {value: 'test'},
       services,
-      settings: {cache: {configDir: CACHEDIR}},
-      queries: {
-        result: ['heavy:process', {input: '$.given.value', cache: {}}]
+      runtime,
+      phases: {
+        result: ['GET [heavy]/process', {input: '$given.value', cache: {}}]
       },
-      select: 'result'
+      select: '$result'
     })
     const duration1 = Date.now() - start1
 
@@ -110,11 +112,11 @@ describe('Cache and Rate Limit Integration Tests', () => {
     const result2 = await query({
       given: {value: 'test'},
       services,
-      settings: {cache: {configDir: CACHEDIR}},
-      queries: {
-        result: ['heavy:process', {input: '$.given.value', cache: {}}]
+      runtime,
+      phases: {
+        result: ['GET [heavy]/process', {input: '$given.value', cache: {}}]
       },
-      select: 'result'
+      select: '$result'
     })
     const duration2 = Date.now() - start2
 
@@ -129,7 +131,7 @@ describe('Cache and Rate Limit Integration Tests', () => {
     let callCount = 0
     const services = {
       timed: {
-        async process({input}) {
+        async '/process'({input}) {
           callCount++
           return {processed: input, call: callCount, created: new Date().toISOString()}
         }
@@ -140,16 +142,16 @@ describe('Cache and Rate Limit Integration Tests', () => {
     const result1 = await query({
       given: {value: 'expiring'},
       services,
+      runtime,
       settings: {
-        cache: {configDir: CACHEDIR},
         rateLimit: {
           timed: 100
         }
       },
-      queries: {
-        result: ['timed:process', {input: '$.given.value', cache: {invalidateAfter: '1h'}}]
+      phases: {
+        result: ['GET [timed]/process', {input: '$given.value', cache: {ttl: '1h'}}]
       },
-      select: 'result'
+      select: '$result'
     })
 
     assert.strictEqual(result1.call, 1)
@@ -159,16 +161,16 @@ describe('Cache and Rate Limit Integration Tests', () => {
     const result2 = await query({
       given: {value: 'expiring'},
       services,
+      runtime,
       settings: {
-        cache: {configDir: CACHEDIR},
         rateLimit: {
           timed: 100
         }
       },
-      queries: {
-        result: ['timed:process', {input: '$.given.value', cache: {invalidateAfter: '1h'}}]
+      phases: {
+        result: ['GET [timed]/process', {input: '$given.value', cache: {ttl: '1h'}}]
       },
-      select: 'result'
+      select: '$result'
     })
 
     assert.strictEqual(result2.call, 1) // Same cached result

@@ -1,9 +1,11 @@
 import assert from 'node:assert'
 import {describe, it, beforeEach} from 'node:test'
-import query from '../query.js'
+import query, {nodeRuntime, fileStore} from '../node.js'
 import {rm} from 'fs/promises'
 
 const CACHEDIR = '.cache-test-cache-error-handling'
+// the node runtime with its Cache kept in a test directory
+const runtime = {...nodeRuntime, cache: fileStore(CACHEDIR)}
 
 describe('Cache Error Handling Tests', () => {
   // Clean up cache before each test
@@ -21,7 +23,7 @@ describe('Cache Error Handling Tests', () => {
   // Reusable services
   const unreliableService = {
     unreliable: {
-      async getData({value}) {
+      async '/getData'({value}) {
         unreliableService.callCount++
         if (unreliableService.callCount === 1) {
           throw new Error('Service failed')
@@ -34,13 +36,13 @@ describe('Cache Error Handling Tests', () => {
 
   const failingServices = {
     failing: {
-      async process() {
+      async '/process'() {
         failingServices.serviceCallCount++
         throw new Error('Always fails')
       }
     },
     errorHandler: {
-      async handleError() {
+      async '/handleError'() {
         failingServices.errorHandlerCallCount++
         return {errorHandled: true, handlerCall: failingServices.errorHandlerCallCount}
       }
@@ -51,7 +53,7 @@ describe('Cache Error Handling Tests', () => {
 
   const conditionalServices = {
     conditional: {
-      async process({shouldFail}) {
+      async '/process'({shouldFail}) {
         conditionalServices.serviceCallCount++
         if (shouldFail) {
           throw new Error('Conditional failure')
@@ -60,7 +62,7 @@ describe('Cache Error Handling Tests', () => {
       }
     },
     errorHandler: {
-      async handleError() {
+      async '/handleError'() {
         conditionalServices.errorHandlerCallCount++
         return {errorResult: true, call: conditionalServices.errorHandlerCallCount}
       }
@@ -71,7 +73,7 @@ describe('Cache Error Handling Tests', () => {
 
   const testServices = {
     test: {
-      async getData({value}) {
+      async '/getData'({value}) {
         testServices.serviceCallCount++
         if (value === 'fail') {
           throw new Error('Intentional failure')
@@ -80,14 +82,14 @@ describe('Cache Error Handling Tests', () => {
       }
     },
     errorHandler: {
-      async handle() {return {error: 'handled'}}
+      async '/handle'() {return {error: 'handled'}}
     }
   }
   testServices.serviceCallCount = 0
 
   // Base query template
   const baseQuery = {
-    settings: {cache: {configDir: CACHEDIR}}
+    runtime
   }
 
   describe('Error caching prevention', () => {
@@ -96,10 +98,10 @@ describe('Cache Error Handling Tests', () => {
         ...baseQuery,
         given: {input: 'test'},
         services: unreliableService,
-        queries: {
-          result: ['unreliable:getData', {value: '$.given.input', cache: true}]
+        phases: {
+          result: ['GET [unreliable]/getData', {value: '$given.input', cache: true}]
         },
-        select: 'result'
+        select: '$result'
       }
 
       // First call should fail
@@ -120,14 +122,14 @@ describe('Cache Error Handling Tests', () => {
       const q = {
         ...baseQuery,
         services: failingServices,
-        queries: {
-          result: ['failing:process', {
-            onError: ['errorHandler:handleError'],
+        phases: {
+          result: ['GET [failing]/process', {
+            onError: ['GET [errorHandler]/handleError'],
             ignoreErrors: true,
             cache: true
           }]
         },
-        select: 'result'
+        select: '$result'
       }
 
       // First call with error handler
@@ -157,12 +159,12 @@ describe('Cache Error Handling Tests', () => {
     it('should not cache error handler results between identical calls', async () => {
       const timestampServices = {
         failingService: {
-          async process() {
+          async '/process'() {
             throw new Error('Always fails')
           }
         },
         errorHandler: {
-          async handle() {
+          async '/handle'() {
             return {handled: true, timestamp: Date.now()}
           }
         }
@@ -171,14 +173,14 @@ describe('Cache Error Handling Tests', () => {
       const q = {
         ...baseQuery,
         services: timestampServices,
-        queries: {
-          result: ['failingService:process', {
-            onError: ['errorHandler:handle'],
+        phases: {
+          result: ['GET [failingService]/process', {
+            onError: ['GET [errorHandler]/handle'],
             ignoreErrors: true,
             cache: true
           }]
         },
-        select: 'result'
+        select: '$result'
       }
 
       // First call
@@ -201,7 +203,7 @@ describe('Cache Error Handling Tests', () => {
     it('should return correct source type and not mix error handler with service results', async () => {
       const sourceTrackingServices = {
         conditionalService: {
-          async getData({shouldFail, id}) {
+          async '/getData'({shouldFail, id}) {
             if (shouldFail) {
               throw new Error('Intentional failure')
             }
@@ -209,7 +211,7 @@ describe('Cache Error Handling Tests', () => {
           }
         },
         errorService: {
-          async handleError() {
+          async '/handleError'() {
             return {success: false, source: 'error-handler'}
           }
         }
@@ -218,16 +220,16 @@ describe('Cache Error Handling Tests', () => {
       const testQuery = {
         ...baseQuery,
         services: sourceTrackingServices,
-        queries: {
-          result: ['conditionalService:getData', {
-            shouldFail: '$.given.shouldFail',
-            id: '$.given.id',
-            onError: ['errorService:handleError'],
+        phases: {
+          result: ['GET [conditionalService]/getData', {
+            shouldFail: '$given.shouldFail',
+            id: '$given.id',
+            onError: ['GET [errorService]/handleError'],
             ignoreErrors: true,
             cache: true
           }]
         },
-        select: 'result'
+        select: '$result'
       }
 
       // Call 1: Fail case - should get error handler result
@@ -254,15 +256,15 @@ describe('Cache Error Handling Tests', () => {
         ...baseQuery,
         given: {shouldFail: true},
         services: conditionalServices,
-        queries: {
-          result: ['conditional:process', {
-            shouldFail: '$.given.shouldFail',
-            onError: ['errorHandler:handleError'],
+        phases: {
+          result: ['GET [conditional]/process', {
+            shouldFail: '$given.shouldFail',
+            onError: ['GET [errorHandler]/handleError'],
             ignoreErrors: true,
             cache: true
           }]
         },
-        select: 'result'
+        select: '$result'
       }
 
       // First call fails and uses error handler
@@ -284,7 +286,7 @@ describe('Cache Error Handling Tests', () => {
       let serviceCallCount = 0
       const services = {
         test: {
-          async getData({value}) {
+          async '/getData'({value}) {
             serviceCallCount++
             if (value === 'fail') {
               throw new Error('Intentional failure')
@@ -293,7 +295,7 @@ describe('Cache Error Handling Tests', () => {
           }
         },
         errorHandler: {
-          async handle() {return {error: 'handled'}}
+          async '/handle'() {return {error: 'handled'}}
         }
       }
 
@@ -301,15 +303,15 @@ describe('Cache Error Handling Tests', () => {
         ...baseQuery,
         given: {input: 'fail'},
         services,
-        queries: {
-          result: ['test:getData', {
-            value: '$.given.input',
-            onError: ['errorHandler:handle'],
+        phases: {
+          result: ['GET [test]/getData', {
+            value: '$given.input',
+            onError: ['GET [errorHandler]/handle'],
             ignoreErrors: true,
             cache: true
           }]
         },
-        select: 'result'
+        select: '$result'
       }
 
       // Call with failing input first

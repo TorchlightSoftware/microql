@@ -29,8 +29,8 @@ Basically query validations "wrap" service validations which "wrap" the service 
 // Query with service validation
 const config = {
   services: { userService },
-  queries: {
-    newUser: ['userService:createUser', {
+  phases: {
+    newUser: ['GET [userService]/createUser', {
       userData: {
         name: 'John Doe',
         email: 'john@example.com',
@@ -49,13 +49,13 @@ const config = {
 
 // Service definition
 const userService = {
-  async createUser(args) {
+  async '/createUser'(args) {
     return { id: 123, ...args.userData }
   }
 }
 
 // Service-level validation - precheck and postcheck
-userService.createUser._validators = {
+userService['/createUser']._validators = {
   precheck: {
     userData: {
       name: ['string'],
@@ -158,7 +158,7 @@ import {z} from 'zod'
 const CustomSchema = z.string().min(8).regex(/^[A-Z]/)
 
 // Usage in service validators
-userService.create._validators = {
+userService['/create']._validators = {
   precheck: {
     username: CustomSchema
   }
@@ -173,7 +173,7 @@ Use 'any' for service arguments that accept other services (like `util.map`, `ut
 
 ```javascript
 // Example from util.js
-util.map._validators = {
+util['/each']._validators = {
   precheck: {
     on: ['array'],
     service: ['any'] // Service arguments are compiled by MicroQL - don't need special validation
@@ -202,7 +202,7 @@ Examples are mixed from Query and Service validations.  The format is the same, 
 
 ```javascript
 // Service definition
-emailService.send._validators = {
+emailService['/send']._validators = {
   precheck: {
     to: ['string', 'email'],
     subject: ['string', {min: 1, max: 200}],
@@ -215,7 +215,7 @@ emailService.send._validators = {
 
 ```javascript
 // Service definition
-calculator.divide._validators = {
+calculator['/divide']._validators = {
   precheck: {
     numerator: ['number'],
     denominator: ['number', {min: 0.0001}] // Prevent division by zero
@@ -228,7 +228,7 @@ calculator.divide._validators = {
 
 ```javascript
 // Service definition
-dataProcessor.batch._validators = {
+dataProcessor['/batch']._validators = {
   precheck: {
     items: ['array', ['string'], {min: 1, max: 100}],
     options: {
@@ -243,7 +243,7 @@ dataProcessor.batch._validators = {
 
 ```javascript
 // Service definition
-orderService.create._validators = {
+orderService['/create']._validators = {
   precheck: {
     order: {
       customer: {
@@ -270,7 +270,7 @@ orderService.create._validators = {
 
 ```javascript
 // Service definition
-profileService.update._validators = {
+profileService['/update']._validators = {
   precheck: {
     userId: ['string', 'uuid'],
     updates: {
@@ -288,13 +288,13 @@ profileService.update._validators = {
 ```javascript
 const config = {
   services: { transformer },
-  queries: {
+  phases: {
     pipeline: [
-      ['transformer:step1', {
+      ['GET [transformer]/step1', {
         value: 10,
         precheck: { value: ['number', {min: 0, max: 100}] }
       }],
-      ['transformer:step2', {
+      ['GET [transformer]/step2', {
         value: '@',
         precheck: { value: ['number', {max: 200}] }
       }]
@@ -307,7 +307,7 @@ const config = {
 
 ```javascript
 // Service definition
-userService.register._validators = {
+userService['/register']._validators = {
   precheck: {
     username: ['string', {regex: /^[a-zA-Z0-9_]{3,20}$/}],
     password: ['string', {min: 8, regex: /^(?=.*[A-Za-z])(?=.*\d)/}],
@@ -320,7 +320,7 @@ userService.register._validators = {
 
 ```javascript
 // Service definition
-settingsService.update._validators = {
+settingsService['/update']._validators = {
   precheck: {
     theme: ['enum', ['light', 'dark', 'auto']],
     language: ['enum', ['en', 'es', 'fr', 'de']],
@@ -337,7 +337,7 @@ settingsService.update._validators = {
 
 ```javascript
 // Service definition
-eventService.schedule._validators = {
+eventService['/schedule']._validators = {
   precheck: {
     title: ['string'],
     startDate: ['date', {min: new Date()}], // Must be in the future
