@@ -158,7 +158,7 @@ export async function execute(compiled, {runState = memoryStore(), trigger, targ
     compiled,
     runtime,
     runState,
-    forms: await formsOf(compiled, {trigger}),
+    forms: formsOf(compiled, {trigger}),
     nodes: {given: compiled.given, trigger},
     inflight: new Map(),
     pending: new Set(),

@@ -61,7 +61,7 @@ describe('Run State', () => {
     const query1 = listingsQuery(counting(new Set([2])))
     await assert.rejects(query(query1, {runState}))
 
-    const {calls} = await plan(query1)
+    const {calls} = plan(query1)
     const inner = calls.find(call => call.address === '$fetched.@1a1')
     const entries = await runState.list(inner.formHash)
 
@@ -94,7 +94,7 @@ describe('Run State', () => {
     events.push('reported')
     assert.deepEqual(events, ['slow finished', 'tearDown', 'reported'])
 
-    const {calls} = await plan(config)
+    const {calls} = plan(config)
     const [entry] = await runState.list(calls.find(c => c.address === '$b.@1').formHash)
     assert.equal(entry.status, 'done')
   })
@@ -131,7 +131,7 @@ describe('Cache', () => {
 
   // Ages a call's only cache entry by some days.
   const age = async (cache, config, days) => {
-    const {calls: [call]} = await plan(config)
+    const {calls: [call]} = plan(config)
     const [entry] = await cache.list(call.formHash)
     await cache.set(call.formHash, entry.input, {...entry, created: new Date(Date.now() - days * 86400000).toISOString()})
     return entry
@@ -163,7 +163,7 @@ describe('Cache', () => {
     const config = {...cachedQuery(counting(), 1, {ttl: '2h'}), runtime: {...defaultRuntime, cache: store}}
     await query(config)
 
-    const {calls: [call]} = await plan(config)
+    const {calls: [call]} = plan(config)
     const [entry] = await store.list(call.formHash)
     assert.equal(Date.parse(entry.expires) - Date.parse(entry.created), 2 * 3600000)
   })
@@ -175,7 +175,7 @@ describe('Cache', () => {
     const config = {...cachedQuery(service, 1, {ttl: '1h'}), runtime}
 
     await query(config)
-    const {calls: [call]} = await plan(config)
+    const {calls: [call]} = plan(config)
     const [entry] = await cache.list(call.formHash)
     await cache.set(call.formHash, entry.input, {...entry, created: new Date(Date.now() - 2 * 3600000).toISOString()})
 

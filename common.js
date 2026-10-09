@@ -13,4 +13,12 @@ const getServiceColorName = (serviceName) => {
   return serviceColors.get(serviceName)
 }
 
-export {RESERVE_ARGS, COLOR_NAMES, getServiceColorName}
+// A plain object, as written in a Query or parsed from JSON — not an instance
+// of a class. Cheaper than lodash's, which stringifies the constructor.
+const isPlainObject = (value) => {
+  if (typeof value !== 'object' || value === null) return false
+  const proto = Object.getPrototypeOf(value)
+  return proto === Object.prototype || proto === null
+}
+
+export {RESERVE_ARGS, COLOR_NAMES, getServiceColorName, isPlainObject}

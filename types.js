@@ -12,6 +12,7 @@
  */
 
 import _ from 'lodash'
+import {isPlainObject} from './common.js'
 
 export const mixed = {type: 'mixed'}
 
@@ -45,7 +46,7 @@ export function typeOfValue(value) {
   if (typeof value === 'boolean') return {type: 'boolean'}
   if (value instanceof Date) return {type: 'datetime'}
   if (Array.isArray(value)) return listOf(value.map(typeOfValue))
-  if (_.isPlainObject(value)) return {type: 'object', fields: _.mapValues(value, typeOfValue)}
+  if (isPlainObject(value)) return {type: 'object', fields: _.mapValues(value, typeOfValue)}
   return mixed
 }
 

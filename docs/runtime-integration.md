@@ -146,7 +146,7 @@ A form holds only its own call — its key, its arguments, the settings that cha
 - `@`, `@name` and `@err` count as the form of what flows in, which inside an iteration is "the input of the call that owns it";
 - operational settings (`timeout`, `retry`, `debug`, `cache`) don't count.
 
-Hashes are SHA-256 over canonical JSON, through Web Crypto. Prior art: Nix distinguishes the hash of what a build step *is* (input-addressed, our form hash) from the hash of what it *produced*; Clojure treats code as data with value equality, which is what a form is.
+Hashes are SHA-256 over canonical JSON, computed synchronously in pure JS (`@noble/hashes`) so they cost the same on every platform; `plan()` is therefore synchronous. Prior art: Nix distinguishes the hash of what a build step *is* (input-addressed, our form hash) from the hash of what it *produced*; Clojure treats code as data with value equality, which is what a form is.
 
 ### Types
 

@@ -244,8 +244,8 @@ describe('Cache Tests', () => {
       assert.strictEqual(result2.result2.call, 2) // Same as before
       assert.strictEqual(callCount, 2) // No new calls
 
-      // Should be fast (no rate limiting for cached results)
-      assert(duration < 50, 'Cached results should return quickly')
+      // cached results skip the rate limiter: a second limited call would wait 100ms
+      assert(duration < 100, `Cached results took ${duration}ms, should skip the 100ms rate limit`)
     })
 
     it('should work with validation', async () => {

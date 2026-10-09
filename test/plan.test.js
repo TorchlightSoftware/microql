@@ -38,8 +38,8 @@ const query = {
 }
 
 describe('plan()', () => {
-  it('returns phases, dependencies, columns and root nodes', async () => {
-    const planned = await plan(query, {trigger: {at: 'noon'}})
+  it('returns phases, dependencies, columns and root nodes', () => {
+    const planned = plan(query, {trigger: {at: 'noon'}})
     assert.deepEqual(planned.columns, [['categories'], ['listings']])
     assert.deepEqual(planned.phases.map(p => [p.name, p.dependencies]), [['categories', []], ['listings', ['categories']]])
     assert.deepEqual(planned.roots.map(r => r.name), ['given', 'trigger'])
@@ -48,8 +48,8 @@ describe('plan()', () => {
     assert.match(planned.query, /^[0-9a-f]{64}$/)
   })
 
-  it('assigns every call an address, a path and a form hash', async () => {
-    const {calls} = await plan(query)
+  it('assigns every call an address, a path and a form hash', () => {
+    const {calls} = plan(query)
     const addresses = calls.map(call => call.address).sort()
     assert.deepEqual(addresses, [
       '$categories.@1',
@@ -65,12 +65,12 @@ describe('plan()', () => {
     for (const call of calls) assert.match(call.formHash, /^[0-9a-f]{64}$/)
   })
 
-  it('shows identical calls as two addresses with one form hash', async () => {
-    const {calls} = await plan(query)
+  it('shows identical calls as two addresses with one form hash', () => {
+    const {calls} = plan(query)
     const hashOf = (address) => calls.find(c => c.address === address).formHash
     assert.equal(hashOf('$categories.@1') === hashOf('$listings.@1a1'), false, '@type makes them differ')
 
-    const twin = await plan({...query, phases: {a: query.phases.categories, b: query.phases.categories}})
+    const twin = plan({...query, phases: {a: query.phases.categories, b: query.phases.categories}})
     assert.equal(twin.calls[0].formHash, twin.calls[1].formHash)
   })
 })
@@ -94,53 +94,53 @@ describe('Service Call Addresses ↔ JSON paths', () => {
   ]
 
   for (const [address, path] of cases) {
-    it(`${address} ↔ ${path.join('/')}`, async () => {
-      const planned = await plan(query)
+    it(`${address} ↔ ${path.join('/')}`, () => {
+      const planned = plan(query)
       assert.deepEqual(addressToPath(planned, address), path)
       assert.equal(pathToAddress(planned, path), address)
     })
   }
 
-  it('finds nothing outside the Query\'s calls', async () => {
-    const planned = await plan(query)
+  it('finds nothing outside the Query\'s calls', () => {
+    const planned = plan(query)
     assert.equal(addressToPath(planned, '$nope.@1'), undefined)
     assert.equal(pathToAddress(planned, ['given', 'baseUrl']), undefined)
   })
 })
 
 describe('type inference', () => {
-  const typesOf = async (q, address) => (await plan(q)).calls.find(c => c.address === address).types
+  const typesOf = (q, address) => plan(q).calls.find(c => c.address === address).types
 
-  it('gives each argument its expected and actual type', async () => {
-    const types = await typesOf(query, '$categories.@1')
+  it('gives each argument its expected and actual type', () => {
+    const types = typesOf(query, '$categories.@1')
     assert.deepEqual(types.args.url, {expected: {type: 'text'}, actual: {type: 'text'}})
     assert.deepEqual(types.returns.fields.url, {type: 'text'})
   })
 
-  it('types @ as the item of the iterated list, and paths walk into types', async () => {
-    const types = await typesOf(query, '$listings.@1a2c1')
+  it('types @ as the item of the iterated list, and paths walk into types', () => {
+    const types = typesOf(query, '$listings.@1a2c1')
     assert.deepEqual(types.args.id.actual, {type: 'number'})
   })
 
-  it('types a chain step\'s @ as the previous call\'s return', async () => {
-    const types = await typesOf(query, '$listings.@1a2')
+  it('types a chain step\'s @ as the previous call\'s return', () => {
+    const types = typesOf(query, '$listings.@1a2')
     assert.equal(types.args.on.actual.type, 'object')
     assert.deepEqual(types.args.on.actual.fields.url, {type: 'text'})
   })
 
-  it('types onError\'s @ as an error', async () => {
-    const types = await typesOf(query, '$listings.@1a2b1')
+  it('types onError\'s @ as an error', () => {
+    const types = typesOf(query, '$listings.@1a2b1')
     assert.deepEqual(types.args.error.actual, {type: 'text'})
   })
 
-  it('warns on a mismatch without failing the plan', async () => {
+  it('warns on a mismatch without failing the plan', () => {
     const mismatched = {...query, phases: {a: ['GET [branch]/extract', {url: '$given.ids'}]}}
-    const {warnings} = await plan(mismatched)
+    const {warnings} = plan(mismatched)
     assert.deepEqual(warnings, [{address: '$a.@1.url', message: '$a.@1.url expects text but receives list of number'}])
   })
 
-  it('checks a service position against the return type its argument needs', async () => {
-    const {warnings} = await plan({
+  it('checks a service position against the return type its argument needs', () => {
+    const {warnings} = plan({
       given: {xs: ['a']},
       services: {branch},
       phases: {kept: ['$given.xs', 'GET [util]/filter', {service: ['GET [branch]/extract', {url: '@'}]}]}
@@ -148,8 +148,8 @@ describe('type inference', () => {
     assert.deepEqual(warnings, [{address: '$kept.@1.service', message: '$kept.@1.service expects boolean but receives object'}])
   })
 
-  it('is mixed where nothing is declared', async () => {
-    const types = await typesOf(query, '$listings.@1a2')
+  it('is mixed where nothing is declared', () => {
+    const types = typesOf(query, '$listings.@1a2')
     assert.deepEqual(types.returns, {type: 'mixed'})
   })
 })

@@ -18,6 +18,7 @@
  */
 
 import _ from 'lodash'
+import {isPlainObject} from './common.js'
 
 const PATH = '((?:\\.[^.[\\]]+|\\[\\d+\\])*)'
 const REFERENCE = new RegExp(`^([$@])([A-Za-z_]\\w*)?${PATH}$`)
@@ -34,6 +35,16 @@ const ADDRESS_SEGMENT = /^@\d/
 
 export const isReference = (value) =>
   typeof value === 'string' && (value.startsWith('$') || value.startsWith('@'))
+
+// Arguments with each reference replaced by what `replace` makes of its text:
+// the walk shared by resolution (execute) and forms. Arrays and plain objects
+// are walked; every other value is kept as it is.
+export const mapReferences = (value, replace) => {
+  if (isReference(value)) return replace(value)
+  if (Array.isArray(value)) return value.map(v => mapReferences(v, replace))
+  if (isPlainObject(value)) return _.mapValues(value, v => mapReferences(v, replace))
+  return value
+}
 
 // The reason a reference-shaped string is not a valid reference, or undefined.
 const malformation = (text, match) => {

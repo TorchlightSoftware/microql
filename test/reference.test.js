@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import {parseReference, isReference, resolveReference} from '../reference.js'
+import {parseReference, isReference, resolveReference, mapReferences} from '../reference.js'
+import {isPlainObject} from '../common.js'
 
 describe('Reference grammar', () => {
   // [string, parsed reference]
@@ -81,6 +82,53 @@ describe('Reference resolution', () => {
   for (const [text, expected] of cases) {
     it(`resolves ${text}`, () => {
       assert.deepEqual(resolveReference(parseReference(text), scope, nodes), expected)
+    })
+  }
+})
+
+describe('mapReferences', () => {
+  // [value, expected, with each reference replaced by its text in brackets]
+  const cases = [
+    ['$given.a', '<$given.a>'],
+    ['literal', 'literal'],
+    [{url: '@', nested: {list: ['$a', 2, null]}}, {url: '<@>', nested: {list: ['<$a>', 2, null]}}],
+    [[{id: '@item.id'}], [{id: '<@item.id>'}]]
+  ]
+
+  for (const [value, expected] of cases) {
+    it(`maps ${JSON.stringify(value)}`, () => {
+      assert.deepEqual(mapReferences(value, text => `<${text}>`), expected)
+    })
+  }
+
+  it('leaves instances alone, references inside them included', () => {
+    const date = new Date(0)
+    const instance = new (class Holder { ref = '$a' })()
+    const mapped = mapReferences({date, instance}, () => 'replaced')
+    assert.equal(mapped.date, date)
+    assert.equal(mapped.instance, instance)
+  })
+})
+
+describe('isPlainObject', () => {
+  // [value, is plain]
+  const cases = [
+    [{}, true],
+    [{a: 1}, true],
+    [Object.create(null), true],
+    [JSON.parse('{"a":1}'), true],
+    [[], false],
+    [null, false],
+    ['text', false],
+    [new Date(0), false],
+    [new Map(), false],
+    [new (class Holder {})(), false],
+    [Object.create({inherited: true}), false]
+  ]
+
+  for (const [value, expected] of cases) {
+    it(`${expected ? 'accepts' : 'rejects'} ${Object.prototype.toString.call(value)} ${JSON.stringify(value) ?? ''}`, () => {
+      assert.equal(isPlainObject(value), expected)
     })
   }
 })

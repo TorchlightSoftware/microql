@@ -14,8 +14,11 @@
  */
 
 import _ from 'lodash'
-import {isReference, parseReference, rootScope, enterPosition, scopedRoot} from './reference.js'
+import {sha256} from '@noble/hashes/sha2.js'
+import {bytesToHex, utf8ToBytes} from '@noble/hashes/utils.js'
+import {mapReferences, parseReference, rootScope, enterPosition, scopedRoot} from './reference.js'
 import {columnsOf} from './graph.js'
+import {isPlainObject} from './common.js'
 
 // Settings that change how a call runs, never what it returns.
 const OPERATIONAL_SETTINGS = ['timeout', 'retry', 'debug', 'cache']
@@ -31,7 +34,7 @@ function canonicalValue(value) {
   if (value instanceof Error) return canonicalValue({...value, name: value.name, message: value.message})
   if (value instanceof Date) return value.toISOString()
   if (Array.isArray(value)) return value.map(v => v === undefined || typeof v === 'function' ? null : canonicalValue(v))
-  if (_.isPlainObject(value)) {
+  if (isPlainObject(value)) {
     return Object.fromEntries(Object.keys(value).sort()
       .filter(k => value[k] !== undefined && typeof value[k] !== 'function')
       .map(k => [k, canonicalValue(value[k])]))
@@ -41,12 +44,9 @@ function canonicalValue(value) {
   return value
 }
 
-// SHA-256 of the value's canonical JSON, as hex. Web Crypto exists on every runtime.
-export async function hashOf(value) {
-  const bytes = new TextEncoder().encode(canonical(value))
-  const digest = await crypto.subtle.digest('SHA-256', bytes)
-  return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('')
-}
+// SHA-256 of the value's canonical JSON, as hex. Synchronous and pure JS, so it
+// runs on every platform without Web Crypto's per-digest promise and thread hop.
+export const hashOf = (value) => bytesToHex(sha256(utf8ToBytes(canonical(value))))
 
 // A reference's form: what it points to, as a hash or (for root nodes) a value.
 function referenceForm(text, scope, env) {
@@ -58,19 +58,14 @@ function referenceForm(text, scope, env) {
 }
 
 // Arguments with every reference replaced by its form.
-const argumentsForm = (value, scope, env) => {
-  if (isReference(value)) return referenceForm(value, scope, env)
-  if (Array.isArray(value)) return value.map(v => argumentsForm(v, scope, env))
-  if (_.isPlainObject(value)) return _.mapValues(value, v => argumentsForm(v, scope, env))
-  return value
-}
+const argumentsForm = (value, scope, env) => mapReferences(value, text => referenceForm(text, scope, env))
 
 // Forms the steps of a phase or position in order; returns each step's hash.
-async function stepsForm(steps, scope, env) {
+function stepsForm(steps, scope, env) {
   const hashes = []
   let flow = scope.flow
   for (const step of steps) {
-    flow = await callForm(step, {...scope, flow}, env)
+    flow = callForm(step, {...scope, flow}, env)
     hashes.push(flow)
   }
   return hashes
@@ -79,7 +74,7 @@ async function stepsForm(steps, scope, env) {
 // A call's form and hash, recorded by address. The data part (key and
 // arguments) is hashed first: a position's input is "the input of this call",
 // which the inner forms name by that hash, so a form never contains itself.
-async function callForm(call, scope, env) {
+function callForm(call, scope, env) {
   const data = {
     key: call.key,
     args: argumentsForm({...call.args, ...call.settingsArgs}, scope, env),
@@ -87,16 +82,16 @@ async function callForm(call, scope, env) {
     checks: call.checks
   }
   // only a call with positions needs its data hashed apart from its form
-  const input = Object.keys(call.positions).length ? await hashOf(data) : undefined
+  const input = Object.keys(call.positions).length ? hashOf(data) : undefined
 
   const positions = {}
   for (const [field, position] of Object.entries(call.positions)) {
     const item = field === 'onError' ? {errorOf: input} : {itemOf: input}
-    positions[field] = await stepsForm(position.steps, enterPosition(position, scope, item), env)
+    positions[field] = stepsForm(position.steps, enterPosition(position, scope, item), env)
   }
 
   const form = {...data, positions}
-  const hash = await hashOf(form)
+  const hash = hashOf(form)
   env.calls.set(call.address, {form, hash})
   return hash
 }
@@ -105,21 +100,18 @@ async function callForm(call, scope, env) {
  * The forms of every call in a compiled Query, against one trigger payload.
  * @returns {Object} {calls: Map(address → {form, hash}), phases: {name → hash}, query: hash}
  */
-export async function formsOf(compiled, {trigger} = {}) {
+export function formsOf(compiled, {trigger} = {}) {
   const env = {nodes: {given: compiled.given, trigger}, phases: {}, calls: new Map()}
 
-  // a column's phases depend only on earlier columns, so they are formed together
-  for (const column of columnsOf(compiled.phases)) {
-    await Promise.all(column.map(async (name) => {
-      const hashes = await stepsForm(compiled.phases[name].steps, rootScope, env)
-      env.phases[name] = hashes.at(-1)
-    }))
+  // in column order, so a phase's upstream form hashes are known before it
+  for (const name of columnsOf(compiled.phases).flat()) {
+    env.phases[name] = stepsForm(compiled.phases[name].steps, rootScope, env).at(-1)
   }
 
   const onError = compiled.settings.onError
   if (onError) {
-    await stepsForm(onError.steps, enterPosition(onError, rootScope, {errorOf: 'run'}), env)
+    stepsForm(onError.steps, enterPosition(onError, rootScope, {errorOf: 'run'}), env)
   }
 
-  return {calls: env.calls, phases: env.phases, query: await hashOf(env.phases)}
+  return {calls: env.calls, phases: env.phases, query: hashOf(env.phases)}
 }

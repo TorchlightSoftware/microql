@@ -15,6 +15,7 @@ import {columnsOf} from './graph.js'
 import {formsOf} from './forms.js'
 import {isReference, parseReference, rootScope, enterPosition, scopedRoot} from './reference.js'
 import {mixed, typeOfSchema, typeOfValue, typeAtPath, listOf, satisfies} from './types.js'
+import {isPlainObject} from './common.js'
 
 const ERROR_TYPE = {type: 'object', fields: {message: {type: 'text'}, address: {type: 'text'}, key: {type: 'text'}}}
 
@@ -26,7 +27,7 @@ function typeOfArgument(value, scope, env) {
     return typeAtPath(root ?? mixed, ref.path)
   }
   if (Array.isArray(value)) return listOf(value.map(v => typeOfArgument(v, scope, env)))
-  if (_.isPlainObject(value)) return {type: 'object', fields: _.mapValues(value, v => typeOfArgument(v, scope, env))}
+  if (isPlainObject(value)) return {type: 'object', fields: _.mapValues(value, v => typeOfArgument(v, scope, env))}
   return typeOfValue(value)
 }
 
@@ -89,10 +90,10 @@ function inferTypes(compiled, columns, trigger) {
  * @param {Object} query - the Query, as given to query()
  * @param {Object} options - {trigger}: the trigger payload, when known
  */
-export async function plan(query, {trigger} = {}) {
+export function plan(query, {trigger} = {}) {
   const compiled = compile(query)
   const columns = columnsOf(compiled.phases)
-  const forms = await formsOf(compiled, {trigger})
+  const forms = formsOf(compiled, {trigger})
   const types = inferTypes(compiled, columns, trigger)
 
   const roots = [

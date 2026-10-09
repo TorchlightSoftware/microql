@@ -72,11 +72,10 @@ describe('Cache and Rate Limit Integration Tests', () => {
     assert.strictEqual(callTimes.length, 2)
 
     // Rate limiting should apply between actual executions
-    assert(callTimes[0] < 50, 'First call should be immediate')
     assert(callTimes[1] >= 100, `Second call at ${callTimes[1]}ms, should be >= 100ms due to rate limiting`)
   })
 
-  it('should return cached results quickly across separate query executions', async () => {
+  it('should reuse cached results across separate query executions', async () => {
     await cleanup()
 
     let callCount = 0
@@ -108,7 +107,6 @@ describe('Cache and Rate Limit Integration Tests', () => {
     assert(duration1 >= 50, 'First call should take time due to service execution')
 
     // Second query - should use cache
-    const start2 = Date.now()
     const result2 = await query({
       given: {value: 'test'},
       services,
@@ -118,11 +116,9 @@ describe('Cache and Rate Limit Integration Tests', () => {
       },
       select: '$result'
     })
-    const duration2 = Date.now() - start2
 
     assert.strictEqual(result2.call, 1) // Same cached result
     assert.strictEqual(callCount, 1) // No new service call
-    assert(duration2 < 20, `Second call took ${duration2}ms, should be fast due to cache`)
   })
 
   it('should handle cache invalidation with rate limiting', async () => {

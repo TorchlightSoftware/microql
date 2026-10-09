@@ -1,8 +1,10 @@
 /**
  * @fileoverview Wrappers — the behaviour around every service call.
  *
- * Each wrapper takes the next step and returns a step of the same shape,
- * `(args, invocation) => result`, where an invocation is {call, scope, run}.
+ * Each wrapper takes the next step, plus the call and Run it is built for,
+ * and returns a step of the same shape, `(args, invocation) => result`, where
+ * an invocation is {call, scope, run}. A pipeline is built once per call per
+ * Run, so what depends only on the call is worked out then, not per execution.
  * They are applied in canonical order, outermost first:
  *
  *   arguments → debug → error handling → run state → cache → precheck
@@ -15,7 +17,7 @@
  */
 
 import _ from 'lodash'
-import {isReference, parseReference, resolveReference} from './reference.js'
+import {mapReferences, parseReference, resolveReference} from './reference.js'
 import {getServiceColorName} from './common.js'
 import {hashOf} from './forms.js'
 import {validate} from './validation.js'
@@ -26,26 +28,25 @@ const labelOf = (call) => `[${call.address} - ${call.key}]`
 
 // Arguments with every reference replaced by its value; a reference that
 // names nothing resolves to undefined.
-export const resolveArgs = (value, scope, nodes) => {
-  if (isReference(value)) return resolveReference(parseReference(value), scope, nodes)
-  if (Array.isArray(value)) return value.map(v => resolveArgs(v, scope, nodes))
-  if (_.isPlainObject(value)) return _.mapValues(value, v => resolveArgs(v, scope, nodes))
-  return value
-}
+export const resolveArgs = (value, scope, nodes) =>
+  mapReferences(value, text => resolveReference(parseReference(text), scope, nodes))
 
 // Resolves the call's data, injects settings-typed arguments, and hands each
 // service-typed argument over as a function of its input.
-const withArgs = (next) => async (_args, inv) => {
-  const {call, scope, run} = inv
-  const data = resolveArgs(call.args, scope, run.nodes)
-  const settingsArgs = _.mapValues(resolveArgs(call.settingsArgs, scope, run.nodes),
-    value => _.defaults({}, value, call.settings))
-  const services = _.mapValues(_.omit(call.positions, ['onError']),
-    position => (input) => run.runPosition(position, scope, input))
+const withArgs = (next, call) => {
+  const positions = servicePositions(call)
+  return async (_args, inv) => {
+    const {scope, run} = inv
+    const data = resolveArgs(call.args, scope, run.nodes)
+    const settingsArgs = _.mapValues(resolveArgs(call.settingsArgs, scope, run.nodes),
+      value => _.defaults({}, value, call.settings))
+    const services = Object.fromEntries(positions.map(([field, position]) =>
+      [field, (input) => run.runPosition(position, scope, input)]))
 
-  inv.inputs = {...data, ...settingsArgs}
-  inv.input = await hashOf(inv.inputs)
-  return next({...inv.inputs, ...services}, inv)
+    inv.inputs = {...data, ...settingsArgs}
+    inv.input = hashOf(inv.inputs)
+    return next({...inv.inputs, ...services}, inv)
+  }
 }
 
 const withDebug = (next) => async (args, inv) => {
@@ -106,17 +107,19 @@ const withErrorHandling = (next) => async (args, inv) => {
 
 // Reuses a result the Run State already holds for this form and input —
 // unless the Run reruns this call — and runs identical calls in flight once.
-const withRunState = (next) => async (args, inv) => {
-  const {call, run} = inv
+const withRunState = (next, call, run) => {
   const form = run.forms.calls.get(call.address).hash
-  const stored = run.rerun(call) ? undefined : await run.runState.get(form, inv.input)
-  if (stored?.status === 'done') return stored.output
+  const rerun = run.rerun(call)
+  return async (args, inv) => {
+    const stored = rerun ? undefined : await run.runState.get(form, inv.input)
+    if (stored?.status === 'done') return stored.output
 
-  const key = `${form}/${inv.input}`
-  if (!run.inflight.has(key)) {
-    run.inflight.set(key, recordResult(next, args, inv, form).finally(() => run.inflight.delete(key)))
+    const key = `${form}/${inv.input}`
+    if (!run.inflight.has(key)) {
+      run.inflight.set(key, recordResult(next, args, inv, form).finally(() => run.inflight.delete(key)))
+    }
+    return run.inflight.get(key)
   }
-  return run.inflight.get(key)
 }
 
 async function recordResult(next, args, inv, form) {
@@ -147,19 +150,20 @@ const DEFAULT_TTL = '7D'
 
 // Reuses a result across Runs while it is younger than the call's ttl. Each
 // entry records when it expires, so a store can prune without knowing ttls.
-const withCache = (next) => async (args, inv) => {
-  const {call, run} = inv
-  const store = run.runtime.cache
+const withCache = (next, call, run) => {
   const form = run.forms.calls.get(call.address).hash
-  const ttl = parseTimeUnit(call.settings.cache.ttl ?? run.compiled.settings.cache?.ttl ?? DEFAULT_TTL)
-  const cached = await store.get(form, inv.input)
-  if (cached && Date.now() - Date.parse(cached.created) < ttl) return cached.output
+  return async (args, inv) => {
+    const store = run.runtime.cache
+    const ttl = parseTimeUnit(call.settings.cache.ttl ?? run.compiled.settings.cache?.ttl ?? DEFAULT_TTL)
+    const cached = await store.get(form, inv.input)
+    if (cached && Date.now() - Date.parse(cached.created) < ttl) return cached.output
 
-  const output = await next(args, inv)
-  const created = new Date()
-  const expires = new Date(created.getTime() + ttl)
-  await store.set(form, inv.input, {input: inv.input, created: created.toISOString(), expires: expires.toISOString(), output})
-  return output
+    const output = await next(args, inv)
+    const created = new Date()
+    const expires = new Date(created.getTime() + ttl)
+    await store.set(form, inv.input, {input: inv.input, created: created.toISOString(), expires: expires.toISOString(), output})
+    return output
+  }
 }
 
 // Validates a value against the call's schemas for one order (precheck or
@@ -224,9 +228,13 @@ const withTimeout = (next) => async (args, inv) => {
   }
 }
 
+// The positions a call hands its service as functions: all but onError, which
+// MicroQL runs itself when the call fails.
+const servicePositions = (call) => Object.entries(call.positions).filter(([field]) => field !== 'onError')
+
 // A call that holds other calls (an `each`) doesn't take a concurrency slot,
 // or it would starve the calls it is waiting on.
-const holdsCalls = (call) => Object.keys(call.positions).some(field => field !== 'onError')
+const holdsCalls = (call) => servicePositions(call).length > 0
 
 // The wrappers a call needs, in canonical order, outermost first.
 function wrappersFor(call, run) {
@@ -249,5 +257,5 @@ function wrappersFor(call, run) {
 // The call's action wrapped in its behaviour: a step `(args, invocation) => result`.
 export function wrap(call, run) {
   const action = (args) => call.action.call(call.service, args)
-  return wrappersFor(call, run).reduceRight((next, wrapper) => wrapper(next), action)
+  return wrappersFor(call, run).reduceRight((next, wrapper) => wrapper(next, call, run), action)
 }

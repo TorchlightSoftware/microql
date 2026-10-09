@@ -2,6 +2,23 @@ import assert from 'node:assert'
 import {describe, it} from 'node:test'
 import query from '../node.js'
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// Counts how many calls are in flight at once: parallelism measured without a
+// clock, so a loaded machine can't fail it.
+const overlapCounter = () => {
+  const counter = {active: 0, max: 0}
+  counter.during = async (work) => {
+    counter.max = Math.max(counter.max, ++counter.active)
+    try {
+      return await work()
+    } finally {
+      counter.active--
+    }
+  }
+  return counter
+}
+
 describe('MicroQL Comprehensive Tests', () => {
   describe('Basic Functionality', () => {
     it('should handle basic dependency chain', async () => {
@@ -160,14 +177,13 @@ describe('MicroQL Comprehensive Tests', () => {
     })
 
     it('should execute queries in parallel when possible', async () => {
-      const start = Date.now()
+      const overlap = overlapCounter()
       const result = await query({
         given: {delay: 10},
         services: {
           async: {
             async '/delay'({ms, value}) {
-              await new Promise((resolve) => setTimeout(resolve, ms))
-              return value
+              return overlap.during(() => sleep(ms).then(() => value))
             }
           }
         },
@@ -178,8 +194,7 @@ describe('MicroQL Comprehensive Tests', () => {
         }
       })
 
-      const duration = Date.now() - start
-      assert(duration < 30, `Should execute in parallel (took ${duration}ms, expected <30ms)`)
+      assert.strictEqual(overlap.max, 3, 'independent phases run at once')
       assert.strictEqual(result.query1, 'A')
       assert.strictEqual(result.query2, 'B')
       assert.strictEqual(result.query3, 'C')
@@ -280,15 +295,13 @@ describe('MicroQL Comprehensive Tests', () => {
 
   describe('Performance', () => {
     it('should handle large parallel execution efficiently', async () => {
-      const start = Date.now()
+      const overlap = overlapCounter()
       const result = await query({
         given: {count: 50},
         services: {
           worker: {
             async '/process'({id}) {
-              await new Promise((resolve) =>
-                setTimeout(resolve, Math.random() * 5))
-              return `processed-${id}`
+              return overlap.during(() => sleep(Math.random() * 5).then(() => `processed-${id}`))
             }
           }
         },
@@ -300,10 +313,7 @@ describe('MicroQL Comprehensive Tests', () => {
         )
       })
 
-      const duration = Date.now() - start
-      // run serially, 50 calls averaging 2.5ms would take ~125ms; hashing every
-      // call's form and inputs costs a few ms more than 0.6 did
-      assert(duration < 100, `Should complete quickly (took ${duration}ms, expected <100ms)`)
+      assert.strictEqual(overlap.max, 50, 'all 50 independent phases run at once')
 
       // Verify all queries completed correctly
       for (let i = 0; i < 50; i++) {

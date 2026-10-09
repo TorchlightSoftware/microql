@@ -13,6 +13,7 @@
   },
   "scripts": {
     "test": "node --test test/*.test.js",
+    "bench": "node scripts/bench.js",
     "lint": "npx eslint .",
     "lint:fix": "npx eslint --fix ."
   },
@@ -50,6 +51,7 @@
     "simple-git-hooks": "^2.13.0"
   },
   "dependencies": {
+    "@noble/hashes": "^2.4.0",
     "@tlsft/service-key": "^0.2.0",
     "lodash": "^4.17.10",
     "zod": "^4.0.5"

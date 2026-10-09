@@ -20,9 +20,13 @@ describe('canonical serialization', () => {
     })
   }
 
-  it('hashes equal values equally regardless of key order', async () => {
-    assert.equal(await hashOf({a: 1, b: 2}), await hashOf({b: 2, a: 1}))
-    assert.match(await hashOf({a: 1}), /^[0-9a-f]{64}$/)
+  it('hashes equal values equally regardless of key order', () => {
+    assert.equal(hashOf({a: 1, b: 2}), hashOf({b: 2, a: 1}))
+  })
+
+  // stored entries are keyed by these hashes, so they must not change
+  it('hashes as SHA-256 of the canonical text, in hex', () => {
+    assert.equal(hashOf({b: 2, a: 1}), '43258cff783fe7036d8a43033f830adfc60ec037382473548ac742b888292777')
   })
 })
 
@@ -50,8 +54,8 @@ describe('form hashes', () => {
     }
   }
 
-  const hashesOf = async (query) => {
-    const forms = await formsOf(compile(query))
+  const hashesOf = (query) => {
+    const forms = formsOf(compile(query))
     return _.mapValues(Object.fromEntries(forms.calls), 'hash')
   }
 
@@ -72,11 +76,11 @@ describe('form hashes', () => {
   ]
 
   for (const [name, edit, changed] of edits) {
-    it(`${name}: changes ${changed.length ? changed.join(', ') : 'nothing'}`, async () => {
-      const before = await hashesOf(base)
+    it(`${name}: changes ${changed.length ? changed.join(', ') : 'nothing'}`, () => {
+      const before = hashesOf(base)
       const edited = _.cloneDeepWith(base, v => typeof v === 'function' ? v : undefined)
       edit(edited)
-      const after = await hashesOf(edited)
+      const after = hashesOf(edited)
 
       assert.deepEqual(Object.keys(after).sort(), Object.keys(before).sort())
       const actual = Object.keys(before).filter(address => before[address] !== after[address]).sort()
@@ -84,15 +88,15 @@ describe('form hashes', () => {
     })
   }
 
-  it('rename a phase: addresses change, forms do not', async () => {
+  it('rename a phase: addresses change, forms do not', () => {
     const renamed = {...base, phases: {cats: base.phases.categories, listings: ['$cats', ...base.phases.listings.slice(1)]}}
-    const before = await hashesOf(base)
-    const after = await hashesOf(renamed)
+    const before = hashesOf(base)
+    const after = hashesOf(renamed)
     assert.equal(after['$cats.@1'], before['$categories.@1'])
     assert.equal(after['$listings.@1'], before['$listings.@1'])
   })
 
-  it('move a subtree: a new address, the same form', async () => {
+  it('move a subtree: a new address, the same form', () => {
     const moved = {
       ...base,
       phases: {
@@ -103,14 +107,14 @@ describe('form hashes', () => {
         listings: base.phases.listings
       }
     }
-    const before = await hashesOf(base)
-    const after = await hashesOf(moved)
+    const before = hashesOf(base)
+    const after = hashesOf(moved)
     assert.equal(after['$categories.@2'], before['$categories.@1'])
     assert.equal(after['$listings.@1a2'], before['$listings.@1a2'])
   })
 
-  it('gives identical calls one form hash', async () => {
-    const hashes = await hashesOf({
+  it('gives identical calls one form hash', () => {
+    const hashes = hashesOf({
       given: {u: 'x'},
       services,
       phases: {
@@ -121,16 +125,16 @@ describe('form hashes', () => {
     assert.equal(hashes['$a.@1'], hashes['$b.@1'])
   })
 
-  it('distinguishes trigger payloads', async () => {
+  it('distinguishes trigger payloads', () => {
     const query = {trigger: {kind: 'webhook'}, services, phases: {a: ['GET [scraper]/extract', {url: '$trigger.url'}]}}
-    const one = await formsOf(compile(query), {trigger: {url: 'one'}})
-    const two = await formsOf(compile(query), {trigger: {url: 'two'}})
+    const one = formsOf(compile(query), {trigger: {url: 'one'}})
+    const two = formsOf(compile(query), {trigger: {url: 'two'}})
     assert.notEqual(one.calls.get('$a.@1').hash, two.calls.get('$a.@1').hash)
     assert.notEqual(one.query, two.query)
   })
 
-  it('returns a readable form that holds upstream hashes, not upstream forms', async () => {
-    const forms = await formsOf(compile(base))
+  it('returns a readable form that holds upstream hashes, not upstream forms', () => {
+    const forms = formsOf(compile(base))
     const {form} = forms.calls.get('$listings.@1')
     assert.equal(form.key, 'GET [util]/each')
     assert.deepEqual(form.args.on, {phase: forms.calls.get('$categories.@1').hash, path: []})
