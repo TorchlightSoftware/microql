@@ -43,7 +43,7 @@ async function time(fn) {
 const results = {version}
 for (const [name, calls, config] of workloads) {
   const ms = await time(() => query({services: {echo}, ...config()}))
-  results[name] = {ms: +ms.toFixed(1), usPerCall: +((ms * 1000) / calls).toFixed(0)}
+  results[name] = {ms: +ms.toFixed(1), usPerCall: +((ms * 1000) / calls).toFixed(0), calls}
 }
 
 console.log(JSON.stringify(results))

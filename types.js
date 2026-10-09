@@ -11,8 +11,8 @@
  * A type is plain data: {type, optional?, element?, fields?}.
  */
 
-import _ from 'lodash'
-import {isPlainObject} from './common.js'
+import {isPlainObject, mapValues} from './common.js'
+import {canonical} from './forms.js'
 
 export const mixed = {type: 'mixed'}
 
@@ -31,7 +31,7 @@ export function typeOfSchema(schema) {
 function convertSchema(def) {
   if (SCALARS[def.type]) return {type: SCALARS[def.type]}
   if (def.type === 'array') return {type: 'list', element: typeOfSchema(def.element)}
-  if (def.type === 'object') return {type: 'object', fields: _.mapValues(def.shape, typeOfSchema)}
+  if (def.type === 'object') return {type: 'object', fields: mapValues(def.shape, typeOfSchema)}
   if (def.type === 'optional' || def.type === 'nullable') return {...typeOfSchema(def.innerType), optional: true}
   if (def.type === 'default') return typeOfSchema(def.innerType)
   if (def.type === 'literal') return typeOfValue(def.values[0])
@@ -46,14 +46,14 @@ export function typeOfValue(value) {
   if (typeof value === 'boolean') return {type: 'boolean'}
   if (value instanceof Date) return {type: 'datetime'}
   if (Array.isArray(value)) return listOf(value.map(typeOfValue))
-  if (isPlainObject(value)) return {type: 'object', fields: _.mapValues(value, typeOfValue)}
+  if (isPlainObject(value)) return {type: 'object', fields: mapValues(value, typeOfValue)}
   return mixed
 }
 
 // A list whose element type is shared by all its elements, or mixed.
 export function listOf(elementTypes) {
   const [first, ...rest] = elementTypes
-  const shared = first && rest.every(t => _.isEqual(t, first))
+  const shared = first && rest.every(t => canonical(t) === canonical(first))
   return {type: 'list', element: shared ? first : mixed}
 }
 

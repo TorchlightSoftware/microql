@@ -6,7 +6,8 @@
  * which MicroQL hands to the service at init.
  */
 
-import _ from 'lodash'
+import {isPlainObject, mapValues, filterObject, pick} from '../common.js'
+import {canonical} from '../forms.js'
 
 // An item that failed: an Error, or the null left by ignoreErrors.
 const isFailure = (item) => item === null || item instanceof Error
@@ -18,9 +19,39 @@ const filterHidden = (val) => {
     return val.map(filterHidden)
   }
   if (typeof val === 'object' && val !== null) {
-    return _.omitBy(val, (v, k) => k.startsWith('_'))
+    return filterObject(val, (_v, k) => !k.startsWith('_'))
   }
   return val
+}
+
+// A copy of plain data: arrays and plain objects are rebuilt, everything else
+// (dates, errors, instances) is shared.
+const copyPlain = (value) =>
+  Array.isArray(value) ? value.map(copyPlain) : isPlainObject(value) ? mapValues(value, copyPlain) : value
+
+// `on`'s items, then those of `more` not yet present, compared by value.
+function union(on, more) {
+  const present = new Set(on.map(canonical))
+  const added = more.filter(item => {
+    const key = canonical(item)
+    if (present.has(key)) return false
+    present.add(key)
+    return true
+  })
+  return [...on, ...added].map(copyPlain)
+}
+
+// `with` merged onto `on`: plain objects merge key by key, arrays are a set
+// union, an undefined value in `with` keeps `on`'s, and any other value wins.
+// So merging the same `with` twice changes nothing.
+function mergeValues(on, withValue) {
+  if (withValue === undefined) return copyPlain(on)
+  if (isPlainObject(on) && isPlainObject(withValue)) {
+    const keys = new Set([...Object.keys(on), ...Object.keys(withValue)])
+    return Object.fromEntries([...keys].map(key => [key, mergeValues(on[key], withValue[key])]))
+  }
+  if (Array.isArray(on) && Array.isArray(withValue)) return union(on, withValue)
+  return copyPlain(withValue)
 }
 
 const truncate = (str, maxStr) => !!maxStr && typeof str === 'string' ?
@@ -121,17 +152,17 @@ const util = {
   },
 
   /**
-   * Pick specific fields from an object (similar to lodash pick)
+   * Pick the listed fields that the object has
    */
   async '/pick'({on, fields}) {
-    return _.pick(on, fields.filter(field => Object.hasOwn(on, field)))
+    return pick(on, fields)
   },
 
   /**
-   * Deep merge of 'with' onto 'on', returning a new object
+   * Deep merge of 'with' onto 'on', returning a new object; arrays are a set union
    */
   async '/merge'({on, with: withObj}) {
-    return _.merge({}, on, withObj)
+    return mergeValues(on, withObj)
   },
 
   /**

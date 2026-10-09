@@ -407,7 +407,7 @@ All answer `GET`.
 - `/when({test, then, otherwise})` - `then` when `test` is truthy, otherwise `otherwise`
 - `/concat({args})` - Concatenate arrays
 - `/pick({on, fields})` - Extract object fields
-- `/merge({on, with})` - Deep merge of `with` onto `on`
+- `/merge({on, with})` - Deep merge of `with` onto `on`: objects merge key by key, arrays are a set union by value (`on`'s items, then those of `with` not already present), and `undefined` in `with` keeps `on`'s value. Merging the same `with` twice changes nothing; to replace an array, shape it with `/template` first
 - `/length({value})` - Get length of an array or string
 - `/exists({value})` - Check that a value is not null or undefined
 - `/eq`, `/gt`, `/lt` `({l, r})` - Comparisons

@@ -13,12 +13,11 @@
  * and `$given` / `$trigger` by their values.
  */
 
-import _ from 'lodash'
 import {sha256} from '@noble/hashes/sha2.js'
 import {bytesToHex, utf8ToBytes} from '@noble/hashes/utils.js'
 import {mapReferences, parseReference, rootScope, enterPosition, scopedRoot} from './reference.js'
 import {columnsOf} from './graph.js'
-import {isPlainObject} from './common.js'
+import {isPlainObject, getIn, omit} from './common.js'
 
 // Settings that change how a call runs, never what it returns.
 const OPERATIONAL_SETTINGS = ['timeout', 'retry', 'debug', 'cache']
@@ -52,7 +51,7 @@ export const hashOf = (value) => bytesToHex(sha256(utf8ToBytes(canonical(value))
 function referenceForm(text, scope, env) {
   const ref = parseReference(text)
   const {sigil, name, path} = ref
-  if (sigil === '$' && name in env.nodes) return {value: _.get(env.nodes[name], path) ?? null}
+  if (sigil === '$' && name in env.nodes) return {value: getIn(env.nodes[name], path) ?? null}
   if (sigil === '$') return {phase: env.phases[name], path}
   return {scoped: scopedRoot(ref, scope), path}
 }
@@ -78,7 +77,7 @@ function callForm(call, scope, env) {
   const data = {
     key: call.key,
     args: argumentsForm({...call.args, ...call.settingsArgs}, scope, env),
-    settings: _.omit(call.settings, [...OPERATIONAL_SETTINGS, 'rateLimit', 'inspect']),
+    settings: omit(call.settings, [...OPERATIONAL_SETTINGS, 'rateLimit', 'inspect']),
     checks: call.checks
   }
   // only a call with positions needs its data hashed apart from its form

@@ -17,10 +17,9 @@
  *             numbered, positions lettered in sorted key order, alternating.
  */
 
-import _ from 'lodash'
 import {parseServiceKey} from '@tlsft/service-key'
 
-import {RESERVE_ARGS, isPlainObject} from './common.js'
+import {RESERVE_ARGS, isPlainObject, mapValues, filterObject, pick, omit, defaults} from './common.js'
 import {isReference, parseReference} from './reference.js'
 import {parseSchema} from './validation.js'
 import {fieldPathOf} from './addresses.js'
@@ -46,7 +45,7 @@ const isChain = (value) =>
 // Splits a descriptor into its service key, arguments and the method-syntax
 // target, if any: ['KEY', {...}] or [target, 'KEY', {...}].
 function parseDescriptor(site, descriptor) {
-  const methodParts = typeof descriptor[1] === 'string' && parseServiceKey(descriptor[1])
+  const methodParts = parseServiceKey(descriptor[1])
   if (methodParts) {
     const [target, key, args = {}] = descriptor
     return {key, parts: methodParts, args, target, hasTarget: true}
@@ -120,10 +119,10 @@ const compileValidators = (args, validators) => {
 // A call's settings: its own reserve args, then any settings-typed arguments,
 // then the Query's global settings (except those that only apply globally).
 const compileSettings = (serviceName, args, argtypes, querySettings) => {
-  const ownSettings = _.omit(_.pick(args, RESERVE_ARGS), ['onError', 'precheck', 'postcheck'])
-  const settingsArgs = _.pickBy(args, (a, k) => argtypes[k]?.type === 'settings')
-  const globalSettings = _.omit(querySettings, ['onError', 'ignoreErrors', 'cache', 'rateLimit', 'concurrency'])
-  const settings = _.defaults({}, ownSettings, ...Object.values(settingsArgs), globalSettings)
+  const ownSettings = omit(pick(args, RESERVE_ARGS), ['onError', 'precheck', 'postcheck'])
+  const settingsArgs = filterObject(args, (_a, k) => argtypes[k]?.type === 'settings')
+  const globalSettings = omit(querySettings, ['onError', 'ignoreErrors', 'cache', 'rateLimit', 'concurrency'])
+  const settings = defaults(ownSettings, ...Object.values(settingsArgs), globalSettings)
   settings.rateLimit = querySettings.rateLimit?.[serviceName]
   return settings
 }
@@ -263,10 +262,10 @@ function compileCall(descriptor, site, scope, query) {
   }
 
   const settingsFields = Object.keys(argtypes).filter(k => argtypes[k]?.type === 'settings')
-  call.args = _.omit(args, [...RESERVE_ARGS, 'as', ...fields, ...settingsFields])
+  call.args = omit(args, [...RESERVE_ARGS, 'as', ...fields, ...settingsFields])
   call.settingsArgs = Object.fromEntries(settingsFields.map(field => [field, args[field] ?? {}]))
   call.settings = compileSettings(parsed.parts.service, args, argtypes, query.settings)
-  call.checks = _.pick(args, ['precheck', 'postcheck'])
+  call.checks = pick(args, ['precheck', 'postcheck'])
   call.validators = compileValidators(args, action._validators || {})
   call.dependencies = checkReferences(site, {...call.args, ...call.settingsArgs}, scope, query)
   call.positions = Object.fromEntries(fields.map((field, i) =>
@@ -313,7 +312,7 @@ function compileSelect(select, query) {
  */
 export function compile(config) {
   const {phases = {}, given, trigger, settings = {}} = config
-  const services = _.defaults({}, config.services, {util})
+  const services = defaults(config.services, {util})
 
   const query = {
     services,
@@ -324,7 +323,7 @@ export function compile(config) {
     calls: []
   }
 
-  const compiledPhases = _.mapValues(phases, (descriptor, name) => compilePhase(name, descriptor, query))
+  const compiledPhases = mapValues(phases, (descriptor, name) => compilePhase(name, descriptor, query))
 
   return {
     phases: compiledPhases,

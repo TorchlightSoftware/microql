@@ -3,16 +3,19 @@
 Every named function in core: `function` declarations, `const` function values, object properties (util resources, store methods) and class methods. Anonymous inline callbacks are not listed.
 
 - **lines** — length of the definition
-- **refs** — references to the name in core: in its own file, plus in files that import it. 0 means public API used only by callers outside core (tests, hosts). Properties and methods are dispatched by name at run time, so their refs are not meaningful.
-- **0.6** — the name also appears in 0.6.6 core (`836d9bf`)
+- **refs** — identifiers naming the function in core: in its own file, plus in files that import it, leaving out its declaration, import and export lists, property keys and member names. 0 means public API used only by callers outside core (tests, hosts). Properties and methods are dispatched by name at run time, so they get no count. Names are matched textually, so a parameter that shadows a function is counted too.
+- **0.6** — 0.6.6 core (`836d9bf`) also defined a function by this name
 
+The tables below are generated. Regenerate them with `npm run docs:functions` after changing core; it rewrites only the text between the `generated:function-names` markers, so edit this introduction freely.
+
+<!-- generated:function-names -->
 ## addresses.js
 
 | line | name | kind | lines | refs | 0.6 |
 |---|---|---|---|---|---|
 | 18 | `fieldPathOf` | const | 2 | 2 |  |
 | 22 | `addressToPath` | function | 8 | 0 |  |
-| 31 | `startsWith` | const | 1 | 2 | ✓ |
+| 31 | `startsWith` | const | 1 | 2 |  |
 | 34 | `withField` | const | 1 | 2 |  |
 | 38 | `pathToAddress` | function | 12 | 0 |  |
 
@@ -21,34 +24,40 @@ Every named function in core: `function` declarations, `const` function values, 
 | line | name | kind | lines | refs | 0.6 |
 |---|---|---|---|---|---|
 | 9 | `getServiceColorName` | const | 6 | 1 | ✓ |
+| 18 | `isPlainObject` | const | 5 | 11 |  |
+| 28 | `mapValues` | const | 5 | 11 |  |
+| 35 | `filterObject` | const | 2 | 3 |  |
+| 39 | `pick` | const | 2 | 6 | ✓ |
+| 42 | `omit` | const | 1 | 4 |  |
+| 45 | `getIn` | const | 1 | 3 |  |
+| 48 | `defaults` | const | 9 | 3 |  |
 
 ## compile.js
 
 | line | name | kind | lines | refs | 0.6 |
 |---|---|---|---|---|---|
-| 37 | `fail` | const | 3 | 21 |  |
-| 42 | `isChain` | const | 2 | 3 | ✓ |
-| 45 | `isPlainObject` | const | 1 | 4 |  |
-| 49 | `parseDescriptor` | function | 16 | 1 |  |
-| 69 | `lookupAction` | function | 17 | 1 |  |
-| 88 | `targetField` | function | 5 | 1 |  |
-| 94 | `parseSchemaWithErrorContext` | function | 8 | 2 | ✓ |
-| 104 | `compileValidators` | const | 16 | 1 | ✓ |
-| 123 | `compileSettings` | const | 8 | 1 | ✓ |
-| 134 | `checkReferences` | function | 16 | 1 |  |
-| 136 | `check` | const | 11 | 3 | ✓ |
-| 151 | `parseWithSite` | function | 7 | 2 |  |
-| 159 | `checkReference` | function | 8 | 1 |  |
-| 169 | `declareBinding` | function | 8 | 1 |  |
-| 180 | `sitesAt` | const | 4 | 3 |  |
-| 188 | `compileSteps` | function | 6 | 3 |  |
-| 200 | `compilePosition` | function | 23 | 1 |  |
-| 225 | `positionFields` | function | 10 | 1 |  |
-| 237 | `compileCall` | function | 45 | 1 |  |
-| 283 | `compilePhase` | function | 9 | 1 |  |
-| 294 | `compileGlobalOnError` | function | 4 | 1 |  |
-| 300 | `compileSelect` | function | 10 | 1 |  |
-| 315 | `compile` | function | 30 | 3 | ✓ |
+| 36 | `fail` | const | 3 | 21 |  |
+| 41 | `isChain` | const | 2 | 3 | ✓ |
+| 47 | `parseDescriptor` | function | 16 | 1 |  |
+| 67 | `lookupAction` | function | 17 | 1 |  |
+| 86 | `targetField` | function | 5 | 1 |  |
+| 92 | `parseSchemaWithErrorContext` | function | 8 | 2 | ✓ |
+| 102 | `compileValidators` | const | 16 | 1 | ✓ |
+| 121 | `compileSettings` | const | 8 | 1 | ✓ |
+| 132 | `checkReferences` | function | 16 | 1 |  |
+| 134 | `check` | const | 11 | 3 |  |
+| 149 | `parseWithSite` | function | 7 | 2 |  |
+| 157 | `checkReference` | function | 8 | 1 |  |
+| 167 | `declareBinding` | function | 8 | 1 |  |
+| 178 | `sitesAt` | const | 4 | 3 |  |
+| 186 | `compileSteps` | function | 6 | 3 |  |
+| 198 | `compilePosition` | function | 23 | 1 |  |
+| 223 | `positionFields` | function | 10 | 1 |  |
+| 235 | `compileCall` | function | 45 | 1 |  |
+| 281 | `compilePhase` | function | 9 | 1 |  |
+| 292 | `compileGlobalOnError` | function | 4 | 1 |  |
+| 298 | `compileSelect` | function | 10 | 1 |  |
+| 313 | `compile` | function | 30 | 2 | ✓ |
 
 ## concurrency.js
 
@@ -71,28 +80,27 @@ Every named function in core: `function` declarations, `const` function values, 
 | 81 | `report` | function | 7 | 1 |  |
 | 91 | `runPhase` | function | 18 | 1 |  |
 | 93 | `reportPhase` | const | 2 | 3 |  |
-| 95 | `duration` | const | 1 | 2 | ✓ |
+| 95 | `duration` | const | 1 | 2 |  |
 | 111 | `targetPhase` | function | 7 | 1 |  |
 | 122 | `scopeOfRun` | function | 8 | 1 |  |
 | 123 | `rerun` | property | 1 | — |  |
 | 127 | `rerun` | property | 1 | — |  |
 | 132 | `handleGlobalError` | function | 11 | 1 |  |
-| 152 | `execute` | function | 39 | 2 | ✓ |
+| 152 | `execute` | function | 41 | 1 | ✓ |
 | 170 | `runPosition` | property | 1 | — |  |
 
 ## forms.js
 
 | line | name | kind | lines | refs | 0.6 |
 |---|---|---|---|---|---|
-| 23 | `isPlainObject` | const | 1 | 2 |  |
-| 27 | `canonical` | function | 3 | 1 | ✓ |
-| 31 | `canonicalValue` | function | 13 | 4 |  |
-| 46 | `hashOf` | function | 5 | 4 |  |
-| 53 | `referenceForm` | function | 7 | 1 |  |
-| 62 | `argumentsForm` | const | 6 | 3 |  |
-| 70 | `stepsForm` | function | 9 | 3 |  |
-| 83 | `callForm` | function | 21 | 1 |  |
-| 109 | `formsOf` | function | 18 | 2 |  |
+| 28 | `canonical` | function | 3 | 5 |  |
+| 32 | `canonicalValue` | function | 13 | 4 |  |
+| 48 | `hashOf` | const | 1 | 4 |  |
+| 51 | `referenceForm` | function | 7 | 1 |  |
+| 60 | `argumentsForm` | const | 1 | 1 |  |
+| 63 | `stepsForm` | function | 9 | 3 |  |
+| 76 | `callForm` | function | 21 | 1 |  |
+| 102 | `formsOf` | function | 15 | 2 |  |
 
 ## graph.js
 
@@ -112,12 +120,12 @@ Every named function in core: `function` declarations, `const` function values, 
 | 50 | `sweep` | function | 8 | 1 |  |
 | 61 | `fileStore` | function | 23 | 1 |  |
 | 62 | `fileOf` | const | 1 | 2 |  |
-| 64 | `ready` | const | 1 | 4 | ✓ |
+| 64 | `ready` | const | 1 | 4 |  |
 | 68 | `get` | property | 4 | — | ✓ |
-| 72 | `set` | property | 5 | — | ✓ |
-| 77 | `list` | property | 5 | — | ✓ |
-| 85 | `print` | function | 5 | 2 | ✓ |
-| 91 | `recordFailure` | function | 6 | 2 | ✓ |
+| 72 | `set` | property | 5 | — |  |
+| 77 | `list` | property | 5 | — |  |
+| 85 | `print` | function | 5 | 1 | ✓ |
+| 91 | `recordFailure` | function | 6 | 1 | ✓ |
 | 106 | `query` | function | 3 | 0 | ✓ |
 
 ## plan.js
@@ -130,14 +138,14 @@ Every named function in core: `function` declarations, `const` function values, 
 | 41 | `stepsTypes` | function | 5 | 2 |  |
 | 49 | `callTypes` | function | 23 | 1 |  |
 | 74 | `inferTypes` | function | 12 | 1 |  |
-| 92 | `plan` | function | 34 | 0 | ✓ |
+| 92 | `plan` | function | 34 | 0 |  |
 
 ## query.js
 
 | line | name | kind | lines | refs | 0.6 |
 |---|---|---|---|---|---|
 | 14 | `applySelection` | function | 5 | 1 | ✓ |
-| 26 | `query` | function | 5 | 2 | ✓ |
+| 26 | `query` | function | 5 | 1 | ✓ |
 
 ## ratelimit.js
 
@@ -152,13 +160,14 @@ Every named function in core: `function` declarations, `const` function values, 
 
 | line | name | kind | lines | refs | 0.6 |
 |---|---|---|---|---|---|
-| 35 | `isReference` | const | 2 | 5 |  |
-| 39 | `malformation` | const | 8 | 1 |  |
-| 48 | `pathOf` | const | 7 | 2 |  |
-| 58 | `parseReference` | function | 11 | 4 |  |
-| 76 | `enterPosition` | const | 5 | 4 |  |
-| 83 | `scopedRoot` | const | 4 | 3 |  |
-| 89 | `resolveReference` | function | 4 | 2 |  |
+| 35 | `isReference` | const | 2 | 4 |  |
+| 41 | `mapReferences` | const | 6 | 4 |  |
+| 49 | `malformation` | const | 8 | 1 |  |
+| 58 | `pathOf` | const | 7 | 2 |  |
+| 68 | `parseReference` | function | 11 | 4 |  |
+| 86 | `enterPosition` | const | 5 | 4 |  |
+| 93 | `scopedRoot` | const | 4 | 3 |  |
+| 99 | `resolveReference` | function | 4 | 2 |  |
 
 ## runtime.js
 
@@ -166,91 +175,96 @@ Every named function in core: `function` declarations, `const` function values, 
 |---|---|---|---|---|---|
 | 19 | `memoryStore` | function | 15 | 2 |  |
 | 22 | `get` | property | 3 | — | ✓ |
-| 25 | `set` | property | 4 | — | ✓ |
-| 29 | `list` | property | 3 | — | ✓ |
+| 25 | `set` | property | 4 | — |  |
+| 29 | `list` | property | 3 | — |  |
 | 36 | `print` | property | 1 | — | ✓ |
-| 37 | `inspect` | property | 1 | — | ✓ |
+| 37 | `inspect` | property | 1 | — |  |
 | 38 | `recordFailure` | property | 1 | — | ✓ |
+
+## services/util.js
+
+| line | name | kind | lines | refs | 0.6 |
+|---|---|---|---|---|---|
+| 13 | `isFailure` | const | 1 | 3 |  |
+| 14 | `successes` | const | 1 | 4 |  |
+| 17 | `filterHidden` | const | 9 | 2 | ✓ |
+| 29 | `copyPlain` | const | 2 | 5 |  |
+| 33 | `union` | function | 10 | 1 |  |
+| 47 | `mergeValues` | function | 9 | 2 |  |
+| 57 | `truncate` | const | 2 | 1 | ✓ |
+| 62 | `init` | property | 3 | — |  |
+| 69 | `/each` | property | 6 | — |  |
+| 79 | `/filter` | property | 5 | — |  |
+| 89 | `/removeErrors` | property | 3 | — |  |
+| 96 | `/removeNulls` | property | 3 | — |  |
+| 103 | `/removeSuccesses` | property | 3 | — |  |
+| 110 | `/partitionErrors` | property | 3 | — |  |
+| 117 | `/concat` | property | 3 | — |  |
+| 124 | `/when` | property | 3 | — |  |
+| 128 | `/eq` | property | 3 | — |  |
+| 132 | `/gt` | property | 3 | — |  |
+| 136 | `/lt` | property | 3 | — |  |
+| 143 | `/exists` | property | 3 | — |  |
+| 150 | `/length` | property | 3 | — |  |
+| 157 | `/pick` | property | 3 | — |  |
+| 164 | `/merge` | property | 3 | — |  |
+| 171 | `/print` | property | 10 | — |  |
+| 185 | `/recordFailure` | property | 13 | — |  |
+| 203 | `/template` | property | 3 | — |  |
+| 273 | `comparison` | const | 1 | 3 |  |
 
 ## types.js
 
 | line | name | kind | lines | refs | 0.6 |
 |---|---|---|---|---|---|
-| 24 | `typeOfSchema` | function | 5 | 7 |  |
-| 30 | `convertSchema` | function | 9 | 1 |  |
-| 41 | `typeOfValue` | function | 10 | 6 |  |
-| 53 | `listOf` | function | 5 | 2 |  |
-| 60 | `typeAtPath` | function | 7 | 1 |  |
-| 70 | `satisfies` | function | 6 | 2 |  |
+| 25 | `typeOfSchema` | function | 5 | 7 |  |
+| 31 | `convertSchema` | function | 9 | 1 |  |
+| 42 | `typeOfValue` | function | 10 | 6 |  |
+| 54 | `listOf` | function | 5 | 2 |  |
+| 61 | `typeAtPath` | function | 7 | 1 |  |
+| 71 | `satisfies` | function | 6 | 2 |  |
 
 ## validation.js
 
 | line | name | kind | lines | refs | 0.6 |
 |---|---|---|---|---|---|
 | 47 | `showAsJson` | const | 1 | 1 |  |
-| 53 | `formatError` | function | 34 | 1 | ✓ |
-| 91 | `validate` | function | 10 | 2 | ✓ |
-| 107 | `parseSchema` | function | 10 | 2 | ✓ |
-| 118 | `parseSchemaRecursive` | function | 116 | 7 | ✓ |
-| 235 | `applyModifiers` | function | 16 | 8 | ✓ |
-| 252 | `transformObjectShape` | const | 1 | 2 | ✓ |
+| 54 | `pathText` | const | 2 | 1 |  |
+| 57 | `formatError` | function | 26 | 1 | ✓ |
+| 87 | `validate` | function | 10 | 2 | ✓ |
+| 103 | `parseSchema` | function | 10 | 2 | ✓ |
+| 114 | `parseSchemaRecursive` | function | 116 | 7 | ✓ |
+| 231 | `applyModifiers` | function | 16 | 8 | ✓ |
+| 248 | `transformObjectShape` | const | 1 | 2 | ✓ |
 
 ## wrappers.js
 
 | line | name | kind | lines | refs | 0.6 |
 |---|---|---|---|---|---|
-| 23 | `isPlainObject` | const | 1 | 1 |  |
 | 26 | `labelOf` | const | 1 | 5 |  |
-| 30 | `resolveArgs` | const | 6 | 4 |  |
-| 39 | `withArgs` | const | 12 | 1 | ✓ |
-| 52 | `withDebug` | const | 12 | 1 | ✓ |
-| 56 | `show` | const | 1 | 3 |  |
-| 66 | `labelError` | function | 8 | 1 |  |
-| 77 | `recover` | function | 21 | 1 |  |
-| 99 | `withErrorHandling` | const | 8 | 1 | ✓ |
-| 110 | `withRunState` | const | 12 | 1 |  |
-| 123 | `recordResult` | function | 14 | 1 |  |
-| 138 | `parseTimeUnit` | const | 7 | 1 | ✓ |
-| 151 | `withCache` | const | 14 | 1 | ✓ |
-| 168 | `check` | function | 13 | 2 | ✓ |
-| 169 | `show` | const | 1 | 3 |  |
-| 182 | `withPrecheck` | const | 4 | 1 |  |
-| 187 | `withPostcheck` | const | 5 | 1 |  |
-| 193 | `hasChecks` | const | 1 | 2 |  |
-| 195 | `withRateLimit` | const | 2 | 1 | ✓ |
-| 198 | `withConcurrency` | const | 2 | 1 |  |
-| 201 | `withRetry` | const | 13 | 1 | ✓ |
-| 215 | `withTimeout` | const | 12 | 1 | ✓ |
-| 230 | `holdsCalls` | const | 1 | 1 |  |
-| 233 | `wrappersFor` | function | 16 | 1 |  |
-| 251 | `wrap` | function | 4 | 1 | ✓ |
-| 252 | `action` | const | 1 | 1 | ✓ |
-
-## services/util.js
-
-| line | name | kind | lines | refs | 0.6 |
-|---|---|---|---|---|---|
-| 12 | `isFailure` | const | 1 | 3 |  |
-| 13 | `successes` | const | 1 | 4 | ✓ |
-| 16 | `filterHidden` | const | 9 | 2 | ✓ |
-| 26 | `truncate` | const | 2 | 1 | ✓ |
-| 31 | `init` | property | 3 | — |  |
-| 38 | `/each` | property | 6 | — |  |
-| 48 | `/filter` | property | 5 | — |  |
-| 58 | `/removeErrors` | property | 3 | — |  |
-| 65 | `/removeNulls` | property | 3 | — |  |
-| 72 | `/removeSuccesses` | property | 3 | — |  |
-| 79 | `/partitionErrors` | property | 3 | — |  |
-| 86 | `/concat` | property | 3 | — |  |
-| 93 | `/when` | property | 3 | — |  |
-| 97 | `/eq` | property | 3 | — |  |
-| 101 | `/gt` | property | 3 | — |  |
-| 105 | `/lt` | property | 3 | — |  |
-| 112 | `/exists` | property | 3 | — |  |
-| 119 | `/length` | property | 3 | — |  |
-| 126 | `/pick` | property | 3 | — |  |
-| 133 | `/merge` | property | 3 | — |  |
-| 140 | `/print` | property | 10 | — |  |
-| 154 | `/recordFailure` | property | 13 | — |  |
-| 172 | `/template` | property | 3 | — |  |
-| 242 | `comparison` | const | 1 | 3 | ✓ |
+| 30 | `resolveArgs` | const | 2 | 2 |  |
+| 35 | `withArgs` | const | 15 | 1 | ✓ |
+| 51 | `withDebug` | const | 12 | 1 | ✓ |
+| 55 | `show` | const | 1 | 3 |  |
+| 65 | `labelError` | function | 8 | 1 |  |
+| 76 | `recover` | function | 21 | 1 |  |
+| 98 | `withErrorHandling` | const | 8 | 1 | ✓ |
+| 109 | `withRunState` | const | 14 | 1 |  |
+| 124 | `recordResult` | function | 14 | 1 |  |
+| 139 | `parseTimeUnit` | const | 7 | 1 | ✓ |
+| 152 | `withCache` | const | 15 | 1 | ✓ |
+| 170 | `check` | function | 13 | 2 |  |
+| 171 | `show` | const | 1 | 3 |  |
+| 184 | `withPrecheck` | const | 4 | 1 |  |
+| 189 | `withPostcheck` | const | 5 | 1 |  |
+| 195 | `hasChecks` | const | 1 | 2 |  |
+| 197 | `withRateLimit` | const | 2 | 1 | ✓ |
+| 200 | `withConcurrency` | const | 2 | 1 |  |
+| 203 | `withRetry` | const | 13 | 1 | ✓ |
+| 217 | `withTimeout` | const | 12 | 1 | ✓ |
+| 232 | `servicePositions` | const | 1 | 2 |  |
+| 236 | `holdsCalls` | const | 1 | 1 |  |
+| 239 | `wrappersFor` | function | 16 | 1 |  |
+| 257 | `wrap` | function | 4 | 1 |  |
+| 258 | `action` | const | 1 | 1 |  |
+<!-- /generated:function-names -->

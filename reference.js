@@ -17,8 +17,7 @@
  * serves both dependency extraction (compile) and resolution (execute).
  */
 
-import _ from 'lodash'
-import {isPlainObject} from './common.js'
+import {isPlainObject, mapValues, getIn} from './common.js'
 
 const PATH = '((?:\\.[^.[\\]]+|\\[\\d+\\])*)'
 const REFERENCE = new RegExp(`^([$@])([A-Za-z_]\\w*)?${PATH}$`)
@@ -42,7 +41,7 @@ export const isReference = (value) =>
 export const mapReferences = (value, replace) => {
   if (isReference(value)) return replace(value)
   if (Array.isArray(value)) return value.map(v => mapReferences(v, replace))
-  if (isPlainObject(value)) return _.mapValues(value, v => mapReferences(v, replace))
+  if (isPlainObject(value)) return mapValues(value, v => mapReferences(v, replace))
   return value
 }
 
@@ -99,5 +98,5 @@ export const scopedRoot = ({name, depth}, scope) =>
 // The value a reference names, given the current scope and the resolved nodes.
 export function resolveReference(ref, scope, nodes) {
   const root = ref.sigil === '$' ? nodes[ref.name] : scopedRoot(ref, scope)
-  return ref.path.length ? _.get(root, ref.path) : root
+  return getIn(root, ref.path)
 }

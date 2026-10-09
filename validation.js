@@ -9,7 +9,7 @@
  */
 
 import {z} from 'zod'
-import _ from 'lodash'
+import {getIn, mapValues} from './common.js'
 
 const PRIMITIVE_TYPES = ['string', 'number', 'boolean', 'date', 'any', 'unknown', 'void', 'undefined', 'null']
 const WRAPPER_TYPES = ['array', 'object', 'union', 'enum', 'nullable', 'optional', 'tuple', 'function']
@@ -50,20 +50,16 @@ const showAsJson = (value) => JSON.stringify(value)
  * Format Zod error messages into MicroQL error format; `show` renders a value
  * (the runtime's inspect, at execution).
  */
+// A zod issue's path as text: `.` for the value itself, else like `items[0].name`.
+const pathText = (path) => path.length === 0 ? '.' : path.map((segment, index) =>
+  typeof segment === 'number' ? `[${segment}]` : index === 0 ? segment : `.${segment}`).join('')
+
 function formatError(zodError, value, show = showAsJson) {
   const issues = zodError?.issues || []
   const errorMessages = issues.map(err => {
-    // Build a more detailed path showing the exact location of the error
-    let path = '.'
-    if (err.path && err.path.length > 0) {
-      path = err.path.map((segment, index) => {
-        if (typeof segment === 'number') {
-          return `[${segment}]`
-        }
-        return index === 0 ? segment : `.${segment}`
-      }).join('')
-    }
-    const specificValue = path === '.' ? value : _.get(value, path)
+    // the exact location of the error, and the value found there
+    const path = pathText(err.path ?? [])
+    const specificValue = getIn(value, err.path ?? [])
 
     // Improve union error messages by finding the most helpful branch error
     let message = err.message
@@ -249,4 +245,4 @@ function applyModifiers(schema, modifiers) {
   }, schema)
 }
 
-const transformObjectShape = (shape) => _.mapValues(shape, parseSchemaRecursive)
+const transformObjectShape = (shape) => mapValues(shape, parseSchemaRecursive)

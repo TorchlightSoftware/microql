@@ -9,13 +9,12 @@
  * addresses sharing one form hash are identical calls that run once.
  */
 
-import _ from 'lodash'
 import compile from './compile.js'
 import {columnsOf} from './graph.js'
 import {formsOf} from './forms.js'
 import {isReference, parseReference, rootScope, enterPosition, scopedRoot} from './reference.js'
 import {mixed, typeOfSchema, typeOfValue, typeAtPath, listOf, satisfies} from './types.js'
-import {isPlainObject} from './common.js'
+import {isPlainObject, mapValues} from './common.js'
 
 const ERROR_TYPE = {type: 'object', fields: {message: {type: 'text'}, address: {type: 'text'}, key: {type: 'text'}}}
 
@@ -27,7 +26,7 @@ function typeOfArgument(value, scope, env) {
     return typeAtPath(root ?? mixed, ref.path)
   }
   if (Array.isArray(value)) return listOf(value.map(v => typeOfArgument(v, scope, env)))
-  if (isPlainObject(value)) return {type: 'object', fields: _.mapValues(value, v => typeOfArgument(v, scope, env))}
+  if (isPlainObject(value)) return {type: 'object', fields: mapValues(value, v => typeOfArgument(v, scope, env))}
   return typeOfValue(value)
 }
 
@@ -49,7 +48,7 @@ function stepsTypes(steps, scope, env) {
 // expected and actual return, and the call's own return type.
 function callTypes(call, scope, env) {
   const expectedFields = typeOfSchema(call.validators?.precheck?.service).fields ?? {}
-  const args = _.mapValues({...call.args, ...call.settingsArgs}, (value, field) => ({
+  const args = mapValues({...call.args, ...call.settingsArgs}, (value, field) => ({
     expected: expectedFields[field] ?? mixed,
     actual: typeOfArgument(value, scope, env)
   }))
@@ -58,7 +57,7 @@ function callTypes(call, scope, env) {
   const iterated = args[call.iterates]?.actual
   const item = iterated?.type === 'list' ? iterated.element : mixed
 
-  const positions = _.mapValues(call.positions, (position, field) => {
+  const positions = mapValues(call.positions, (position, field) => {
     const input = field === 'onError' ? ERROR_TYPE : item
     const actual = stepsTypes(position.steps, enterPosition(position, scope, input), env)
     const expected = typeOfSchema(position.returns)

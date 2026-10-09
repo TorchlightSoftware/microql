@@ -18,7 +18,7 @@ describe('core is platform-free', () => {
     ['import fs from \'node:fs\'\nfs()', 'compile.js', true],
     ['import {inspect} from \'util\'\ninspect()', 'wrappers.js', true],
     ['import fs from \'fs-extra\'\nfs()', 'services/util.js', true],
-    ['import _ from \'lodash\'\n_()', 'execute.js', false],
+    ['import {sha256} from \'@noble/hashes/sha2.js\'\nsha256()', 'forms.js', false],
     ['import fs from \'node:fs\'\nfs()', 'node.js', false],
     ['import fs from \'node:fs\'\nfs()', 'test/anything.test.js', false]
   ]

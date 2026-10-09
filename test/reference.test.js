@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
 import {parseReference, isReference, resolveReference, mapReferences} from '../reference.js'
-import {isPlainObject} from '../common.js'
 
 describe('Reference grammar', () => {
   // [string, parsed reference]
@@ -108,27 +107,4 @@ describe('mapReferences', () => {
     assert.equal(mapped.date, date)
     assert.equal(mapped.instance, instance)
   })
-})
-
-describe('isPlainObject', () => {
-  // [value, is plain]
-  const cases = [
-    [{}, true],
-    [{a: 1}, true],
-    [Object.create(null), true],
-    [JSON.parse('{"a":1}'), true],
-    [[], false],
-    [null, false],
-    ['text', false],
-    [new Date(0), false],
-    [new Map(), false],
-    [new (class Holder {})(), false],
-    [Object.create({inherited: true}), false]
-  ]
-
-  for (const [value, expected] of cases) {
-    it(`${expected ? 'accepts' : 'rejects'} ${Object.prototype.toString.call(value)} ${JSON.stringify(value) ?? ''}`, () => {
-      assert.equal(isPlainObject(value), expected)
-    })
-  }
 })

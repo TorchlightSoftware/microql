@@ -12,7 +12,6 @@
  * errors of its enclosing onError handlers (`@err`, `@@err`).
  */
 
-import _ from 'lodash'
 import {columnsOf, upstreamOf} from './graph.js'
 import {formsOf} from './forms.js'
 import {memoryStore, defaultRuntime} from './runtime.js'
@@ -20,6 +19,7 @@ import {wrap} from './wrappers.js'
 import {rootScope, enterPosition} from './reference.js'
 import RateLimitedQueue from './ratelimit.js'
 import {concurrencyLimit} from './concurrency.js'
+import {mapValues, pick} from './common.js'
 
 // The runtime each service last received at init. A service is initialized
 // at most once per runtime; a service shared between runtimes is initialized
@@ -163,7 +163,7 @@ export async function execute(compiled, {runState = memoryStore(), trigger, targ
     inflight: new Map(),
     pending: new Set(),
     usedServices: new Map(),
-    rateLimiters: _.mapValues(settings.rateLimit ?? {}, interval => new RateLimitedQueue(interval)),
+    rateLimiters: mapValues(settings.rateLimit ?? {}, interval => new RateLimitedQueue(interval)),
     limit: settings.concurrency ? concurrencyLimit(settings.concurrency) : undefined,
     rerun,
     onUpdate,
@@ -175,7 +175,7 @@ export async function execute(compiled, {runState = memoryStore(), trigger, targ
   await initServices(new Set(compiled.calls.map(call => call.service)), runtime)
 
   try {
-    for (const column of columnsOf(_.pick(compiled.phases, phases))) {
+    for (const column of columnsOf(pick(compiled.phases, phases))) {
       await Promise.all(column.map(async (name) => {
         run.nodes[name] = await runPhase(name, run)
       }))
@@ -188,7 +188,7 @@ export async function execute(compiled, {runState = memoryStore(), trigger, targ
     await callTearDown(run.usedServices)
   }
 
-  return _.pick(run.nodes, phases)
+  return pick(run.nodes, phases)
 }
 
 export default execute

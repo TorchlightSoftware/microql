@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import _ from 'lodash'
 import compile from '../compile.js'
 import {canonical, hashOf, formsOf} from '../forms.js'
 
@@ -39,7 +38,8 @@ describe('form hashes', () => {
   }
   services.scraper['/images']._argtypes = {on: {argOrder: 0}}
 
-  const base = {
+  // a fresh Query on every call, so an edit never reaches another test
+  const baseQuery = () => ({
     given: {baseUrl: 'https://a.example', unused: 1},
     services,
     phases: {
@@ -52,11 +52,12 @@ describe('form hashes', () => {
         ]
       }]
     }
-  }
+  })
+  const base = baseQuery()
 
   const hashesOf = (query) => {
     const forms = formsOf(compile(query))
-    return _.mapValues(Object.fromEntries(forms.calls), 'hash')
+    return Object.fromEntries([...forms.calls].map(([address, {hash}]) => [address, hash]))
   }
 
   // [edit, addresses whose form hash changes, addresses that appear or disappear]
@@ -78,7 +79,7 @@ describe('form hashes', () => {
   for (const [name, edit, changed] of edits) {
     it(`${name}: changes ${changed.length ? changed.join(', ') : 'nothing'}`, () => {
       const before = hashesOf(base)
-      const edited = _.cloneDeepWith(base, v => typeof v === 'function' ? v : undefined)
+      const edited = baseQuery()
       edit(edited)
       const after = hashesOf(edited)
 

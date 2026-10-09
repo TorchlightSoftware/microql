@@ -257,7 +257,7 @@ const resolvers = {
 
 **Minimal Overhead**:
 - Small codebase (~1000 lines)
-- Minimal dependencies (lodash, zod)
+- Minimal dependencies (zod, @noble/hashes, @tlsft/service-key)
 - Direct function calls to services
 
 ### GraphQL Performance

@@ -5,14 +5,14 @@
  * names. Platform-free: the runtime arrives as `config.runtime`.
  */
 
-import _ from 'lodash'
+import {pick} from './common.js'
 import compile from './compile.js'
 import execute from './execute.js'
 import {resolveReference, rootScope} from './reference.js'
 
 // What `select` names: one reference's value, or the listed phases by name.
 export function applySelection(results, select) {
-  if (Array.isArray(select)) return _.pick(results, select.map(ref => ref.name))
+  if (Array.isArray(select)) return pick(results, select.map(ref => ref.name))
   if (select) return resolveReference(select, rootScope, results)
   return results
 }

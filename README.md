@@ -301,13 +301,22 @@ A draft that fails its `postcheck` — a thread entry over 280 characters — is
 npm test
 ```
 
+## Generated docs
+
+[performance.md](performance.md) and [function-names.md](function-names.md) mix prose with generated sections, marked `<!-- generated:name -->` … `<!-- /generated:name -->`. The scripts rewrite only the text between their markers:
+
+```bash
+npm run docs:bench       # performance.md results: this checkout vs 0.6.6, about a minute
+npm run docs:functions   # function-names.md tables: after changing core
+```
+
 ## Questions
 
 ### How is this different from GraphQL?
 
 GraphQL is primarily developed for field extraction, whereas MicroQL was designed for service orchestration.  You can do service orchestration with GraphQL but it requires that you put a lot more leg work into resolvers and that you manually think about dependency resolution.  MicroQL infers dependency resolution and parallelism from the paths that are referenced.  MicroQL also doesn't invent a completely new syntax - it's mostly a subset of JSON.  We found ways to do that without being pedantic and verbose.
 
-The MicroQL codebase is also small, dependencies `lodash`, `zod` and `@tlsft/service-key`.
+The MicroQL codebase is also small, dependencies `zod`, `@noble/hashes` and `@tlsft/service-key`.
 
 [See here for a more detailed comparison](docs/comparison-graphql.md).
 

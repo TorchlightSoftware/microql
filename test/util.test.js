@@ -174,6 +174,39 @@ describe('Util Service Tests', () => {
       assert.deepStrictEqual(original, {name: 'Alice', age: 30})
       assert.deepStrictEqual(toMerge, {age: 31, city: 'NYC'})
     })
+
+    // [description, on, with, merged]: arrays are a set union by value, so
+    // merging the same `with` again changes nothing
+    const merges = [
+      ['unions primitive arrays', {tags: ['a', 'b']}, {tags: ['b', 'c']}, {tags: ['a', 'b', 'c']}],
+      ['unions records by value, not identity', {items: [{id: 1}]}, {items: [{id: 1}, {id: 2}]}, {items: [{id: 1}, {id: 2}]}],
+      ['keeps duplicates already in on', {tags: ['a', 'a']}, {tags: ['a']}, {tags: ['a', 'a']}],
+      ['adds an array on lacks', {}, {tags: ['a']}, {tags: ['a']}],
+      ['merges arrays inside nested objects', {profile: {roles: ['admin']}}, {profile: {roles: ['editor']}}, {profile: {roles: ['admin', 'editor']}}],
+      ['skips undefined in with', {name: 'Alice'}, {name: undefined}, {name: 'Alice'}],
+      ['overwrites with null', {name: 'Alice'}, {name: null}, {name: null}],
+      ['replaces a value of another kind', {tags: 'a', profile: ['x']}, {tags: ['b'], profile: {theme: 'dark'}}, {tags: ['b'], profile: {theme: 'dark'}}]
+    ]
+
+    for (const [description, on, withObj, merged] of merges) {
+      it(`merge ${description}`, async () => {
+        assert.deepStrictEqual(await util['/merge']({on, with: withObj}), merged)
+      })
+    }
+
+    it('merges idempotently', async () => {
+      const on = {tags: ['a'], profile: {roles: [{id: 1}]}}
+      const withObj = {tags: ['b'], profile: {roles: [{id: 2}]}}
+      const once = await util['/merge']({on, with: withObj})
+      assert.deepStrictEqual(await util['/merge']({on: once, with: withObj}), once)
+    })
+
+    it('does not share nested objects with its inputs', async () => {
+      const on = {profile: {roles: ['admin']}}
+      const result = await util['/merge']({on, with: {profile: {theme: 'dark'}}})
+      result.profile.roles.push('editor')
+      assert.deepStrictEqual(on, {profile: {roles: ['admin']}})
+    })
   })
 
   describe('MicroQL Integration', () => {

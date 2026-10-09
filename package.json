@@ -14,6 +14,8 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "bench": "node scripts/bench.js",
+    "docs:bench": "node scripts/bench-report.js",
+    "docs:functions": "node scripts/function-names.js",
     "lint": "npx eslint .",
     "lint:fix": "npx eslint --fix ."
   },
@@ -47,13 +49,13 @@
   "devDependencies": {
     "@stylistic/eslint-plugin": "^5.2.0",
     "eslint": "^9.31.0",
+    "espree": "^10.4.0",
     "fs-extra": "^11.4.1",
     "simple-git-hooks": "^2.13.0"
   },
   "dependencies": {
     "@noble/hashes": "^2.4.0",
-    "@tlsft/service-key": "^0.2.0",
-    "lodash": "^4.17.10",
+    "@tlsft/service-key": "^0.3.0",
     "zod": "^4.0.5"
   },
   "engines": {

@@ -16,9 +16,8 @@
  * fit — while a precheck failure isn't, since no attempt changes the arguments.
  */
 
-import _ from 'lodash'
 import {mapReferences, parseReference, resolveReference} from './reference.js'
-import {getServiceColorName} from './common.js'
+import {getServiceColorName, mapValues, defaults} from './common.js'
 import {hashOf} from './forms.js'
 import {validate} from './validation.js'
 
@@ -38,8 +37,8 @@ const withArgs = (next, call) => {
   return async (_args, inv) => {
     const {scope, run} = inv
     const data = resolveArgs(call.args, scope, run.nodes)
-    const settingsArgs = _.mapValues(resolveArgs(call.settingsArgs, scope, run.nodes),
-      value => _.defaults({}, value, call.settings))
+    const settingsArgs = mapValues(resolveArgs(call.settingsArgs, scope, run.nodes),
+      value => defaults(value, call.settings))
     const services = Object.fromEntries(positions.map(([field, position]) =>
       [field, (input) => run.runPosition(position, scope, input)]))
 
