@@ -32,9 +32,11 @@ function typeOfArgument(value, scope, env) {
 
 const describeType = (t) => t.type === 'list' ? `list of ${describeType(t.element)}` : t.type
 
-function warnUnless(expected, actual, where, env) {
+// A type mismatch is an error in the plan; run-time validation still decides
+// whether the call runs.
+function checkType(expected, actual, where, env) {
   if (!satisfies(expected, actual)) {
-    env.warnings.push({address: where, message: `${where} expects ${describeType(expected)} but receives ${describeType(actual)}`})
+    env.errors.push({address: where, message: `${where} expects ${describeType(expected)} but receives ${describeType(actual)}`})
   }
 }
 
@@ -47,12 +49,12 @@ function stepsTypes(steps, scope, env) {
 // A call's types: each argument's expected and actual type, each position's
 // expected and actual return, and the call's own return type.
 function callTypes(call, scope, env) {
-  const expectedFields = typeOfSchema(call.validators?.precheck?.service).fields ?? {}
+  const expectedFields = typeOfSchema(call.validators?.precheck?.schema).fields ?? {}
   const args = mapValues({...call.args, ...call.settingsArgs}, (value, field) => ({
     expected: expectedFields[field] ?? mixed,
     actual: typeOfArgument(value, scope, env)
   }))
-  for (const [field, {expected, actual}] of Object.entries(args)) warnUnless(expected, actual, `${call.address}.${field}`, env)
+  for (const [field, {expected, actual}] of Object.entries(args)) checkType(expected, actual, `${call.address}.${field}`, env)
 
   const iterated = args[call.iterates]?.actual
   const item = iterated?.type === 'list' ? iterated.element : mixed
@@ -61,22 +63,27 @@ function callTypes(call, scope, env) {
     const input = field === 'onError' ? ERROR_TYPE : item
     const actual = stepsTypes(position.steps, enterPosition(position, scope, input), env)
     const expected = typeOfSchema(position.returns)
-    warnUnless(expected, actual, `${call.address}.${field}`, env)
+    checkType(expected, actual, `${call.address}.${field}`, env)
     return {expected, actual}
   })
 
-  const returns = typeOfSchema(call.validators?.postcheck?.query ?? call.validators?.postcheck?.service)
+  const returns = typeOfSchema(call.validators?.postcheck?.call ?? call.validators?.postcheck?.schema)
   env.calls.set(call.address, {args, positions, returns})
   return returns
 }
 
-// Expected and actual types for every call, by address, plus mismatch warnings.
+// Expected and actual types for every call, by address, plus mismatch errors.
+// $trigger's type: the payload's own when there is one, else the Query's
+// trigger schema's, else mixed.
+const triggerType = (payload, schema) =>
+  payload !== undefined ? typeOfValue(payload) : schema ? typeOfSchema(schema) : mixed
+
 function inferTypes(compiled, columns, trigger) {
   const env = {
-    nodes: {given: typeOfValue(compiled.given), trigger: trigger === undefined ? mixed : typeOfValue(trigger)},
+    nodes: {given: typeOfValue(compiled.given), trigger: triggerType(trigger, compiled.triggerSchema)},
     phases: {},
     calls: new Map(),
-    warnings: []
+    errors: []
   }
   for (const name of columns.flat()) {
     env.phases[name] = stepsTypes(compiled.phases[name].steps, {...rootScope, flow: mixed}, env)
@@ -97,7 +104,7 @@ export function plan(query, {trigger} = {}) {
 
   const roots = [
     compiled.given !== undefined && {name: 'given', type: types.nodes.given},
-    compiled.trigger && {name: 'trigger', kind: compiled.trigger.kind, type: types.nodes.trigger}
+    {name: 'trigger', type: types.nodes.trigger}
   ].filter(Boolean)
 
   return {
@@ -120,6 +127,7 @@ export function plan(query, {trigger} = {}) {
       form: forms.calls.get(call.address).form,
       types: types.calls.get(call.address)
     })),
-    warnings: [...compiled.warnings, ...types.warnings]
+    warnings: compiled.warnings,
+    errors: types.errors
   }
 }

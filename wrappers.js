@@ -17,7 +17,7 @@
  */
 
 import {mapReferences, parseReference, resolveReference} from './reference.js'
-import {getServiceColorName, mapValues, defaults} from './common.js'
+import {VALIDATION_NAMES, getServiceColorName, mapValues, defaults} from './common.js'
 import {hashOf} from './forms.js'
 import {validate} from './validation.js'
 
@@ -99,6 +99,8 @@ const withErrorHandling = (next) => async (args, inv) => {
   try {
     return await next(args, inv)
   } catch (error) {
+    // an aborted Run handles nothing: the abort passes through untouched
+    if (inv.run.signal?.aborted) throw error
     labelError(error, inv)
     return recover(error, inv)
   }
@@ -175,20 +177,20 @@ function check(value, order, designations, {call, run}) {
     try {
       validate(schema, value, show)
     } catch (error) {
-      error.message = `${designation} ${order} validation failed:\n${error.message}`
+      error.message = `${VALIDATION_NAMES[designation]} ${order} failed:\n${error.message}`
       throw error
     }
   }
 }
 
 const withPrecheck = (next) => async (args, inv) => {
-  check(args, 'precheck', ['query', 'service'], inv)
+  check(args, 'precheck', ['call', 'schema'], inv)
   return next(args, inv)
 }
 
 const withPostcheck = (next) => async (args, inv) => {
   const result = await next(args, inv)
-  check(result, 'postcheck', ['service', 'query'], inv)
+  check(result, 'postcheck', ['schema', 'call'], inv)
   return result
 }
 

@@ -4,29 +4,31 @@ MicroQL provides a powerful validation system based on [Zod](https://zod.dev/) t
 
 ## Table of Contents
 
-- [Query and Service Validations](#query-and-service-validations)
+- [Service Call Validations and Service Schema Validations](#service-call-validations-and-service-schema-validations)
 - [Schema Syntax](#schema-syntax)
 - [Error Messages](#error-messages)
 - [Examples](#examples)
 
-## Query and Service Validations
+## Service Call Validations and Service Schema Validations
 
-Validation in MicroQL can be defined at two levels:
+Validation in MicroQL can be defined in two places:
 
-1. **Query-level validation**: Query writers can add validations to enforce their expectations
-2. **Service-level validation**: Service writers can add validations in leiu of imperative conditional input validation
+1. **Service Call Validations**: the Query's author adds `precheck` and `postcheck` to one service call, to enforce what that call should receive and return.
+2. **Service Schema Validations**: the service's author declares schemas for a resource's input fields and its result, in lieu of imperative input checks.
+
+There is no validation spanning a whole Query. The closest is the schema a Query may declare for its trigger payload (`trigger.schema`), which uses the same syntax; see [Runtime Integration](runtime-integration.md#trigger).
 
 ## Validation Execution Order
 
-- **Precheck**: On `args` before execution: [Query Validations, Service Validations]
-- **Postcheck**: On `results` after execution: [Service Validations, Query Validations]
+- **Precheck**: on the input fields, before the call: [Service Call Validations, Service Schema Validations]
+- **Postcheck**: on the result, after the call: [Service Schema Validations, Service Call Validations]
 
-Basically query validations "wrap" service validations which "wrap" the service in question.
+Service Call Validations wrap Service Schema Validations, which wrap the call itself.
 
 ### Some Examples
 
 ```javascript
-// Query with service validation
+// A Query whose service call adds its own validation
 const config = {
   services: { userService },
   phases: {
@@ -37,7 +39,7 @@ const config = {
         age: 25
       },
 
-      // Validation for `createUser`
+      // Service Call Validation for this call to `createUser`
       precheck: {
         userData: {
           age: ['number', {min: 18, max: 65}]
@@ -54,7 +56,7 @@ const userService = {
   }
 }
 
-// Service-level validation - precheck and postcheck
+// Service Schema Validation: precheck and postcheck
 userService['/createUser']._validators = {
   precheck: {
     userData: {
@@ -148,7 +150,7 @@ Wrapper types handle complex data structures and can be combined with modifiers:
 ['optional', ['number']]
 ```
 
-### 5. Direct Zod Schema Usage
+### 4. Direct Zod Schema Usage
 
 For advanced cases not covered by the JSON syntax, you can use Zod schemas directly:
 
@@ -186,15 +188,17 @@ util['/each']._validators = {
 Validation errors provide clear, detailed messages with full context:
 
 ```
-// [<queryName> - <serviceName>:<action>]
-[newUser - userService:createUser] precheck validation failed:
- - userData.age: -25 => Too small: expected number to be >0
- - userData.email: 'invalid-email' => Invalid email
+// [<address> - <service key>] <Service Call Validation | Service Schema Validation> <precheck | postcheck> failed:
+[$newUser.@1 - GET [userService]/createUser] Service Schema Validation precheck failed:
+- userData.age: -25 => Too small: expected number to be >0
+- userData.email: 'invalid-email' => Invalid email
 ```
+
+The error names which validation failed. A schema that can't be parsed fails before anything runs, named the same way: `Service Call Validation precheck schema parse error`.
 
 ## Examples
 
-Examples are mixed from Query and Service validations.  The format is the same, `Query` / `Service` and `precheck` / `postcheck`.  So any of the examples here can be used anywhere a validator is expected.
+Examples are mixed from Service Call Validations and Service Schema Validations. The syntax is the same for both, and for `precheck` and `postcheck`, so any of the examples here can be used anywhere a validator is expected.
 
 **For comprehensive examples and test cases**, see `test/validation.test.js` which contains data-driven tests demonstrating all syntax patterns, modifier combinations, and edge cases.
 

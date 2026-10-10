@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import query, {memoryStore} from '../index.js'
+import query, {memoryStore, plan} from '../node.js'
 
 // A service that counts its calls by id, and fails the ids it's told to.
 const counting = (failing = new Set()) => ({
@@ -58,13 +58,57 @@ describe('onUpdate', () => {
     assert.deepEqual(source.calls, {categories: 1, listings: 1, records: 1, summary: 1})
   })
 
+  // The done update of each phase, by name.
+  const doneUpdates = async (config, options) => {
+    const updates = []
+    await query(config, {...options, onUpdate: update => updates.push(update)})
+    return Object.fromEntries(updates.filter(u => u.status === 'done').map(u => [u.name, u]))
+  }
+
+  it('reports the hash of each phase\'s result, and of each upstream result it read', async () => {
+    const done = await doneUpdates(pipeline(counting()))
+    assert.match(done.categories.resultHash, /^[0-9a-f]{64}$/)
+    assert.deepEqual(done.categories.upstream, {})
+    assert.deepEqual(done.listings.upstream, {categories: done.categories.resultHash})
+    assert.deepEqual(done.records.upstream, {listings: done.listings.resultHash})
+  })
+
+  // A source whose categories result is whatever `version` holds now.
+  const versioned = () => {
+    const source = counting()
+    source.version = 1
+    const fetch = source['/fetch']
+    source['/fetch'] = async function ({id}) {
+      const result = await fetch.call(this, {id})
+      return id === 'categories' ? {...result, version: this.version} : result
+    }
+    return source
+  }
+
+  // [description, change before rerunning categories, listings goes stale]
+  const reruns = [
+    ['an unchanged result', () => {}, false],
+    ['a changed result', source => { source.version = 2 }, true]
+  ]
+
+  for (const [description, change, stale] of reruns) {
+    it(`lets a platform tell that a later phase is ${stale ? '' : 'not '}stale after rerunning upstream with ${description}`, async () => {
+      const source = versioned()
+      const runState = memoryStore()
+      const first = await doneUpdates(pipeline(source), {runState})
+      change(source)
+      const rerun = await doneUpdates(pipeline(source), {runState, target: '$categories'})
+      assert.equal(first.listings.upstream.categories !== rerun.categories.resultHash, stale)
+    })
+  }
+
   it('reports when a phase started and how long it took, never its output', async () => {
     const updates = []
     await query(pipeline(counting()), {onUpdate: update => updates.push(update)})
 
     const [running, done] = updates.filter(u => u.name === 'categories')
     assert.deepEqual(Object.keys(running).sort(), ['kind', 'name', 'startedAt', 'status'])
-    assert.deepEqual(Object.keys(done).sort(), ['duration', 'kind', 'name', 'startedAt', 'status'])
+    assert.deepEqual(Object.keys(done).sort(), ['duration', 'kind', 'name', 'resultHash', 'startedAt', 'status', 'upstream'])
     assert.equal(done.startedAt, running.startedAt)
     assert.equal(typeof done.duration, 'number')
   })
@@ -115,4 +159,64 @@ describe('target', () => {
       await assert.rejects(query(pipeline(counting()), {target}), pattern)
     })
   }
+})
+
+describe('abort', () => {
+  // A service whose /wait never answers, and says when it has been called.
+  const gated = () => {
+    const service = {calls: [], started: null}
+    service.started = new Promise(resolve => {
+      service['/wait'] = async () => { service.calls.push('wait'); resolve(); return new Promise(() => {}) }
+    })
+    service['/quick'] = async () => { service.calls.push('quick'); return 'quick' }
+    service['/after'] = async () => { service.calls.push('after'); return 'after' }
+    return service
+  }
+
+  const gatedQuery = (gate, onError) => ({
+    services: {gate},
+    settings: onError ? {onError} : {},
+    phases: {
+      quick: ['GET [gate]/quick', {}],
+      waiting: [['GET [gate]/wait', {after: '$quick'}], ['GET [gate]/after', {}]]
+    }
+  })
+
+  it('stops at once, reports the running phase cancelled with its calls in flight, and keeps finished results', {timeout: 2000}, async () => {
+    const gate = gated()
+    const controller = new AbortController()
+    const runState = memoryStore()
+    const updates = []
+    const run = query(gatedQuery(gate), {runState, signal: controller.signal, onUpdate: update => updates.push(update)})
+
+    await gate.started
+    controller.abort()
+    await assert.rejects(run, {name: 'AbortError'})
+
+    const cancelled = updates.find(u => u.name === 'waiting' && u.status === 'cancelled')
+    assert.deepEqual(cancelled.inFlight, ['$waiting.@1'])
+    assert.deepEqual(gate.calls, ['quick', 'wait'])
+    const {calls} = plan(gatedQuery(gate))
+    const [quick] = await runState.list(calls.find(c => c.address === '$quick.@1').formHash)
+    assert.equal(quick.status, 'done')
+  })
+
+  it('runs nothing when the signal has already aborted', async () => {
+    const gate = gated()
+    await assert.rejects(query(gatedQuery(gate), {signal: AbortSignal.abort()}), {name: 'AbortError'})
+    assert.deepEqual(gate.calls, [])
+  })
+
+  it('does not run the global onError handler', {timeout: 2000}, async () => {
+    const gate = gated()
+    const handled = []
+    gate['/handle'] = async () => { handled.push('handled') }
+    const controller = new AbortController()
+    const run = query(gatedQuery(gate, ['GET [gate]/handle', {}]), {signal: controller.signal})
+
+    await gate.started
+    controller.abort()
+    await assert.rejects(run, {name: 'AbortError'})
+    assert.deepEqual(handled, [])
+  })
 })

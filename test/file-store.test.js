@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {describe, it, beforeEach} from 'node:test'
 import {rm, readdir} from 'node:fs/promises'
-import {fileStore} from '../node.js'
+import {fileStore, memoryStore} from '../node.js'
 
 const DIR = '.cache-test-file-store'
 const hour = 3600000
@@ -48,3 +48,38 @@ describe('fileStore', () => {
     await fileStore(DIR).sweep()
   })
 })
+
+// The stores MicroQL ships, each emptied before a test.
+const stores = [
+  ['memoryStore', async () => memoryStore()],
+  ['fileStore', async () => { await rm(DIR, {recursive: true, force: true}); return fileStore(DIR) }]
+]
+
+for (const [name, fresh] of stores) {
+  describe(`${name} clear`, () => {
+    // Two forms with an entry each.
+    const filled = async () => {
+      const store = await fresh()
+      await store.set('form-a', 'one', entry('one', hour))
+      await store.set('form-b', 'two', entry('two', hour))
+      return store
+    }
+
+    it('clears one form, leaving the others', async () => {
+      const store = await filled()
+      await store.clear('form-a')
+      assert.deepEqual(await store.list('form-a'), [])
+      assert.equal((await store.get('form-b', 'two')).output, 'two')
+    })
+
+    it('clears every form when given none', async () => {
+      const store = await filled()
+      await store.clear()
+      assert.deepEqual([...await store.list('form-a'), ...await store.list('form-b')], [])
+    })
+
+    it('clears a form it never held', async () => {
+      await (await fresh()).clear('missing')
+    })
+  })
+}

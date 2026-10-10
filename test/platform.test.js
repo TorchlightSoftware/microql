@@ -11,7 +11,7 @@ const rulesFired = async (code, filePath) => {
   return result.messages.map(m => m.ruleId)
 }
 
-describe('core is platform-free', () => {
+describe('core is free of environment dependencies', () => {
   // [import, file it appears in, banned]
   const cases = [
     ['import fs from \'fs\'\nfs()', 'execute.js', true],
@@ -43,14 +43,21 @@ describe('core is platform-free', () => {
 })
 
 describe('entry points', () => {
-  it('maps workerd to core and node to the node entry point', async () => {
+  it('exports the node entry point as microql and core as microql/core', async () => {
     const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
-    assert.deepEqual(pkg.exports['.'], {workerd: './index.js', node: './node.js', default: './index.js'})
+    assert.deepEqual(pkg.exports, {'.': './node.js', './core': './index.js'})
   })
 
-  it('resolves to the node entry point under node', async () => {
+  it('resolves microql to core plus the node runtime', async () => {
     const microql = await import('microql')
     assert.equal(typeof microql.nodeRuntime, 'object')
     assert.equal(typeof microql.default, 'function')
+  })
+
+  it('resolves microql/core to core alone, with no runtime of its own', async () => {
+    const core = await import('microql/core')
+    assert.equal(typeof core.execute, 'function')
+    assert.equal(core.nodeRuntime, undefined)
+    assert.equal(core.defaultRuntime, undefined)
   })
 })

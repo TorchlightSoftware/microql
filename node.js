@@ -11,6 +11,7 @@ import {inspect} from 'node:util'
 import path from 'node:path'
 import {mkdir, readFile, readdir, rm, writeFile} from 'node:fs/promises'
 import coreQuery from './query.js'
+import {memoryStore} from './runtime.js'
 
 export * from './index.js'
 
@@ -78,6 +79,10 @@ export function fileStore(dir) {
       await ready()
       const files = await filesIn(path.join(dir, form))
       return Promise.all(files.map(file => readJson(path.join(dir, form, file))))
+    },
+    // not part of what core calls: the owner's way to empty one form, or all
+    async clear(form) {
+      await rm(form === undefined ? dir : path.join(dir, form), {recursive: true, force: true})
     }
   }
 }
@@ -102,7 +107,8 @@ export const nodeRuntime = {
   cache: fileStore('.cache')
 }
 
-// A Query run with the node runtime unless the config names another.
+// A Query run with the node runtime, and a fresh Run State in memory, unless
+// the caller passes its own.
 export default function query(config, options) {
-  return coreQuery({runtime: nodeRuntime, ...config}, options)
+  return coreQuery({runtime: nodeRuntime, ...config}, {runState: memoryStore(), ...options})
 }

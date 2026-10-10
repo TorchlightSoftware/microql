@@ -36,7 +36,9 @@ export default [
         crypto: 'readonly',
         TextEncoder: 'readonly',
         performance: 'readonly',
-        URL: 'readonly'
+        URL: 'readonly',
+        AbortController: 'readonly',
+        AbortSignal: 'readonly'
       }
     },
     plugins: {
@@ -92,7 +94,7 @@ export default [
         caughtErrorsIgnorePattern: '^_'
       }],
 
-      // Core is platform-free: no node built-ins, and nothing built on them
+      // Core is free of environment dependencies: no node built-ins, and nothing built on them
       'no-restricted-imports': ['error', {
         paths: [...builtinModules, 'fs-extra'].map(name => ({
           name,

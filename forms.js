@@ -23,16 +23,18 @@ import {isPlainObject, getIn, omit} from './common.js'
 const OPERATIONAL_SETTINGS = ['timeout', 'retry', 'debug', 'cache']
 
 
-// The value as canonical JSON: sorted keys (RFC 8785 ordering), functions and
-// undefined dropped, errors by name, message and their own fields.
+// The value as canonical JSON: sorted keys (RFC 8785 ordering), errors by name,
+// message and their own fields. Functions and undefined are dropped from
+// objects, and read as null anywhere else.
 export function canonical(value) {
   return JSON.stringify(canonicalValue(value))
 }
 
 function canonicalValue(value) {
+  if (value === undefined || typeof value === 'function') return null
   if (value instanceof Error) return canonicalValue({...value, name: value.name, message: value.message})
   if (value instanceof Date) return value.toISOString()
-  if (Array.isArray(value)) return value.map(v => v === undefined || typeof v === 'function' ? null : canonicalValue(v))
+  if (Array.isArray(value)) return value.map(canonicalValue)
   if (isPlainObject(value)) {
     return Object.fromEntries(Object.keys(value).sort()
       .filter(k => value[k] !== undefined && typeof value[k] !== 'function')

@@ -23,14 +23,14 @@ The tables below are generated. Regenerate them with `npm run docs:functions` af
 
 | line | name | kind | lines | refs | 0.6 |
 |---|---|---|---|---|---|
-| 9 | `getServiceColorName` | const | 6 | 1 | ✓ |
-| 18 | `isPlainObject` | const | 5 | 11 |  |
-| 28 | `mapValues` | const | 5 | 11 |  |
-| 35 | `filterObject` | const | 2 | 3 |  |
-| 39 | `pick` | const | 2 | 6 | ✓ |
-| 42 | `omit` | const | 1 | 4 |  |
-| 45 | `getIn` | const | 1 | 3 |  |
-| 48 | `defaults` | const | 9 | 3 |  |
+| 14 | `getServiceColorName` | const | 6 | 1 | ✓ |
+| 23 | `isPlainObject` | const | 5 | 11 |  |
+| 33 | `mapValues` | const | 5 | 11 |  |
+| 40 | `filterObject` | const | 2 | 3 |  |
+| 44 | `pick` | const | 2 | 6 | ✓ |
+| 47 | `omit` | const | 1 | 4 |  |
+| 50 | `getIn` | const | 1 | 3 |  |
+| 53 | `defaults` | const | 9 | 3 |  |
 
 ## compile.js
 
@@ -41,23 +41,23 @@ The tables below are generated. Regenerate them with `npm run docs:functions` af
 | 47 | `parseDescriptor` | function | 16 | 1 |  |
 | 67 | `lookupAction` | function | 17 | 1 |  |
 | 86 | `targetField` | function | 5 | 1 |  |
-| 92 | `parseSchemaWithErrorContext` | function | 8 | 2 | ✓ |
-| 102 | `compileValidators` | const | 16 | 1 | ✓ |
-| 121 | `compileSettings` | const | 8 | 1 | ✓ |
-| 132 | `checkReferences` | function | 16 | 1 |  |
-| 134 | `check` | const | 11 | 3 |  |
-| 149 | `parseWithSite` | function | 7 | 2 |  |
-| 157 | `checkReference` | function | 8 | 1 |  |
-| 167 | `declareBinding` | function | 8 | 1 |  |
-| 178 | `sitesAt` | const | 4 | 3 |  |
-| 186 | `compileSteps` | function | 6 | 3 |  |
-| 198 | `compilePosition` | function | 23 | 1 |  |
-| 223 | `positionFields` | function | 10 | 1 |  |
-| 235 | `compileCall` | function | 45 | 1 |  |
-| 281 | `compilePhase` | function | 9 | 1 |  |
-| 292 | `compileGlobalOnError` | function | 4 | 1 |  |
-| 298 | `compileSelect` | function | 10 | 1 |  |
-| 313 | `compile` | function | 30 | 2 | ✓ |
+| 92 | `parseSchemaWithErrorContext` | function | 8 | 3 | ✓ |
+| 103 | `compileValidators` | const | 16 | 1 | ✓ |
+| 122 | `compileSettings` | const | 8 | 1 | ✓ |
+| 133 | `checkReferences` | function | 16 | 1 |  |
+| 135 | `check` | const | 11 | 3 |  |
+| 150 | `parseWithSite` | function | 7 | 2 |  |
+| 158 | `checkReference` | function | 8 | 1 |  |
+| 168 | `declareBinding` | function | 8 | 1 |  |
+| 179 | `sitesAt` | const | 4 | 3 |  |
+| 187 | `compileSteps` | function | 6 | 3 |  |
+| 199 | `compilePosition` | function | 23 | 1 |  |
+| 224 | `positionFields` | function | 10 | 1 |  |
+| 236 | `compileCall` | function | 45 | 1 |  |
+| 282 | `compilePhase` | function | 9 | 1 |  |
+| 293 | `compileGlobalOnError` | function | 4 | 1 |  |
+| 299 | `compileSelect` | function | 10 | 1 |  |
+| 314 | `compile` | function | 32 | 2 | ✓ |
 
 ## concurrency.js
 
@@ -75,32 +75,37 @@ The tables below are generated. Regenerate them with `npm run docs:functions` af
 | 39 | `callTearDown` | function | 12 | 1 | ✓ |
 | 53 | `runSteps` | function | 7 | 2 |  |
 | 62 | `runPosition` | function | 3 | 2 |  |
-| 66 | `invoke` | function | 6 | 1 |  |
-| 75 | `settle` | function | 3 | 2 |  |
-| 81 | `report` | function | 7 | 1 |  |
-| 91 | `runPhase` | function | 18 | 1 |  |
-| 93 | `reportPhase` | const | 2 | 3 |  |
-| 95 | `duration` | const | 1 | 2 |  |
-| 111 | `targetPhase` | function | 7 | 1 |  |
-| 122 | `scopeOfRun` | function | 8 | 1 |  |
-| 123 | `rerun` | property | 1 | — |  |
-| 127 | `rerun` | property | 1 | — |  |
-| 132 | `handleGlobalError` | function | 11 | 1 |  |
-| 152 | `execute` | function | 41 | 1 | ✓ |
-| 170 | `runPosition` | property | 1 | — |  |
+| 68 | `invoke` | function | 7 | 1 |  |
+| 78 | `settle` | function | 3 | 2 |  |
+| 85 | `abortion` | function | 8 | 1 |  |
+| 94 | `isAbort` | const | 1 | 2 |  |
+| 97 | `inFlightIn` | const | 1 | 1 |  |
+| 101 | `report` | function | 7 | 1 |  |
+| 112 | `resultHashes` | function | 5 | 1 |  |
+| 121 | `runPhase` | function | 19 | 1 |  |
+| 123 | `reportPhase` | const | 2 | 4 |  |
+| 125 | `duration` | const | 1 | 3 |  |
+| 142 | `targetPhase` | function | 7 | 1 |  |
+| 153 | `scopeOfRun` | function | 8 | 1 |  |
+| 154 | `rerun` | property | 1 | — |  |
+| 158 | `rerun` | property | 1 | — |  |
+| 163 | `handleGlobalError` | function | 11 | 1 |  |
+| 177 | `checkRunInputs` | function | 10 | 1 |  |
+| 197 | `execute` | function | 46 | 1 | ✓ |
+| 218 | `runPosition` | property | 1 | — |  |
 
 ## forms.js
 
 | line | name | kind | lines | refs | 0.6 |
 |---|---|---|---|---|---|
-| 28 | `canonical` | function | 3 | 5 |  |
-| 32 | `canonicalValue` | function | 13 | 4 |  |
-| 48 | `hashOf` | const | 1 | 4 |  |
-| 51 | `referenceForm` | function | 7 | 1 |  |
-| 60 | `argumentsForm` | const | 1 | 1 |  |
-| 63 | `stepsForm` | function | 9 | 3 |  |
-| 76 | `callForm` | function | 21 | 1 |  |
-| 102 | `formsOf` | function | 15 | 2 |  |
+| 29 | `canonical` | function | 3 | 5 |  |
+| 33 | `canonicalValue` | function | 14 | 4 |  |
+| 50 | `hashOf` | const | 1 | 5 |  |
+| 53 | `referenceForm` | function | 7 | 1 |  |
+| 62 | `argumentsForm` | const | 1 | 1 |  |
+| 65 | `stepsForm` | function | 9 | 3 |  |
+| 78 | `callForm` | function | 21 | 1 |  |
+| 104 | `formsOf` | function | 15 | 2 |  |
 
 ## graph.js
 
@@ -114,19 +119,20 @@ The tables below are generated. Regenerate them with `npm run docs:functions` af
 
 | line | name | kind | lines | refs | 0.6 |
 |---|---|---|---|---|---|
-| 28 | `readJson` | const | 8 | 3 |  |
-| 38 | `filesIn` | const | 8 | 3 |  |
-| 47 | `isExpired` | const | 1 | 1 |  |
-| 50 | `sweep` | function | 8 | 1 |  |
-| 61 | `fileStore` | function | 23 | 1 |  |
-| 62 | `fileOf` | const | 1 | 2 |  |
-| 64 | `ready` | const | 1 | 4 |  |
-| 68 | `get` | property | 4 | — | ✓ |
-| 72 | `set` | property | 5 | — |  |
-| 77 | `list` | property | 5 | — |  |
-| 85 | `print` | function | 5 | 1 | ✓ |
-| 91 | `recordFailure` | function | 6 | 1 | ✓ |
-| 106 | `query` | function | 3 | 0 | ✓ |
+| 29 | `readJson` | const | 8 | 3 |  |
+| 39 | `filesIn` | const | 8 | 3 |  |
+| 48 | `isExpired` | const | 1 | 1 |  |
+| 51 | `sweep` | function | 8 | 1 |  |
+| 62 | `fileStore` | function | 27 | 1 |  |
+| 63 | `fileOf` | const | 1 | 2 |  |
+| 65 | `ready` | const | 1 | 4 |  |
+| 69 | `get` | property | 4 | — | ✓ |
+| 73 | `set` | property | 5 | — |  |
+| 78 | `list` | property | 5 | — |  |
+| 84 | `clear` | property | 3 | — |  |
+| 90 | `print` | function | 5 | 1 | ✓ |
+| 96 | `recordFailure` | function | 6 | 1 | ✓ |
+| 112 | `query` | function | 3 | 0 | ✓ |
 
 ## plan.js
 
@@ -134,11 +140,12 @@ The tables below are generated. Regenerate them with `npm run docs:functions` af
 |---|---|---|---|---|---|
 | 22 | `typeOfArgument` | function | 10 | 3 |  |
 | 33 | `describeType` | const | 1 | 3 |  |
-| 35 | `warnUnless` | function | 5 | 2 |  |
-| 41 | `stepsTypes` | function | 5 | 2 |  |
-| 49 | `callTypes` | function | 23 | 1 |  |
-| 74 | `inferTypes` | function | 12 | 1 |  |
-| 92 | `plan` | function | 34 | 0 |  |
+| 37 | `checkType` | function | 5 | 2 |  |
+| 43 | `stepsTypes` | function | 5 | 2 |  |
+| 51 | `callTypes` | function | 23 | 1 |  |
+| 78 | `triggerType` | const | 2 | 1 |  |
+| 81 | `inferTypes` | function | 12 | 1 |  |
+| 99 | `plan` | function | 35 | 0 |  |
 
 ## query.js
 
@@ -173,13 +180,11 @@ The tables below are generated. Regenerate them with `npm run docs:functions` af
 
 | line | name | kind | lines | refs | 0.6 |
 |---|---|---|---|---|---|
-| 19 | `memoryStore` | function | 15 | 2 |  |
-| 22 | `get` | property | 3 | — | ✓ |
-| 25 | `set` | property | 4 | — |  |
-| 29 | `list` | property | 3 | — |  |
-| 36 | `print` | property | 1 | — | ✓ |
-| 37 | `inspect` | property | 1 | — |  |
-| 38 | `recordFailure` | property | 1 | — | ✓ |
+| 18 | `memoryStore` | function | 20 | 1 |  |
+| 21 | `get` | property | 3 | — | ✓ |
+| 24 | `set` | property | 4 | — |  |
+| 28 | `list` | property | 3 | — |  |
+| 32 | `clear` | property | 4 | — |  |
 
 ## services/util.js
 
@@ -217,7 +222,7 @@ The tables below are generated. Regenerate them with `npm run docs:functions` af
 
 | line | name | kind | lines | refs | 0.6 |
 |---|---|---|---|---|---|
-| 25 | `typeOfSchema` | function | 5 | 7 |  |
+| 25 | `typeOfSchema` | function | 5 | 8 |  |
 | 31 | `convertSchema` | function | 9 | 1 |  |
 | 42 | `typeOfValue` | function | 10 | 6 |  |
 | 54 | `listOf` | function | 5 | 2 |  |
@@ -231,7 +236,7 @@ The tables below are generated. Regenerate them with `npm run docs:functions` af
 | 47 | `showAsJson` | const | 1 | 1 |  |
 | 54 | `pathText` | const | 2 | 1 |  |
 | 57 | `formatError` | function | 26 | 1 | ✓ |
-| 87 | `validate` | function | 10 | 2 | ✓ |
+| 87 | `validate` | function | 10 | 3 | ✓ |
 | 103 | `parseSchema` | function | 10 | 2 | ✓ |
 | 114 | `parseSchemaRecursive` | function | 116 | 7 | ✓ |
 | 231 | `applyModifiers` | function | 16 | 8 | ✓ |
@@ -248,23 +253,23 @@ The tables below are generated. Regenerate them with `npm run docs:functions` af
 | 55 | `show` | const | 1 | 3 |  |
 | 65 | `labelError` | function | 8 | 1 |  |
 | 76 | `recover` | function | 21 | 1 |  |
-| 98 | `withErrorHandling` | const | 8 | 1 | ✓ |
-| 109 | `withRunState` | const | 14 | 1 |  |
-| 124 | `recordResult` | function | 14 | 1 |  |
-| 139 | `parseTimeUnit` | const | 7 | 1 | ✓ |
-| 152 | `withCache` | const | 15 | 1 | ✓ |
-| 170 | `check` | function | 13 | 2 |  |
-| 171 | `show` | const | 1 | 3 |  |
-| 184 | `withPrecheck` | const | 4 | 1 |  |
-| 189 | `withPostcheck` | const | 5 | 1 |  |
-| 195 | `hasChecks` | const | 1 | 2 |  |
-| 197 | `withRateLimit` | const | 2 | 1 | ✓ |
-| 200 | `withConcurrency` | const | 2 | 1 |  |
-| 203 | `withRetry` | const | 13 | 1 | ✓ |
-| 217 | `withTimeout` | const | 12 | 1 | ✓ |
-| 232 | `servicePositions` | const | 1 | 2 |  |
-| 236 | `holdsCalls` | const | 1 | 1 |  |
-| 239 | `wrappersFor` | function | 16 | 1 |  |
-| 257 | `wrap` | function | 4 | 1 |  |
-| 258 | `action` | const | 1 | 1 |  |
+| 98 | `withErrorHandling` | const | 10 | 1 | ✓ |
+| 111 | `withRunState` | const | 14 | 1 |  |
+| 126 | `recordResult` | function | 14 | 1 |  |
+| 141 | `parseTimeUnit` | const | 7 | 1 | ✓ |
+| 154 | `withCache` | const | 15 | 1 | ✓ |
+| 172 | `check` | function | 13 | 2 |  |
+| 173 | `show` | const | 1 | 3 |  |
+| 186 | `withPrecheck` | const | 4 | 1 |  |
+| 191 | `withPostcheck` | const | 5 | 1 |  |
+| 197 | `hasChecks` | const | 1 | 2 |  |
+| 199 | `withRateLimit` | const | 2 | 1 | ✓ |
+| 202 | `withConcurrency` | const | 2 | 1 |  |
+| 205 | `withRetry` | const | 13 | 1 | ✓ |
+| 219 | `withTimeout` | const | 12 | 1 | ✓ |
+| 234 | `servicePositions` | const | 1 | 2 |  |
+| 238 | `holdsCalls` | const | 1 | 1 |  |
+| 241 | `wrappersFor` | function | 16 | 1 |  |
+| 259 | `wrap` | function | 4 | 1 |  |
+| 260 | `action` | const | 1 | 1 |  |
 <!-- /generated:function-names -->

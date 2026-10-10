@@ -351,7 +351,7 @@ describe('Error Handling Tests', () => {
           // Error message should contain only the innermost service context
           // (outer services don't relabel an error that already has an address)
           assert.match(error.message, /\[\$listings\.@1a1 - GET \[scraper\]\/extract\]/)
-          assert.match(error.message, /service postcheck validation failed/)
+          assert.match(error.message, /Service Schema Validation postcheck failed/)
 
           // Validation details should be present
           assert.match(error.message, /images:.*Too small/)

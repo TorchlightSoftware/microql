@@ -117,7 +117,7 @@ const result = await query({
 
 A service may define two lifecycle functions. Neither is a resource (they have no leading `/`), so a Query can't call them.
 
-- **`init(runtime)`** — called before orchestration begins, on each service the plan uses, at most once per runtime. It receives the runtime's instance-wide capabilities: `print`, `inspect`, `recordFailure` and `cache`. A service that writes output or records failures should use these rather than reaching for the platform, so it runs wherever MicroQL does.
+- **`init(runtime)`** — called before orchestration begins, on each service the plan uses, at most once per runtime. It receives the runtime's instance-wide capabilities: `print`, `inspect`, `recordFailure` and `cache`. A service that writes output or records failures should use these rather than reaching for the environment itself (the file system, stdout), so it runs wherever MicroQL does.
 - **`tearDown()`** — called after a Run, on each service the Run used. Errors thrown here are logged and swallowed.
 
 ```javascript
@@ -174,7 +174,7 @@ Set `_noTimeout = true` on a resource that only orchestrates other calls (as `ut
 
 ## Validation and Descriptors
 
-MicroQL validates with Zod. A resource's `_validators` are its descriptor: `precheck` is the schema of its arguments, `postcheck` the schema of its return. They are enforced on every call, and `plan()` converts them to its seven types to infer what each argument expects and each call returns. See the [Validation Guide](validation.md) for the schema syntax; a raw Zod schema is accepted anywhere a descriptor is.
+MicroQL validates with Zod. A resource's `_validators` are its descriptor, and its Service Schema Validations: `precheck` is the schema of its arguments, `postcheck` the schema of its return. They are enforced on every call, and `plan()` converts them to its seven types to infer what each argument expects and each call returns. See the [Validation Guide](validation.md) for the schema syntax; a raw Zod schema is accepted anywhere a descriptor is.
 
 ```javascript
 const userService = {
@@ -200,7 +200,7 @@ userService['/createUser']._validators = {
 }
 ```
 
-A Query may add its own `precheck` and `postcheck` to any call; those run alongside the service's. A resource with no `postcheck` returns the type mixed, which fits every slot.
+A Query may add a [Service Call Validation](validation.md), its own `precheck` and `postcheck`, to any call; those run alongside these Service Schema Validations. A resource with no `postcheck` returns the type mixed, which fits every slot.
 
 Service definitions are due a revision of their own: one JSON descriptor per action, with schemas in zodex rather than this descriptor syntax, so that service definitions can be built and shared as documents. Until then, `_argtypes` and `_validators` are the descriptor.
 
@@ -458,6 +458,6 @@ Good MicroQL services are:
 2. **Async**: All resources are async functions
 3. **Stateless**: A call's result depends only on its arguments
 4. **Described**: `_argtypes` and `_validators` say what goes in and what comes out
-5. **Portable**: They reach the platform through the runtime received at `init`
+5. **Portable**: They reach the environment through the runtime received at `init`
 6. **Testable**: Easy to unit test in isolation
 7. **Composable**: Can be combined with other services

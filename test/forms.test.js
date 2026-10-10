@@ -10,7 +10,10 @@ describe('canonical serialization', () => {
     [{a: undefined, b: () => 1, c: null}, '{"c":null}'],
     [Object.assign(new Error('boom'), {address: '$x.@1'}), '{"address":"$x.@1","message":"boom","name":"Error"}'],
     [new Date('2026-01-01T00:00:00Z'), '"2026-01-01T00:00:00.000Z"'],
-    ['text', '"text"']
+    ['text', '"text"'],
+    // nothing at all reads as null, as it does inside an array
+    [undefined, 'null'],
+    [[undefined, 1], '[null,1]']
   ]
 
   for (const [value, text] of cases) {

@@ -1,18 +1,17 @@
 /**
- * @fileoverview The runtime — capabilities core cannot provide itself.
+ * @fileoverview Entry stores, and the runtime spec core is written against.
  *
- * A runtime is injected as `config.runtime`:
+ * Core has no runtime of its own. Its caller injects one as `config.runtime`:
  *   print(text, {color})          show a line of output
  *   inspect(value, options)       render a value for output
  *   recordFailure(location, record)  keep a failure for later
  *   cache                         an entry store whose results outlive a Run
+ * The node runtime (node.js) is the reference implementation.
  *
  * Entry stores hold call results by (form hash, input hash): a form holds one
  * entry per distinct input. The Run State and the Cache share this shape and
- * differ only in lifetime. Every method is async, so a store may live anywhere.
- *
- * This module is the platform-free default; the node runtime (node.js) prints
- * in colour and keeps failures and the cache on disk.
+ * differ only in lifetime. Core calls get, set and list, all async, so a store
+ * may live anywhere; clearing is the store owner's business.
  */
 
 // An entry store held in memory.
@@ -28,13 +27,11 @@ export function memoryStore() {
     },
     async list(form) {
       return [...(forms.get(form)?.values() ?? [])]
+    },
+    // not part of what core calls: the owner's way to empty one form, or all
+    async clear(form) {
+      if (form === undefined) forms.clear()
+      else forms.delete(form)
     }
   }
-}
-
-export const defaultRuntime = {
-  print: (text) => console.log(text),
-  inspect: (value) => JSON.stringify(value, null, 2),
-  recordFailure: async (location, record) => console.error(JSON.stringify({location, ...record})),
-  cache: memoryStore()
 }

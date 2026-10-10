@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import query, {memoryStore, defaultRuntime, plan} from '../index.js'
+import query, {memoryStore, nodeRuntime, plan} from '../node.js'
 
 // A service that counts its calls by input, and fails the inputs it's told to.
 const counting = (failing = new Set()) => {
@@ -121,7 +121,7 @@ describe('Cache', () => {
   })
 
   it('reuses a result across Runs only when the inputs match', async () => {
-    const runtime = {...defaultRuntime, cache: memoryStore()}
+    const runtime = {...nodeRuntime, cache: memoryStore()}
     const service = counting()
     await query({...cachedQuery(service, 1), runtime})
     await query({...cachedQuery(service, 1), runtime})
@@ -149,7 +149,7 @@ describe('Cache', () => {
     it(`${reused ? 'reuses' : 'misses'} a ${days}-day-old entry for cache: ${JSON.stringify(cache)} with settings ${JSON.stringify(settings)}`, async () => {
       const store = memoryStore()
       const service = counting()
-      const config = {...cachedQuery(service, 1, cache), settings, runtime: {...defaultRuntime, cache: store}}
+      const config = {...cachedQuery(service, 1, cache), settings, runtime: {...nodeRuntime, cache: store}}
 
       await query(config)
       await age(store, config, days)
@@ -160,7 +160,7 @@ describe('Cache', () => {
 
   it('records when each entry expires', async () => {
     const store = memoryStore()
-    const config = {...cachedQuery(counting(), 1, {ttl: '2h'}), runtime: {...defaultRuntime, cache: store}}
+    const config = {...cachedQuery(counting(), 1, {ttl: '2h'}), runtime: {...nodeRuntime, cache: store}}
     await query(config)
 
     const {calls: [call]} = plan(config)
@@ -170,7 +170,7 @@ describe('Cache', () => {
 
   it('misses an entry older than its ttl', async () => {
     const cache = memoryStore()
-    const runtime = {...defaultRuntime, cache}
+    const runtime = {...nodeRuntime, cache}
     const service = counting()
     const config = {...cachedQuery(service, 1, {ttl: '1h'}), runtime}
 

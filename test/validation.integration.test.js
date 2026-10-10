@@ -98,7 +98,7 @@ describe('Validation Integration Tests', () => {
         validInput: {numerator: 10, denominator: 2},
         expectedResult: 5,
         invalidInput: {numerator: -10, denominator: 2},
-        expectedError: /postcheck validation failed/
+        expectedError: /Validation postcheck failed/
       },
       {
         name: 'enum validation',
@@ -308,7 +308,7 @@ describe('Validation Integration Tests', () => {
         services: {testService: service},
         phases: {result: ['GET [testService]/process', {value: 9}]} // doubled = 18, exceeds max
       }
-      await assert.rejects(query(config2), /postcheck validation failed/)
+      await assert.rejects(query(config2), /Validation postcheck failed/)
     })
 
     it('should accept date with constraints', async () => {
@@ -818,7 +818,7 @@ describe('Validation Integration Tests', () => {
 
       await assert.rejects(
         query(config),
-        /postcheck validation failed/
+        /Validation postcheck failed/
       )
     })
 

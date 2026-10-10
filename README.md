@@ -41,7 +41,7 @@ If you're a programmer and you want to achieve the low risk/high productivity of
 npm install microql
 ```
 
-MicroQL needs Node.js 22 or later. It also runs on Cloudflare Workers; see [Runtime Integration](docs/runtime-integration.md).
+MicroQL needs Node.js 22 or later. `import query from 'microql'` gives you core with the node runtime wired in. Core alone, `microql/core`, has no environment dependencies and runs anywhere JavaScript does, Cloudflare Workers included, with a runtime you supply; see [Runtime Integration](docs/runtime-integration.md).
 
 ## Core Concepts
 
@@ -149,7 +149,7 @@ Real pipelines fail: a page won't load, a model returns junk, an API rate-limits
 |---|---|
 | `retry: 3` | Try again, up to 3 more times — including when the result fails its `postcheck` |
 | `timeout: 30000` | Fail after 30s |
-| `postcheck: {...}` | Treat a wrong-shaped success as a failure — see [Validation](docs/validation.md) |
+| `postcheck: {...}` | Treat a wrong-shaped success as a failure: a [Service Call Validation](docs/validation.md) |
 | `onError: [...]` | Run a handler with the error as `@` (in a chain, `@err`) |
 | `ignoreErrors: true` | Carry on: the call returns the handler's result, or `null` |
 
@@ -201,9 +201,23 @@ Per call, `cache: true` (or `cache: {ttl: '1D'}`) reuses the result across runs 
 
 `select` picks what the Query returns: `select: '$created'`, or `select: ['$created', '$found']`.
 
+## Runs and stored results
+
+A **Run** is one or more executions of a Query against one **Run State**, the store holding the result of every call it made. MicroQL writes each result there as it goes and reuses any result already there, so running again against the same Run State resumes where the last attempt stopped. A Run is only a concept: MicroQL keeps no record of Runs, and the Run State is their only trace.
+
+What the node runtime (`import query from 'microql'`) does with results:
+
+| Store | Where | Lasts | To clear it |
+|---|---|---|---|
+| Run State | in memory, fresh for each `query()` call, unless you pass `{runState: fileStore(dir)}` | the call, or as long as `dir` exists | start a new store, or `await fileStore(dir).clear()` |
+| Cache, for calls with `cache` set | the `.cache` directory under the current working directory | until its ttl passes; expired entries are swept when the store is first used | `rm -rf .cache`, or `await nodeRuntime.cache.clear()` |
+| Failures from `util/recordFailure` | one JSON file per failure under the `location` you give | until you delete them | delete the files |
+
+`fileStore(dir)` keeps one directory per call form and one JSON file per input, so a Run State on disk can be inspected by hand. How core keys and reuses results is in [Runtime Integration § Storage](docs/runtime-integration.md#storage).
+
 ## Running from the Command Line
 
-A Query is an ordinary module, so a script is all a command needs. Pass a Run State and an interrupted run resumes without repeating finished work — the scrape you already paid for isn't paid for again:
+A Query is an ordinary module, so a script is all a command needs. Pass a [Run State](#runs-and-stored-results) on disk and an interrupted run resumes without repeating finished work — the scrape you already paid for isn't paid for again:
 
 ```javascript
 #!/usr/bin/env -S node --env-file=.env
@@ -293,7 +307,7 @@ A draft that fails its `postcheck` — a thread entry over 280 characters — is
 
 - **[Service Development Guide](docs/service_guide.md)** - How to write and structure services
 - **[Validation System](docs/validation.md)** - Type validation and contracts
-- **[Runtime Integration](docs/runtime-integration.md)** - Embedding MicroQL in your own platform: planning, partial runs, progress updates, storage and Workers
+- **[Runtime Integration](docs/runtime-integration.md)** - Building on MicroQL beyond a node script: core, runtimes and platforms, storage, planning, partial runs, progress updates and abort
 
 ## Testing
 

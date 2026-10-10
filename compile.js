@@ -19,7 +19,7 @@
 
 import {parseServiceKey} from '@tlsft/service-key'
 
-import {RESERVE_ARGS, isPlainObject, mapValues, filterObject, pick, omit, defaults} from './common.js'
+import {RESERVE_ARGS, VALIDATION_NAMES, isPlainObject, mapValues, filterObject, pick, omit, defaults} from './common.js'
 import {isReference, parseReference} from './reference.js'
 import {parseSchema} from './validation.js'
 import {fieldPathOf} from './addresses.js'
@@ -98,18 +98,19 @@ function parseSchemaWithErrorContext(designation, order, schema) {
   }
 }
 
-// The Query's checks (from the call's arguments) woven with the service's own.
+// A call's Service Call Validations (from its fields) woven with its Service
+// Schema Validations (the service's own schemas), parsed, by order.
 const compileValidators = (args, validators) => {
   const order = {
-    precheck: {query: args.precheck, service: validators.precheck},
-    postcheck: {service: validators.postcheck, query: args.postcheck}
+    precheck: {call: args.precheck, schema: validators.precheck},
+    postcheck: {schema: validators.postcheck, call: args.postcheck}
   }
   let hasValidators = false
   for (const o in order) {
     for (const d in order[o]) {
       if (order[o][d]) {
         hasValidators = true
-        order[o][d] = parseSchemaWithErrorContext(d, o, order[o][d])
+        order[o][d] = parseSchemaWithErrorContext(VALIDATION_NAMES[d], o, order[o][d])
       }
     }
   }
@@ -308,7 +309,7 @@ function compileSelect(select, query) {
 
 /**
  * Compile a Query into its tree of phases and calls.
- * @returns {Object} {phases, calls, given, trigger, select, settings, services, runtime, warnings}
+ * @returns {Object} {phases, calls, given, trigger, triggerSchema, select, settings, services, runtime, warnings}
  */
 export function compile(config) {
   const {phases = {}, given, trigger, settings = {}} = config
@@ -317,7 +318,8 @@ export function compile(config) {
   const query = {
     services,
     settings,
-    nodeNames: new Set([...Object.keys(phases), ...(given !== undefined ? ['given'] : []), ...(trigger ? ['trigger'] : [])]),
+    // $trigger always exists: it holds whatever payload the Run is given
+    nodeNames: new Set([...Object.keys(phases), ...(given !== undefined ? ['given'] : []), 'trigger']),
     bindingNames: new Set(),
     warnings: [],
     calls: []
@@ -330,6 +332,7 @@ export function compile(config) {
     calls: query.calls,
     given,
     trigger,
+    triggerSchema: trigger?.schema && parseSchemaWithErrorContext('trigger', 'schema', trigger.schema),
     select: compileSelect(config.select, query),
     settings: {
       ...settings,

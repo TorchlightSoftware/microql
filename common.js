@@ -1,6 +1,11 @@
 // Arguments that configure a call rather than feed it data.
 const RESERVE_ARGS = ['timeout', 'retry', 'onError', 'ignoreErrors', 'precheck', 'postcheck', 'debug', 'cache']
 
+// The two kinds of validation a call runs, by the key they are filed under,
+// with the names the docs and error messages use: the Query author's checks
+// on one call, and the service's own schemas.
+const VALIDATION_NAMES = {call: 'Service Call Validation', schema: 'Service Schema Validation'}
+
 // Colour names assigned to services for debug output; the runtime decides how
 // a colour is shown.
 const COLOR_NAMES = ['green', 'yellow', 'blue', 'magenta', 'cyan', 'white']
@@ -55,4 +60,4 @@ const defaults = (...sources) => {
   return result
 }
 
-export {RESERVE_ARGS, COLOR_NAMES, getServiceColorName, isPlainObject, mapValues, filterObject, pick, omit, getIn, defaults}
+export {RESERVE_ARGS, VALIDATION_NAMES, COLOR_NAMES, getServiceColorName, isPlainObject, mapValues, filterObject, pick, omit, getIn, defaults}

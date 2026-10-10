@@ -1,15 +1,12 @@
 {
   "name": "microql",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A query language for composing microservices.",
   "type": "module",
   "main": "node.js",
   "exports": {
-    ".": {
-      "workerd": "./index.js",
-      "node": "./node.js",
-      "default": "./index.js"
-    }
+    ".": "./node.js",
+    "./core": "./index.js"
   },
   "scripts": {
     "test": "node --test test/*.test.js",

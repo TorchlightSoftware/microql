@@ -15,7 +15,7 @@ branch['/extract']._validators = {
 
 const query = {
   given: {baseUrl: 'https://a.example', ids: [1, 2]},
-  trigger: {kind: 'schedule'},
+  trigger: {kind: 'schedule', schema: {at: ['string']}},
   services: {branch},
   settings: {onError: ['GET [util]/template', {failed: true}]},
   phases: {
@@ -44,9 +44,22 @@ describe('plan()', () => {
     assert.deepEqual(planned.phases.map(p => [p.name, p.dependencies]), [['categories', []], ['listings', ['categories']]])
     assert.deepEqual(planned.roots.map(r => r.name), ['given', 'trigger'])
     assert.deepEqual(Object.keys(planned.roots[0].type.fields), ['baseUrl', 'ids'])
-    assert.equal(planned.roots[1].kind, 'schedule')
     assert.match(planned.query, /^[0-9a-f]{64}$/)
   })
+
+  // [description, Query trigger block, payload, trigger type]
+  const triggerTypes = [
+    ['the payload\'s own type when one is given', {schema: {at: ['string']}}, {at: 12}, {type: 'object', fields: {at: {type: 'number'}}}],
+    ['the schema\'s type when no payload is given', {schema: {at: ['string']}}, undefined, {type: 'object', fields: {at: {type: 'text'}}}],
+    ['mixed with neither', undefined, undefined, {type: 'mixed'}]
+  ]
+
+  for (const [description, trigger, payload, type] of triggerTypes) {
+    it(`types $trigger as ${description}`, () => {
+      const {roots} = plan({...query, trigger}, {trigger: payload})
+      assert.deepEqual(roots.find(r => r.name === 'trigger').type, type)
+    })
+  }
 
   it('assigns every call an address, a path and a form hash', () => {
     const {calls} = plan(query)
@@ -133,20 +146,34 @@ describe('type inference', () => {
     assert.deepEqual(types.args.error.actual, {type: 'text'})
   })
 
-  it('warns on a mismatch without failing the plan', () => {
+  it('reports a mismatch as an error, kept apart from compile warnings', () => {
     const mismatched = {...query, phases: {a: ['GET [branch]/extract', {url: '$given.ids'}]}}
-    const {warnings} = plan(mismatched)
-    assert.deepEqual(warnings, [{address: '$a.@1.url', message: '$a.@1.url expects text but receives list of number'}])
+    const {errors, warnings} = plan(mismatched)
+    assert.deepEqual(errors, [{address: '$a.@1.url', message: '$a.@1.url expects text but receives list of number'}])
+    assert.deepEqual(warnings, [])
   })
 
   it('checks a service position against the return type its argument needs', () => {
-    const {warnings} = plan({
+    const {errors} = plan({
       given: {xs: ['a']},
       services: {branch},
       phases: {kept: ['$given.xs', 'GET [util]/filter', {service: ['GET [branch]/extract', {url: '@'}]}]}
     })
-    assert.deepEqual(warnings, [{address: '$kept.@1.service', message: '$kept.@1.service expects boolean but receives object'}])
+    assert.deepEqual(errors, [{address: '$kept.@1.service', message: '$kept.@1.service expects boolean but receives object'}])
   })
+
+  // [description, the call's own postcheck, return type]
+  const returnTypes = [
+    ['the service\'s output schema', undefined, {type: 'object', fields: {url: {type: 'text'}, images: {type: 'list', element: {type: 'object', fields: {src: {type: 'text'}}}, optional: true}}}],
+    ['the call\'s own postcheck, when it has one', {url: ['string']}, {type: 'object', fields: {url: {type: 'text'}}}]
+  ]
+
+  for (const [description, postcheck, returns] of returnTypes) {
+    it(`takes a call's return type from ${description}`, () => {
+      const {phases} = plan({given: {u: 'x'}, services: {branch}, phases: {a: ['GET [branch]/extract', {url: '$given.u', postcheck}]}})
+      assert.deepEqual(phases[0].returns, returns)
+    })
+  }
 
   it('is mixed where nothing is declared', () => {
     const types = typesOf(query, '$listings.@1a2')
