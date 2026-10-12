@@ -1,69 +1,58 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query from '../node.js'
+import query, {serviceFromTable} from '../index.js'
 
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
+
+// A higher-order service that runs its nested call once per item, one after
+// another, so the whole call outlasts any one nested call.
+const serial = serviceFromTable({
+  '/run': {
+    input: {on: ['target'], service: ['call']},
+    async call({on, service}) {
+      const results = []
+      for (const item of on) results.push(await service(item))
+      return results
+    }
+  }
+})
+
+// A service whose calls take the given time.
+const taking = (ms) => serviceFromTable({
+  async '/process'({value}) {
+    await sleep(ms)
+    return {processed: value}
+  }
+})
+
+// A call that holds nested calls has no timeout of its own: each nested call
+// has its own, and only a timeout set on the holding call itself applies to it.
 describe('NoTimeout Tests', () => {
-  describe('Iterator services without timeout', () => {
-    it('should not timeout for util.map itself but nested services still can', async () => {
-      let callCount = 0
-      const services = {
-        fast: {
-          async '/process'({value}) {
-            callCount++
-            // Simulate fast processing (shorter than timeout)
-            await new Promise(resolve => setTimeout(resolve, 10))
-            return {processed: value, call: callCount}
-          }
-        }
-      }
-
+  describe('Calls that hold nested calls have no timeout of their own', () => {
+    it('lets a call outlast the timeout while each nested call stays within it', async () => {
       const result = await query({
-        given: {items: ['a', 'b', 'c']},
-        services,
-        settings: {
-          timeout: 50
-        },
+        given: {items: ['a', 'b', 'c', 'd']},
+        services: {serial, step: taking(20)},
+        settings: {timeout: 50},
         phases: {
-          results: ['GET [util]/each', {
-            on: '$given.items',
-            service: ['GET [fast]/process', {value: '@'}]
-          }]
+          results: ['$given.items', '[serial]/run', {service: ['[step]/process', {value: '@'}]}]
         },
         select: '$results'
       })
 
-      // All items should be processed - map itself won't timeout, and nested services are fast enough
-      assert.strictEqual(result.length, 3)
-      assert.strictEqual(callCount, 3)
-      assert.strictEqual(result[0].processed, 'a')
-      assert.strictEqual(result[1].processed, 'b')
-      assert.strictEqual(result[2].processed, 'c')
+      assert.deepStrictEqual(result.map(r => r.processed), ['a', 'b', 'c', 'd'])
     })
 
-    it('should timeout nested services even in _noTimeout iterator', async () => {
-      let callCount = 0
-      const services = {
-        slow: {
-          async '/process'({value}) {
-            callCount++
-            // Simulate slow processing (longer than timeout)
-            await new Promise(resolve => setTimeout(resolve, 100))
-            return {processed: value, call: callCount}
-          }
-        }
-      }
-
+    it('still times out a nested call that outlasts the timeout', async () => {
       await assert.rejects(
         query({
           given: {items: ['a']},
-          services,
-          settings: {
-            timeout: 50
-          },
+          services: {slow: taking(100)},
+          settings: {timeout: 50},
           phases: {
-            results: ['GET [util]/each', {
+            results: ['[util]/each', {
               on: '$given.items',
-              service: ['GET [slow]/process', {value: '@'}]
+              service: ['[slow]/process', {value: '@'}]
             }]
           },
           select: '$results'
@@ -72,125 +61,80 @@ describe('NoTimeout Tests', () => {
       )
     })
 
-    it('should not timeout for util.filter itself', async () => {
-      let callCount = 0
-      const services = {
-        fastFilter: {
-          async '/isLong'({value}) {
-            callCount++
-            // Simulate fast processing
-            await new Promise(resolve => setTimeout(resolve, 10))
-            return value.length > 2
-          }
-        }
-      }
-
+    it('lets [util]/filter run its nested calls', async () => {
       const result = await query({
         given: {words: ['hi', 'hello', 'world', 'a']},
-        services,
-        settings: {
-          timeout: 50
+        services: {
+          fastFilter: serviceFromTable({
+            async '/isLong'({value}) {
+              await sleep(10)
+              return value.length > 2
+            }
+          })
         },
+        settings: {timeout: 50},
         phases: {
-          longWords: ['GET [util]/filter', {
+          longWords: ['[util]/filter', {
             on: '$given.words',
-            service: ['GET [fastFilter]/isLong', {value: '@'}]
+            service: ['[fastFilter]/isLong', {value: '@'}]
           }]
         },
         select: '$longWords'
       })
 
-      assert.strictEqual(result.length, 2)
-      assert.strictEqual(callCount, 4)
       assert.deepStrictEqual(result, ['hello', 'world'])
     })
 
-    it('should not timeout for util.flatMap itself', async () => {
-      let callCount = 0
-      const services = {
-        fastSplit: {
-          async '/chars'({word}) {
-            callCount++
-            // Simulate fast processing
-            await new Promise(resolve => setTimeout(resolve, 10))
-            return word.split('')
-          }
-        }
-      }
-
+    it('lets [util]/flattenEach run its nested calls', async () => {
       const result = await query({
         given: {words: ['hi', 'bye']},
-        services,
-        settings: {
-          timeout: 50
+        services: {
+          fastSplit: serviceFromTable({
+            async '/chars'({word}) {
+              await sleep(10)
+              return word.split('')
+            }
+          })
         },
+        settings: {timeout: 50},
         phases: {
-          allChars: ['GET [util]/each', {
-            flatten: true,
+          allChars: ['[util]/flattenEach', {
             on: '$given.words',
-            service: ['GET [fastSplit]/chars', {word: '@'}]
+            service: ['[fastSplit]/chars', {word: '@'}]
           }]
         },
         select: '$allChars'
       })
 
-      assert.strictEqual(result.length, 5)
-      assert.strictEqual(callCount, 2)
       assert.deepStrictEqual(result, ['h', 'i', 'b', 'y', 'e'])
     })
   })
 
-  describe('Override _noTimeout with explicit timeout', () => {
-    it('should apply timeout when explicitly provided to _noTimeout service', async () => {
-      // Test that setting an explicit timeout on a _noTimeout service should apply the timeout
-      const services2 = {
-        slowIterator: {
-          async '/process'({items}) {
-            // This service has _noTimeout but we'll override it
-            await new Promise(resolve => setTimeout(resolve, 100))
-            return items.map(item => ({processed: item}))
-          }
-        }
-      }
-      services2.slowIterator._noTimeout = true
-
+  describe('A timeout set on the holding call applies to it', () => {
+    it('times out a holding call given its own timeout', async () => {
       await assert.rejects(
         query({
-          given: {items: ['a']},
-          services: services2,
+          given: {items: ['a', 'b', 'c', 'd']},
+          services: {serial, step: taking(20)},
           phases: {
-            results: ['GET [slowIterator]/process', {
-              items: '$given.items',
-              timeout: 50 // Explicit timeout should override _noTimeout
-            }]
+            results: ['$given.items', '[serial]/run', {service: ['[step]/process', {value: '@'}], timeout: 50}]
           },
           select: '$results'
         }),
-        /Timed out after 50ms/
+        /\[\$results\.@1 - \[serial\]\/run\] Timed out after 50ms/
       )
     })
   })
 
   describe('Regular services still timeout', () => {
-    it('should timeout for non-iterator services with global timeout', async () => {
-      const services = {
-        slow: {
-          async '/process'({value}) {
-            await new Promise(resolve => setTimeout(resolve, 100))
-            return {processed: value}
-          }
-        }
-      }
-
+    it('should timeout for a call that holds no nested call', async () => {
       await assert.rejects(
         query({
           given: {value: 'test'},
-          services,
-          settings: {
-            timeout: 50
-          },
+          services: {slow: taking(100)},
+          settings: {timeout: 50},
           phases: {
-            result: ['GET [slow]/process', {value: '$given.value'}]
+            result: ['[slow]/process', {value: '$given.value'}]
           },
           select: '$result'
         }),

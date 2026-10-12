@@ -18,7 +18,7 @@ export function columnsOf(phases) {
 
     if (ready.length === 0) {
       const remaining = pending.filter(phase => !placed.has(phase.name)).map(phase => phase.name)
-      throw new Error(`Circular dependency detected at compile time: ${remaining.join(', ')}`)
+      throw Object.assign(new Error(`Circular dependency detected at compile time: ${remaining.join(', ')}`), {code: 'circular-dependency', phases: remaining})
     }
 
     ready.forEach(phase => placed.add(phase.name))

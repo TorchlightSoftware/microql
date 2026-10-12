@@ -1,23 +1,22 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import query from '../node.js'
+import query, {serviceFromTable} from '../index.js'
 
 describe('Scope: @ and named bindings', () => {
-  const inspector = {
+  const inspector = serviceFromTable({
     '/check'({level1, level2}) {
       return {level1, level2}
     }
-  }
+  })
 
-  const math = {
-    '/add1': async ({on}) => on + 1,
-    '/times10': async ({on}) => on * 10,
-    '/reduce': async ({on, service}) => on.reduce(async (l, r) => service([await l, r])),
-    '/sequence': async ({on}) => Array.from({length: on}, (v, k) => k + 1),
-    '/sum': async ({on}) => on.reduce((l, r) => l + r)
-  }
-  for (const resource of ['/add1', '/times10', '/sequence', '/sum']) math[resource]._argtypes = {on: {argOrder: 0}}
-  math['/reduce']._argtypes = {on: {argOrder: 0}, service: {type: 'service'}}
+  const onTarget = (call) => ({input: {on: ['target']}, call})
+  const math = serviceFromTable({
+    '/add1': onTarget(async ({on}) => on + 1),
+    '/times10': onTarget(async ({on}) => on * 10),
+    '/reduce': {input: {on: ['target'], service: ['call']}, call: async ({on, service}) => on.reduce(async (l, r) => service([await l, r]))},
+    '/sequence': onTarget(async ({on}) => Array.from({length: on}, (v, k) => k + 1)),
+    '/sum': onTarget(async ({on}) => on.reduce((l, r) => l + r))
+  })
 
   const services = {inspector, math}
 
@@ -26,8 +25,8 @@ describe('Scope: @ and named bindings', () => {
       given: {items: [1, 2]},
       services,
       phases: {
-        simple: ['$given.items', 'GET [util]/each', {
-          service: ['GET [inspector]/check', {level1: '@'}]
+        simple: ['$given.items', '[util]/each', {
+          service: ['[inspector]/check', {level1: '@'}]
         }]
       },
       select: '$simple'
@@ -40,12 +39,11 @@ describe('Scope: @ and named bindings', () => {
       given: {outer: [{inner: [1, 2]}, {inner: [3, 4]}]},
       services,
       phases: {
-        nested: ['$given.outer', 'GET [util]/each', {
+        nested: ['$given.outer', '[util]/flattenEach', {
           as: 'group',
-          flatten: true,
-          service: ['@group.inner', 'GET [util]/each', {
+          service: ['@group.inner', '[util]/each', {
             as: 'number',
-            service: ['GET [inspector]/check', {level1: '@number', level2: '@group'}]
+            service: ['[inspector]/check', {level1: '@number', level2: '@group'}]
           }]
         }]
       },
@@ -58,20 +56,18 @@ describe('Scope: @ and named bindings', () => {
   })
 
   it('flows each chain step into the next', async () => {
-    const chain = {
-      '/step1': ({on}) => `${on}-step1`,
-      '/step2': ({on}) => `${on}-step2`
-    }
-    chain['/step1']._argtypes = {on: {argOrder: 0}}
-    chain['/step2']._argtypes = {on: {argOrder: 0}}
+    const chain = serviceFromTable({
+      '/step1': {input: {on: ['target']}, call: ({on}) => `${on}-step1`},
+      '/step2': {input: {on: ['target']}, call: ({on}) => `${on}-step2`}
+    })
 
     const result = await query({
       given: {input: 'input'},
       services: {chain},
       phases: {
         result: [
-          ['$given.input', 'GET [chain]/step1'],
-          ['@', 'GET [chain]/step2']
+          ['$given.input', '[chain]/step1'],
+          ['@', '[chain]/step2']
         ]
       },
       select: '$result'
@@ -85,16 +81,16 @@ describe('Scope: @ and named bindings', () => {
       services,
       phases: {
         deepNested: [
-          ['$given.input', 'GET [math]/add1'],
-          ['@', 'GET [math]/add1'],
-          ['$given.array', 'GET [util]/each', {
+          ['$given.input', '[math]/add1'],
+          ['@', '[math]/add1'],
+          ['$given.array', '[util]/each', {
             as: 'n',
             service: [
-              ['@n', 'GET [math]/times10'], // 10, 20, 30
-              ['@', 'GET [math]/add1'], // 11, 21, 31
-              ['@', 'GET [math]/sequence'], // [1..11], [1..21], [1..31]
-              ['GET [math]/reduce', {on: '@', service: ['GET [math]/sum', {on: '@'}]}],
-              ['@', 'GET [util]/template', {n: '@n'}]
+              ['@n', '[math]/times10'], // 10, 20, 30
+              ['@', '[math]/add1'], // 11, 21, 31
+              ['@', '[math]/sequence'], // [1..11], [1..21], [1..31]
+              ['[math]/reduce', {on: '@', service: ['[math]/sum', {on: '@'}]}],
+              ['@', '[util]/template', {n: '@n'}]
             ]
           }]
         ]
@@ -110,24 +106,24 @@ describe('Scope: @ and named bindings', () => {
   })
 
   it('lets onError see the error as @ and the enclosing bindings by name', async () => {
-    const flaky = {
+    const flaky = serviceFromTable({
       async '/fetch'({id}) {
         if (id === 2) throw new Error(`no ${id}`)
         return id
       }
-    }
+    })
 
     const result = await query({
       given: {ids: [1, 2, 3]},
       services: {flaky},
       phases: {
-        fetched: ['$given.ids', 'GET [util]/each', {
+        fetched: ['$given.ids', '[util]/each', {
           as: 'id',
           service: [
-            ['GET [flaky]/fetch', {
+            ['[flaky]/fetch', {
               id: '@id',
               ignoreErrors: true,
-              onError: ['GET [util]/template', {failedId: '@id', address: '@.address'}]
+              onError: ['[util]/template', {failedId: '@id', address: '@.address'}]
             }]
           ]
         }]
@@ -143,7 +139,7 @@ describe('Scope: @ and named bindings', () => {
       given: {person: {name: 'Ada'}},
       services,
       phases: {
-        checked: ['GET [inspector]/check', {level1: '$given.person.age', level2: ['$given.person.name', '$given.person.missing']}]
+        checked: ['[inspector]/check', {level1: '$given.person.age', level2: ['$given.person.name', '$given.person.missing']}]
       },
       select: '$checked'
     })

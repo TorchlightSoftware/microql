@@ -1,7 +1,7 @@
 import assert from 'node:assert'
 import {afterEach, beforeEach, describe, it} from 'node:test'
-import query from '../node.js'
-import {ANSI_COLORS} from '../node.js'
+import query, {ANSI_COLORS} from '../index.js'
+import {servicesFromTables} from './test-services.js'
 
 describe('Debug Color Tests', () => {
   let originalWrite
@@ -40,7 +40,7 @@ describe('Debug Color Tests', () => {
   it('should use unique colors for different services in debug mode', async () => {
     const _result = await query({
       settings: {debug: true},
-      services: {
+      services: servicesFromTables({
         serviceA: {
           async '/test'() {
             await new Promise(resolve => setTimeout(resolve, 10))
@@ -59,11 +59,11 @@ describe('Debug Color Tests', () => {
             return 'resultC'
           }
         }
-      },
+      }),
       phases: {
-        testA: ['GET [serviceA]/test', {}],
-        testB: ['GET [serviceB]/test', {}],
-        testC: ['GET [serviceC]/test', {}]
+        testA: ['[serviceA]/test', {}],
+        testB: ['[serviceB]/test', {}],
+        testC: ['[serviceC]/test', {}]
       }
     })
 
@@ -72,9 +72,9 @@ describe('Debug Color Tests', () => {
 
     // Should have debug logs for each service
     const output = captureState.outputs.join('')
-    assert(output.includes('[$testA.@1 - GET [serviceA]/test]'), 'Should log serviceA calls')
-    assert(output.includes('[$testB.@1 - GET [serviceB]/test]'), 'Should log serviceB calls')
-    assert(output.includes('[$testC.@1 - GET [serviceC]/test]'), 'Should log serviceC calls')
+    assert(output.includes('[$testA.@1 - [serviceA]/test]'), 'Should log serviceA calls')
+    assert(output.includes('[$testB.@1 - [serviceB]/test]'), 'Should log serviceB calls')
+    assert(output.includes('[$testC.@1 - [serviceC]/test]'), 'Should log serviceC calls')
 
     // Check for ANSI color codes in the logs
     const coloredLogs = captureState.outputs.filter(log => extractColor(log) !== null)
@@ -90,7 +90,7 @@ describe('Debug Color Tests', () => {
     // Test that the same service gets the same color across multiple queries
     await query({
       settings: {debug: true},
-      services: {
+      services: servicesFromTables({
         consistentService: {
           async '/action1'() { return 'r1' },
           async '/action2'() { return 'r2' }
@@ -98,11 +98,11 @@ describe('Debug Color Tests', () => {
         differentService: {
           async '/action'() { return 'r3' }
         }
-      },
+      }),
       phases: {
-        q1: ['GET [consistentService]/action1', {}],
-        q2: ['GET [differentService]/action', {}],
-        q3: ['GET [consistentService]/action2', {}]
+        q1: ['[consistentService]/action1', {}],
+        q2: ['[differentService]/action', {}],
+        q3: ['[consistentService]/action2', {}]
       }
     })
 
@@ -130,22 +130,22 @@ describe('Debug Color Tests', () => {
   it('should not use red color for services (reserved for errors)', async () => {
     await query({
       settings: {debug: true},
-      services: {
+      services: servicesFromTables({
         testService: {
           async '/method'() {
             return 'result'
           }
         }
-      },
+      }),
       phases: {
-        test: ['GET [testService]/method', {}]
+        test: ['[testService]/method', {}]
       }
     })
 
     // Check that no debug logs use red color
     const hasRedInDebugLogs = captureState.outputs.some(
       (log) =>
-        log.includes('- testService:method]') && log.includes(ANSI_COLORS.red)
+        log.includes('- [testService]/method]') && log.includes(ANSI_COLORS.red)
     )
 
     assert(

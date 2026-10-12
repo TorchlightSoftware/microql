@@ -1,6 +1,7 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query from '../node.js'
+import query from '../index.js'
+import {servicesFromTables} from './test-services.js'
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -24,7 +25,7 @@ describe('MicroQL Comprehensive Tests', () => {
     it('should handle basic dependency chain', async () => {
       const result = await query({
         given: {userId: 'user123'},
-        services: {
+        services: servicesFromTables({
           users: {
             async '/getProfile'({id}) {
               return {id, name: 'John', email: 'john@example.com'}
@@ -35,10 +36,10 @@ describe('MicroQL Comprehensive Tests', () => {
               return {logged: true, user: user.name}
             }
           }
-        },
+        }),
         phases: {
-          profile: ['GET [users]/getProfile', {id: '$given.userId'}],
-          auditLog: ['GET [audit]/log', {user: '$profile'}]
+          profile: ['[users]/getProfile', {id: '$given.userId'}],
+          auditLog: ['[audit]/log', {user: '$profile'}]
         }
       })
 
@@ -50,10 +51,10 @@ describe('MicroQL Comprehensive Tests', () => {
       assert.deepStrictEqual(result.auditLog, {logged: true, user: 'John'})
     })
 
-    it('should auto-wrap service objects', async () => {
+    it('should answer several resources of one service', async () => {
       const result = await query({
         given: {numbers: [1, 2, 3, 4, 5]},
-        services: {
+        services: servicesFromTables({
           math: {
             async '/sum'({values}) {
               return values.reduce((a, b) => a + b, 0)
@@ -65,11 +66,11 @@ describe('MicroQL Comprehensive Tests', () => {
               return Math.max(...values)
             }
           }
-        },
+        }),
         phases: {
-          total: ['GET [math]/sum', {values: '$given.numbers'}],
-          avg: ['GET [math]/average', {values: '$given.numbers'}],
-          maximum: ['GET [math]/max', {values: '$given.numbers'}]
+          total: ['[math]/sum', {values: '$given.numbers'}],
+          avg: ['[math]/average', {values: '$given.numbers'}],
+          maximum: ['[math]/max', {values: '$given.numbers'}]
         }
       })
 
@@ -79,32 +80,23 @@ describe('MicroQL Comprehensive Tests', () => {
     })
 
     it('should handle method syntax with data transformation', async () => {
-      const services = {
+      // method syntax fills the field tagged target
+      const onTarget = {on: ['target']}
+      const services = servicesFromTables({
         transform: {
-          async '/filter'({on, fn}) {
-            return on.filter((item) => item.includes(fn))
-          },
-          async '/upper'({on}) {
-            return on.map((item) => item.toUpperCase())
-          },
-          async '/count'({on}) {
-            return on.length
-          }
+          '/filter': {input: onTarget, call: async ({on, fn}) => on.filter((item) => item.includes(fn))},
+          '/upper': {input: onTarget, call: async ({on}) => on.map((item) => item.toUpperCase())},
+          '/count': {input: onTarget, call: async ({on}) => on.length}
         }
-      }
-
-      // Add argOrder metadata for method syntax
-      services.transform['/filter']._argtypes = {on: {argOrder: 0}}
-      services.transform['/upper']._argtypes = {on: {argOrder: 0}}
-      services.transform['/count']._argtypes = {on: {argOrder: 0}}
+      })
 
       const result = await query({
         given: {items: ['apple', 'banana', 'cherry']},
         services,
         phases: {
-          filtered: ['$given.items', 'GET [transform]/filter', {fn: 'a'}],
-          uppercased: ['$filtered', 'GET [transform]/upper', {}],
-          count: ['$uppercased', 'GET [transform]/count', {}]
+          filtered: ['$given.items', '[transform]/filter', {fn: 'a'}],
+          uppercased: ['$filtered', '[transform]/upper', {}],
+          count: ['$uppercased', '[transform]/count', {}]
         }
       })
 
@@ -116,7 +108,7 @@ describe('MicroQL Comprehensive Tests', () => {
     it('should handle service chains with @ symbol', async () => {
       const result = await query({
         given: {text: 'Hello World 123'},
-        services: {
+        services: servicesFromTables({
           text: {
             async '/extractNumbers'({input}) {
               return input.match(/\d+/g) || []
@@ -125,11 +117,11 @@ describe('MicroQL Comprehensive Tests', () => {
               return numbers.map(Number).reduce((a, b) => a + b, 0)
             }
           }
-        },
+        }),
         phases: {
           result: [
-            ['GET [text]/extractNumbers', {input: '$given.text'}],
-            ['GET [text]/sum', {numbers: '@'}]
+            ['[text]/extractNumbers', {input: '$given.text'}],
+            ['[text]/sum', {numbers: '@'}]
           ]
         }
       })
@@ -140,7 +132,7 @@ describe('MicroQL Comprehensive Tests', () => {
     it('should handle complex @ symbol field access', async () => {
       const result = await query({
         given: {userData: 'name:John,age:30,city:NYC'},
-        services: {
+        services: servicesFromTables({
           parser: {
             async '/parseKeyValue'({data}) {
               const pairs = data.split(',')
@@ -155,11 +147,11 @@ describe('MicroQL Comprehensive Tests', () => {
               return `Hello ${name} from ${city}!`
             }
           }
-        },
+        }),
         phases: {
-          parsed: ['GET [parser]/parseKeyValue', {data: '$given.userData'}],
+          parsed: ['[parser]/parseKeyValue', {data: '$given.userData'}],
           greeting: [
-            'GET [parser]/formatGreeting',
+            '[parser]/formatGreeting',
             {
               name: '$parsed.name',
               city: '$parsed.city'
@@ -180,17 +172,17 @@ describe('MicroQL Comprehensive Tests', () => {
       const overlap = overlapCounter()
       const result = await query({
         given: {delay: 10},
-        services: {
+        services: servicesFromTables({
           async: {
             async '/delay'({ms, value}) {
               return overlap.during(() => sleep(ms).then(() => value))
             }
           }
-        },
+        }),
         phases: {
-          query1: ['GET [async]/delay', {ms: '$given.delay', value: 'A'}],
-          query2: ['GET [async]/delay', {ms: '$given.delay', value: 'B'}],
-          query3: ['GET [async]/delay', {ms: '$given.delay', value: 'C'}]
+          query1: ['[async]/delay', {ms: '$given.delay', value: 'A'}],
+          query2: ['[async]/delay', {ms: '$given.delay', value: 'B'}],
+          query3: ['[async]/delay', {ms: '$given.delay', value: 'C'}]
         }
       })
 
@@ -203,7 +195,7 @@ describe('MicroQL Comprehensive Tests', () => {
     it('should handle select functionality', async () => {
       const result = await query({
         given: {x: 5, y: 10},
-        services: {
+        services: servicesFromTables({
           calc: {
             async '/add'({a, b}) {
               return a + b
@@ -212,11 +204,11 @@ describe('MicroQL Comprehensive Tests', () => {
               return a * b
             }
           }
-        },
+        }),
         phases: {
-          sum: ['GET [calc]/add', {a: '$given.x', b: '$given.y'}],
-          product: ['GET [calc]/multiply', {a: '$given.x', b: '$given.y'}],
-          unused: ['GET [calc]/add', {a: 1, b: 2}]
+          sum: ['[calc]/add', {a: '$given.x', b: '$given.y'}],
+          product: ['[calc]/multiply', {a: '$given.x', b: '$given.y'}],
+          unused: ['[calc]/add', {a: 1, b: 2}]
         },
         select: ['$sum', '$product']
       })
@@ -230,9 +222,9 @@ describe('MicroQL Comprehensive Tests', () => {
       await assert.rejects(
         query({
           given: {x: 1},
-          services: {},
+          services: servicesFromTables({}),
           phases: {
-            result: ['GET [nonexistent]/action', {value: '$given.x'}]
+            result: ['[nonexistent]/action', {value: '$given.x'}]
           }
         }),
         /Service 'nonexistent' not found/
@@ -243,15 +235,15 @@ describe('MicroQL Comprehensive Tests', () => {
       await assert.rejects(
         query({
           given: {x: 1},
-          services: {
+          services: servicesFromTables({
             test: {
               validMethod() {
                 return 'ok'
               }
             }
-          },
+          }),
           phases: {
-            result: ['GET [test]/invalidMethod', {value: '$given.x'}]
+            result: ['[test]/invalidMethod', {value: '$given.x'}]
           }
         }),
         /Resource '\/invalidMethod' not found on service 'test'/
@@ -262,15 +254,15 @@ describe('MicroQL Comprehensive Tests', () => {
       await assert.rejects(
         query({
           given: {start: 1},
-          services: {
+          services: servicesFromTables({
             test: {
               async '/increment'({value}) {
                 return value + 1
               }
             }
-          },
+          }),
           phases: {
-            result: ['GET [test]/increment', {value: '$nonexistent'}]
+            result: ['[test]/increment', {value: '$nonexistent'}]
           }
         }),
         /\[\$result.@1\] Unknown reference '\$nonexistent'/
@@ -285,10 +277,10 @@ describe('MicroQL Comprehensive Tests', () => {
             invalid: 'not a function or object'
           },
           phases: {
-            result: ['GET [invalid]/action', {value: '$given.data'}]
+            result: ['[invalid]/action', {value: '$given.data'}]
           }
         }),
-        /Service 'invalid' must be an object of resources/
+        /Service 'invalid' must provide lookup\(parts\) and operations\(\)/
       )
     })
   })
@@ -298,17 +290,17 @@ describe('MicroQL Comprehensive Tests', () => {
       const overlap = overlapCounter()
       const result = await query({
         given: {count: 50},
-        services: {
+        services: servicesFromTables({
           worker: {
             async '/process'({id}) {
               return overlap.during(() => sleep(Math.random() * 5).then(() => `processed-${id}`))
             }
           }
-        },
+        }),
         phases: Object.fromEntries(
           Array.from({length: 50}, (_, i) => [
             `query${i}`,
-            ['GET [worker]/process', {id: i}]
+            ['[worker]/process', {id: i}]
           ])
         )
       })
@@ -325,7 +317,7 @@ describe('MicroQL Comprehensive Tests', () => {
   describe('Array Literal Arguments', () => {
     it('should pass array literals as static arguments to services', async () => {
       const result = await query({
-        services: {
+        services: servicesFromTables({
           arrayProcessor: {
             async '/sum'({numbers}) {
               return numbers.reduce((a, b) => a + b, 0)
@@ -337,15 +329,15 @@ describe('MicroQL Comprehensive Tests', () => {
               return items.length
             }
           }
-        },
+        }),
         phases: {
-          numberSum: ['GET [arrayProcessor]/sum', {numbers: [1, 2, 3, 4, 5]}],
+          numberSum: ['[arrayProcessor]/sum', {numbers: [1, 2, 3, 4, 5]}],
           textJoin: [
-            'GET [arrayProcessor]/concatenate',
+            '[arrayProcessor]/concatenate',
             {strings: ['hello', 'world', 'test']}
           ],
           itemCount: [
-            'GET [arrayProcessor]/count',
+            '[arrayProcessor]/count',
             {items: ['a', 'b', 'c', 'd']}
           ]
         }
@@ -359,16 +351,16 @@ describe('MicroQL Comprehensive Tests', () => {
     it('should handle mixed array and scalar arguments', async () => {
       const result = await query({
         given: {multiplier: 2},
-        services: {
+        services: servicesFromTables({
           calculator: {
             async '/multiplyAndSum'({numbers, factor}) {
               return numbers.reduce((a, b) => a + b, 0) * factor
             }
           }
-        },
+        }),
         phases: {
           result: [
-            'GET [calculator]/multiplyAndSum',
+            '[calculator]/multiplyAndSum',
             {
               numbers: [10, 20, 30],
               factor: '$given.multiplier'
@@ -382,7 +374,7 @@ describe('MicroQL Comprehensive Tests', () => {
 
     it('should handle nested arrays and objects in arguments', async () => {
       const result = await query({
-        services: {
+        services: servicesFromTables({
           dataProcessor: {
             async '/processNestedData'({config}) {
               const {items, settings} = config
@@ -393,10 +385,10 @@ describe('MicroQL Comprehensive Tests', () => {
               }
             }
           }
-        },
+        }),
         phases: {
           processed: [
-            'GET [dataProcessor]/processNestedData',
+            '[dataProcessor]/processNestedData',
             {
               config: {
                 items: [
@@ -424,7 +416,7 @@ describe('MicroQL Comprehensive Tests', () => {
     it('should work with method syntax and array literals', async () => {
       const result = await query({
         given: {baseNumbers: [1, 2, 3]},
-        services: {
+        services: servicesFromTables({
           arrayOps: {
             async '/merge'({on, additional}) {
               return [...on, ...additional]
@@ -440,17 +432,17 @@ describe('MicroQL Comprehensive Tests', () => {
               })
             }
           }
-        },
+        }),
         phases: {
           merged: [
-            'GET [arrayOps]/merge',
+            '[arrayOps]/merge',
             {
               on: '$given.baseNumbers',
               additional: [4, 5, 6]
             }
           ],
           transformed: [
-            'GET [arrayOps]/transform',
+            '[arrayOps]/transform',
             {
               on: '$merged',
               operations: ['double', 'add10']

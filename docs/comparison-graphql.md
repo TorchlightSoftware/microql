@@ -28,8 +28,8 @@ MicroQL and GraphQL solve different problems despite both being query languages.
 **MicroQL**: **Automatic** - infers dependencies from `$` and `@` references
 ```javascript
 phases: {
-  profile: ['GET [users]/getProfile', {id: '$given.userId'}],
-  auditLog: ['GET [audit]/log', {user: '$profile'}]  // Auto-detects dependency on profile
+  profile: ['[users]/getProfile', {id: '$given.userId'}],
+  auditLog: ['[audit]/log', {user: '$profile'}]  // Auto-detects dependency on profile
 }
 ```
 
@@ -56,20 +56,20 @@ const result = await query({
   services: {users, notifications, audit},
   phases: {
     // These run in parallel (no dependencies)
-    user: ['GET [users]/getProfile', {id: '$given.userId'}],
-    preferences: ['GET [users]/getPreferences', {id: '$given.userId'}],
+    user: ['[users]/getProfile', {id: '$given.userId'}],
+    preferences: ['[users]/getPreferences', {id: '$given.userId'}],
     
     // This waits for user data (has dependency)
-    notification: ['GET [notifications]/send', {
+    notification: ['[notifications]/send', {
       to: '$user.email',
       name: '$user.name'
     }],
     
     // Sequential chain with @ context passing
     pipeline: [
-      ['GET [data]/extract', {source: '$given.data'}],
-      ['GET [data]/transform', {input: '@'}],        // @ = previous step result
-      ['GET [data]/validate', {processed: '@'}]
+      ['[data]/extract', {source: '$given.data'}],
+      ['[data]/transform', {input: '@'}],        // @ = previous step result
+      ['[data]/validate', {processed: '@'}]
     ]
   }
 })
@@ -103,27 +103,20 @@ query {
 Simple async functions focused on business logic:
 
 ```javascript
-const userService = {
+const userService = serviceFromTable({
   async '/getProfile'({id}) {
     return await db.users.findById(id)
   },
   
-  async '/updateProfile'({id, updates}) {
-    await validateUpdates(updates)
-    return await db.users.update(id, updates)
+  // Optional: declare the input, as a validation contract
+  '/updateProfile': {
+    input: {
+      id: [['type', {fromZod: z.uuid()}]],
+      updates: [['type', {fromZod: z.object({name: z.string().optional(), email: z.email().optional()})}]]
+    },
+    call: async ({id, updates}) => db.users.update(id, updates)
   }
-}
-
-// Optional: Add validation contracts
-userService['/updateProfile']._validators = {
-  precheck: {
-    id: ['string', 'uuid'],
-    updates: {
-      name: ['string', 'optional'],
-      email: ['string', 'email', 'optional']
-    }
-  }
-}
+})
 ```
 
 ### GraphQL Resolvers
@@ -158,9 +151,9 @@ const resolvers = {
 **Parallel Execution**: Independent queries run simultaneously
 ```javascript
 phases: {
-  user: ['GET [users]/get', {id: '$given.userId'}],
-  orders: ['GET [orders]/getByUser', {userId: '$given.userId'}],
-  preferences: ['GET [prefs]/get', {userId: '$given.userId'}]
+  user: ['[users]/get', {id: '$given.userId'}],
+  orders: ['[orders]/getByUser', {userId: '$given.userId'}],
+  preferences: ['[prefs]/get', {userId: '$given.userId'}]
   // All three execute in parallel
 }
 ```
@@ -169,10 +162,10 @@ phases: {
 ```javascript
 phases: {
   pipeline: [
-    ['GET [parser]/parseCSV', {data: '$given.csvData'}],
-    ['GET [validator]/check', {rows: '@'}],          // @ = parsed data
-    ['GET [transformer]/enrich', {data: '@'}],       // @ = validated data
-    ['GET [storage]/save', {records: '@'}]           // @ = enriched data
+    ['[parser]/parseCSV', {data: '$given.csvData'}],
+    ['[validator]/check', {rows: '@'}],          // @ = parsed data
+    ['[transformer]/enrich', {data: '@'}],       // @ = validated data
+    ['[storage]/save', {records: '@'}]           // @ = enriched data
   ]
 }
 ```
@@ -180,8 +173,8 @@ phases: {
 **Method Syntax**: Functional composition
 ```javascript
 phases: {
-  result: ['$given.data', 'GET [transform]/filter', {service: ['GET [data]/isActive', {item: '@'}]}],
-  upper: ['$result', 'GET [transform]/map', {service: ['GET [string]/toUpperCase', {text: '@'}]}]
+  result: ['$given.data', '[transform]/filter', {service: ['[data]/isActive', {item: '@'}]}],
+  upper: ['$result', '[transform]/map', {service: ['[string]/toUpperCase', {text: '@'}]}]
 }
 ```
 
@@ -208,9 +201,9 @@ query {
 
 ```javascript
 phases: {
-  user: ['GET [users]/getUser', {
+  user: ['[users]/getUser', {
     id: '$given.userId',
-    onError: ['GET [fallback]/getDefaultUser'],      // Service-level fallback
+    onError: ['[fallback]/getDefaultUser'],      // Service-level fallback
     retry: 3,                                   // Built-in retry
     timeout: 5000,                             // Built-in timeout
     ignoreErrors: false                        // Continue on error
@@ -219,7 +212,7 @@ phases: {
 
 // Global error handling
 settings: {
-  onError: ['GET [logger]/logError']                 // Global error handler
+  onError: ['[logger]/logError']                 // Global error handler
 }
 ```
 
@@ -317,8 +310,8 @@ const result = await query({
   given: {userId: 'user123'},
   services: {users, audit},
   phases: {
-    profile: ['GET [users]/getProfile', {id: '$given.userId'}],
-    logged: ['GET [audit]/log', {action: 'profile_access', user: '$profile'}]
+    profile: ['[users]/getProfile', {id: '$given.userId'}],
+    logged: ['[audit]/log', {action: 'profile_access', user: '$profile'}]
   }
 })
 ```

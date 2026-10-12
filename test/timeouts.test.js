@@ -1,10 +1,10 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query from '../node.js'
+import query, {serviceFromTable} from '../index.js'
 
 describe('Timeout Tests', () => {
   // Test service with configurable delays
-  const createDelayService = (delay, name) => ({
+  const createDelayService = (delay, name) => serviceFromTable({
     async '/delay'(_args) {
       await new Promise((resolve) => setTimeout(resolve, delay))
       return `${name} completed after ${delay}ms`
@@ -19,7 +19,7 @@ describe('Timeout Tests', () => {
           fast: createDelayService(50, 'fast')
         },
         phases: {
-          result: ['GET [fast]/delay', {input: '$given.value'}]
+          result: ['[fast]/delay', {input: '$given.value'}]
         }
       })
 
@@ -37,10 +37,10 @@ describe('Timeout Tests', () => {
             timeout: 100
           },
           phases: {
-            result: ['GET [slow]/delay', {input: '$given.value'}]
+            result: ['[slow]/delay', {input: '$given.value'}]
           }
         }),
-        /\[\$result\.@1 - GET \[slow\]\/delay\] Timed out after 100ms/
+        /\[\$result\.@1 - \[slow\]\/delay\] Timed out after 100ms/
       )
     })
 
@@ -54,7 +54,7 @@ describe('Timeout Tests', () => {
           timeout: 100
         },
         phases: {
-          result: ['GET [fast]/delay', {input: '$given.value'}]
+          result: ['[fast]/delay', {input: '$given.value'}]
         }
       })
 
@@ -73,7 +73,7 @@ describe('Timeout Tests', () => {
           timeout: 100
         },
         phases: {
-          result: ['GET [slow]/delay', {input: '$given.value', timeout: 200}]
+          result: ['[slow]/delay', {input: '$given.value', timeout: 200}]
         }
       })
 
@@ -91,10 +91,10 @@ describe('Timeout Tests', () => {
             timeout: 1000
           },
           phases: {
-            result: ['GET [slow]/delay', {input: '$given.value', timeout: 100}]
+            result: ['[slow]/delay', {input: '$given.value', timeout: 100}]
           }
         }),
-        /\[\$result\.@1 - GET \[slow\]\/delay\] Timed out after 100ms/
+        /\[\$result\.@1 - \[slow\]\/delay\] Timed out after 100ms/
       )
     })
   })
@@ -112,9 +112,9 @@ describe('Timeout Tests', () => {
           timeout: 100
         },
         phases: {
-          fastResult: ['GET [fast]/delay', {input: '$given.value'}],
-          mediumResult: ['GET [medium]/delay', {input: '$given.value'}],
-          slowResult: ['GET [slow]/delay', {input: '$given.value', timeout: 200}]
+          fastResult: ['[fast]/delay', {input: '$given.value'}],
+          mediumResult: ['[medium]/delay', {input: '$given.value'}],
+          slowResult: ['[slow]/delay', {input: '$given.value', timeout: 200}]
         }
       })
 
@@ -135,8 +135,8 @@ describe('Timeout Tests', () => {
         },
         phases: {
           chained: [
-            ['GET [step1]/delay', {input: '$given.value'}],
-            ['GET [step2]/delay', {input: '@'}]
+            ['[step1]/delay', {input: '$given.value'}],
+            ['[step2]/delay', {input: '@'}]
           ]
         }
       })
@@ -157,12 +157,12 @@ describe('Timeout Tests', () => {
           },
           phases: {
             chained: [
-              ['GET [step1]/delay', {input: '$given.value'}],
-              ['GET [step2]/delay', {input: '@'}]
+              ['[step1]/delay', {input: '$given.value'}],
+              ['[step2]/delay', {input: '@'}]
             ]
           }
         }),
-        /\[\$chained\.@2 - GET \[step2\]\/delay\] Timed out after 100ms/
+        /\[\$chained\.@2 - \[step2\]\/delay\] Timed out after 100ms/
       )
     })
   })

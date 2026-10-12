@@ -1,27 +1,26 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import query, {memoryStore, nodeRuntime, plan} from '../node.js'
+import query, {memoryStore, nodeRuntime, plan, serviceFromTable} from '../index.js'
 
 // A service that counts its calls by input, and fails the inputs it's told to.
 const counting = (failing = new Set()) => {
   const calls = {}
-  const service = {
-    calls,
+  const service = serviceFromTable({
     async '/fetch'({id}) {
       calls[id] = (calls[id] ?? 0) + 1
       if (failing.has(id)) throw new Error(`interrupted at ${id}`)
       return {id}
     }
-  }
-  return service
+  })
+  return {...service, calls}
 }
 
 const listingsQuery = (service) => ({
   given: {ids: [1, 2, 3]},
   services: {source: service},
   phases: {
-    fetched: ['$given.ids', 'GET [util]/each', {service: ['GET [source]/fetch', {id: '@'}]}],
-    summary: ['GET [util]/length', {value: '$fetched'}]
+    fetched: ['$given.ids', '[util]/each', {service: ['[source]/fetch', {id: '@'}]}],
+    summary: ['[util]/length', {value: '$fetched'}]
   },
   select: '$fetched'
 })
@@ -78,7 +77,7 @@ describe('Run State', () => {
 
   it('settles the calls a failure left running before the Run reports, and before tearDown', async () => {
     const events = []
-    const service = {
+    const service = serviceFromTable({
       async '/fast'() { throw new Error('fast failure') },
       async '/slow'() {
         await new Promise(resolve => setTimeout(resolve, 20))
@@ -86,9 +85,9 @@ describe('Run State', () => {
         return 'slow'
       },
       async tearDown() { events.push('tearDown') }
-    }
+    })
     const runState = memoryStore()
-    const config = {services: {service}, phases: {a: ['GET [service]/fast', {}], b: ['GET [service]/slow', {}]}}
+    const config = {services: {service}, phases: {a: ['[service]/fast', {}], b: ['[service]/slow', {}]}}
 
     await assert.rejects(query(config, {runState}), /fast failure/)
     events.push('reported')
@@ -104,8 +103,8 @@ describe('Run State', () => {
     const result = await query({
       services: {source: service},
       phases: {
-        a: ['GET [source]/fetch', {id: 7}],
-        b: ['GET [source]/fetch', {id: 7}]
+        a: ['[source]/fetch', {id: 7}],
+        b: ['[source]/fetch', {id: 7}]
       }
     })
     assert.deepEqual(result, {a: {id: 7}, b: {id: 7}})
@@ -116,7 +115,7 @@ describe('Run State', () => {
 describe('Cache', () => {
   const cachedQuery = (service, id, cache = true) => ({
     services: {source: service},
-    phases: {a: ['GET [source]/fetch', {id, cache}]},
+    phases: {a: ['[source]/fetch', {id, cache}]},
     select: '$a'
   })
 

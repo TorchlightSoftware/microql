@@ -1,38 +1,42 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import {plan, addressToPath, pathToAddress} from '../index.js'
+import {z} from 'zod'
+import {plan, addressToPath, pathToAddress, serviceFromTable} from '../core.js'
+import {describeSchema} from '../types.js'
 
-// A service whose resource takes two services, to exercise field lettering.
-const branch = {
-  async '/choose'({on, pass, fail}) { return on ? pass(on) : fail(on) },
-  async '/extract'({url}) { return {url} }
-}
-branch['/choose']._argtypes = {on: {argOrder: 0}, pass: {type: 'service'}, fail: {type: 'service'}}
-branch['/extract']._validators = {
-  precheck: {url: ['string']},
-  postcheck: {url: ['string'], images: ['array', {src: ['string']}, 'optional']}
-}
+// A service whose resource takes two calls, to exercise field lettering.
+const branch = serviceFromTable({
+  '/choose': {
+    input: {on: ['target'], pass: [['call', {fromField: 'on'}]], fail: [['call', {fromField: 'on'}]]},
+    call: async ({on, pass, fail}) => on ? pass(on) : fail(on)
+  },
+  '/extract': {
+    input: {url: [['type', {fromZod: z.string()}]]},
+    output: [['type', {fromZod: z.object({url: z.string(), images: z.array(z.object({src: z.string()})).optional()})}]],
+    call: async ({url}) => ({url})
+  }
+})
 
 const query = {
   given: {baseUrl: 'https://a.example', ids: [1, 2]},
   trigger: {kind: 'schedule', schema: {at: ['string']}},
   services: {branch},
-  settings: {onError: ['GET [util]/template', {failed: true}]},
+  settings: {onError: ['[util]/template', {failed: true}]},
   phases: {
-    categories: ['GET [branch]/extract', {url: '$given.baseUrl'}],
+    categories: ['[branch]/extract', {url: '$given.baseUrl'}],
     listings: [
-      ['$given.ids', 'GET [util]/each', {
+      ['$given.ids', '[util]/each', {
         as: 'id',
         service: [
-          ['GET [branch]/extract', {url: '$given.baseUrl', '@type': 'Listing'}],
-          ['@', 'GET [branch]/choose', {
-            pass: ['GET [util]/template', {id: '@id'}],
-            fail: ['GET [util]/template', {missing: '@id'}],
-            onError: ['GET [util]/template', {error: '@.message'}]
+          ['[branch]/extract', {url: '$given.baseUrl', '@type': 'Listing'}],
+          ['@', '[branch]/choose', {
+            pass: ['[util]/template', {id: '@id'}],
+            fail: ['[util]/template', {missing: '@id'}],
+            onError: ['[util]/template', {error: '@.message'}]
           }]
         ]
       }],
-      ['GET [util]/length', {value: '$categories'}]
+      ['[util]/length', {value: '$categories'}]
     ]
   }
 }
@@ -43,21 +47,21 @@ describe('plan()', () => {
     assert.deepEqual(planned.columns, [['categories'], ['listings']])
     assert.deepEqual(planned.phases.map(p => [p.name, p.dependencies]), [['categories', []], ['listings', ['categories']]])
     assert.deepEqual(planned.roots.map(r => r.name), ['given', 'trigger'])
-    assert.deepEqual(Object.keys(planned.roots[0].type.fields), ['baseUrl', 'ids'])
+    assert.equal(describeSchema(planned.roots[0].type), '{baseUrl: string, ids: array of number}')
     assert.match(planned.query, /^[0-9a-f]{64}$/)
   })
 
   // [description, Query trigger block, payload, trigger type]
   const triggerTypes = [
-    ['the payload\'s own type when one is given', {schema: {at: ['string']}}, {at: 12}, {type: 'object', fields: {at: {type: 'number'}}}],
-    ['the schema\'s type when no payload is given', {schema: {at: ['string']}}, undefined, {type: 'object', fields: {at: {type: 'text'}}}],
-    ['mixed with neither', undefined, undefined, {type: 'mixed'}]
+    ['the payload\'s own type when one is given', {schema: {at: ['string']}}, {at: 12}, '{at: number}'],
+    ['the schema\'s type when no payload is given', {schema: {at: ['string']}}, undefined, '{at: string}'],
+    ['any with neither', undefined, undefined, 'any']
   ]
 
   for (const [description, trigger, payload, type] of triggerTypes) {
     it(`types $trigger as ${description}`, () => {
       const {roots} = plan({...query, trigger}, {trigger: payload})
-      assert.deepEqual(roots.find(r => r.name === 'trigger').type, type)
+      assert.equal(describeSchema(roots.find(r => r.name === 'trigger').type), type)
     })
   }
 
@@ -123,60 +127,142 @@ describe('Service Call Addresses ↔ JSON paths', () => {
 
 describe('type inference', () => {
   const typesOf = (q, address) => plan(q).calls.find(c => c.address === address).types
+  const described = (types) => mapDescribed(types)
 
   it('gives each argument its expected and actual type', () => {
     const types = typesOf(query, '$categories.@1')
-    assert.deepEqual(types.args.url, {expected: {type: 'text'}, actual: {type: 'text'}})
-    assert.deepEqual(types.returns.fields.url, {type: 'text'})
+    assert.deepEqual(described(types.args.url), {expected: 'string', actual: 'string'})
+    assert.equal(describeSchema(types.returns), '{url: string, images?: array of {src: string}}')
   })
 
-  it('types @ as the item of the iterated list, and paths walk into types', () => {
+  it('types @ inside each as one item of the list it iterates (fromList)', () => {
     const types = typesOf(query, '$listings.@1a2c1')
-    assert.deepEqual(types.args.id.actual, {type: 'number'})
+    assert.equal(describeSchema(types.args.id.actual), 'number')
+  })
+
+  it('types @ inside choose as all of its target (fromField)', () => {
+    const {calls} = plan({
+      given: {xs: [1, 2]},
+      services: {branch},
+      phases: {a: ['$given.xs', '[branch]/choose', {pass: ['[util]/template', {value: '@'}], fail: ['[util]/template', {}]}]}
+    })
+    assert.equal(describeSchema(calls.find(c => c.address === '$a.@1b1').types.args.value.actual), 'array of number')
+  })
+
+  it('types @ as any inside a call field that declares nothing it receives', () => {
+    const tally = serviceFromTable({'/reduce': {input: {on: ['target'], service: ['call']}, call: async () => 0}})
+    const {calls} = plan({
+      given: {xs: [1, 2]},
+      services: {branch, tally},
+      phases: {a: ['$given.xs', '[tally]/reduce', {service: ['[branch]/extract', {url: '@'}]}]}
+    })
+    assert.equal(describeSchema(calls.find(c => c.address === '$a.@1a1').types.args.url.actual), 'any')
+  })
+
+  it('takes a nested call\'s own declared return type, whatever its input', () => {
+    const types = typesOf(query, '$listings.@1a1')
+    assert.equal(describeSchema(types.returns), '{url: string, images?: array of {src: string}}')
   })
 
   it('types a chain step\'s @ as the previous call\'s return', () => {
     const types = typesOf(query, '$listings.@1a2')
-    assert.equal(types.args.on.actual.type, 'object')
-    assert.deepEqual(types.args.on.actual.fields.url, {type: 'text'})
+    assert.equal(describeSchema(types.args.on.actual), '{url: string, images?: array of {src: string}}')
   })
 
   it('types onError\'s @ as an error', () => {
     const types = typesOf(query, '$listings.@1a2b1')
-    assert.deepEqual(types.args.error.actual, {type: 'text'})
+    assert.equal(describeSchema(types.args.error.actual), 'string')
+  })
+
+  it('types a declared field a call doesn\'t supply as absent: fine when optional, a mismatch when required', () => {
+    const {errors} = plan({services: {branch}, phases: {a: ['[branch]/extract', {}], b: ['[util]/filter', {on: ['x'], service: ['[util]/exists', {value: '@'}]}]}})
+    assert.deepEqual(errors.map(({address, code}) => ({address, code})), [{address: '$a.@1.url', code: 'type-mismatch'}])
   })
 
   it('reports a mismatch as an error, kept apart from compile warnings', () => {
-    const mismatched = {...query, phases: {a: ['GET [branch]/extract', {url: '$given.ids'}]}}
+    const mismatched = {...query, phases: {a: ['[branch]/extract', {url: '$given.ids'}]}}
     const {errors, warnings} = plan(mismatched)
-    assert.deepEqual(errors, [{address: '$a.@1.url', message: '$a.@1.url expects text but receives list of number'}])
+    assert.deepEqual(errors.map(({address, code, message}) => ({address, code, message})),
+      [{address: '$a.@1.url', code: 'type-mismatch', message: '$a.@1.url expects string but receives array of number'}])
+    assert.equal(describeSchema(errors[0].expected), 'string')
+    assert.equal(describeSchema(errors[0].actual), 'array of number')
     assert.deepEqual(warnings, [])
   })
 
-  it('checks a service position against the return type its argument needs', () => {
+  it('checks a call field against the return type it declares', () => {
     const {errors} = plan({
       given: {xs: ['a']},
       services: {branch},
-      phases: {kept: ['$given.xs', 'GET [util]/filter', {service: ['GET [branch]/extract', {url: '@'}]}]}
+      phases: {kept: ['$given.xs', '[util]/filter', {service: ['[branch]/extract', {url: '@'}]}]}
     })
-    assert.deepEqual(errors, [{address: '$kept.@1.service', message: '$kept.@1.service expects boolean but receives object'}])
+    assert.deepEqual(errors.map(({address, code, message}) => ({address, code, message})),
+      [{address: '$kept.@1.service', code: 'type-mismatch', message: '$kept.@1.service expects boolean but receives {url: string, images?: array of {src: string}}'}])
   })
 
-  // [description, the call's own postcheck, return type]
-  const returnTypes = [
-    ['the service\'s output schema', undefined, {type: 'object', fields: {url: {type: 'text'}, images: {type: 'list', element: {type: 'object', fields: {src: {type: 'text'}}}, optional: true}}}],
-    ['the call\'s own postcheck, when it has one', {url: ['string']}, {type: 'object', fields: {url: {type: 'text'}}}]
+  // [description, phase, its return type]
+  const relationships = [
+    ['each returns a list of what its call returns (toList)',
+      ['$given.urls', '[util]/each', {service: ['[branch]/extract', {url: '@'}]}],
+      'array of {url: string, images?: array of {src: string}}'],
+    ['flattenEach returns what its call returns, flattened into one list',
+      ['$given.groups', '[util]/flattenEach', {service: ['@', '[util]/removeNulls']}],
+      'array of string'],
+    ['filter returns the list it was given (fromField)',
+      ['$given.urls', '[util]/filter', {service: ['[util]/exists', {value: '@'}]}],
+      'array of string'],
+    ['a call\'s own postcheck over its declared output',
+      ['[branch]/extract', {url: '$given.u', postcheck: {url: ['string']}}],
+      '{url: string}'],
+    ['any where nothing is declared',
+      ['[util]/when', {test: true, then: 1, otherwise: 2}],
+      'any']
   ]
 
-  for (const [description, postcheck, returns] of returnTypes) {
-    it(`takes a call's return type from ${description}`, () => {
-      const {phases} = plan({given: {u: 'x'}, services: {branch}, phases: {a: ['GET [branch]/extract', {url: '$given.u', postcheck}]}})
-      assert.deepEqual(phases[0].returns, returns)
+  for (const [description, phase, returns] of relationships) {
+    it(`knows ${description}`, () => {
+      const {phases, errors} = plan({given: {u: 'x', urls: ['a', 'b'], groups: [['a'], ['b']]}, services: {branch}, phases: {a: phase}})
+      assert.deepEqual(errors, [])
+      assert.equal(describeSchema(phases[0].returns), returns)
     })
   }
 
-  it('is mixed where nothing is declared', () => {
-    const types = typesOf(query, '$listings.@1a2')
-    assert.deepEqual(types.returns, {type: 'mixed'})
+  it('requires the calls flattenEach holds to return lists', () => {
+    const {errors} = plan({given: {urls: ['a']}, services: {branch}, phases: {a: ['$given.urls', '[util]/flattenEach', {service: ['[branch]/extract', {url: '@'}]}]}})
+    assert.deepEqual(errors.map(e => e.address), ['$a.@1.service'])
+    assert.match(errors[0].message, /expects array of any but receives \{url: string/)
+  })
+
+  it('composes sources: an object of the items of a list (toObject of fromList)', () => {
+    const index = serviceFromTable({
+      '/byId': {input: {on: ['target']}, output: [['type', {toObject: {fromList: 'on'}}]], call: async () => ({})}
+    })
+    const {phases} = plan({given: {rows: [{id: 'a'}]}, services: {index}, phases: {a: ['$given.rows', '[index]/byId']}})
+    assert.equal(describeSchema(phases[0].returns), 'record of {id: string}')
+  })
+
+  it('reads a value of an object field (fromObject)', () => {
+    const first = serviceFromTable({
+      '/any': {input: {on: ['target']}, output: [['type', {fromObject: 'on'}]], call: async ({on}) => Object.values(on)[0]}
+    })
+    const {phases} = plan({given: {prices: {tea: 2, cake: 3}}, services: {first}, phases: {a: ['$given.prices', '[first]/any']}})
+    assert.equal(describeSchema(phases[0].returns), 'number')
+  })
+
+  it('falls back to a field\'s declared type when nothing known flows in', () => {
+    const names = serviceFromTable({
+      '/each': {
+        input: {on: ['target', ['type', {fromZod: z.array(z.string())}]], service: [['call', {fromList: 'on'}]]},
+        call: async ({on, service}) => Promise.all(on.map(service))
+      }
+    })
+    const {calls} = plan({
+      services: {names},
+      phases: {a: ['[names]/each', {on: '$trigger.items', service: ['[util]/template', {name: '@'}]}]}
+    })
+    assert.equal(describeSchema(calls.find(c => c.address === '$a.@1a1').types.args.name.actual), 'string')
   })
 })
+
+function mapDescribed({expected, actual}) {
+  return {expected: describeSchema(expected), actual: describeSchema(actual)}
+}

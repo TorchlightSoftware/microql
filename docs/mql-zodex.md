@@ -115,8 +115,8 @@ precheck: {
 ```
 
 ```javascript
-// MicroQL: the service's own checks
-userService['/createUser']._validators = {
+// MicroQL: a call's own checks
+['[userService]/createUser', {
   precheck: {
     userData: {
       name: ['string'],
@@ -129,7 +129,7 @@ userService['/createUser']._validators = {
     name: ['string'],
     email: ['string', 'email']
   }
-}
+}]
 ```
 
 ```json
@@ -353,17 +353,17 @@ precheck: {
 
 ```javascript
 // MicroQL: the Query author's checks on two calls
-['GET [transformer]/step1', {value: 10, precheck: {value: ['number', {min: 0, max: 100}]}}],
-['GET [transformer]/step2', {value: '@', precheck: {value: ['number', {max: 200}]}}]
+['[transformer]/step1', {value: 10, precheck: {value: ['number', {min: 0, max: 100}]}}],
+['[transformer]/step2', {value: '@', precheck: {value: ['number', {max: 200}]}}]
 ```
 
 ```json
 [
-  ["GET [transformer]/step1", {"value": 10, "precheck": {
+  ["[transformer]/step1", {"value": 10, "precheck": {
     "type": "object",
     "properties": {"value": {"type": "number", "min": 0, "minInclusive": true, "max": 100, "maxInclusive": true}}
   }}],
-  ["GET [transformer]/step2", {"value": "@", "precheck": {
+  ["[transformer]/step2", {"value": "@", "precheck": {
     "type": "object",
     "properties": {"value": {"type": "number", "max": 200, "maxInclusive": true}}
   }}]

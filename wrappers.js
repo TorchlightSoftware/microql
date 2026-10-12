@@ -8,7 +8,7 @@
  * They are applied in canonical order, outermost first:
  *
  *   arguments → debug → error handling → run state → cache → precheck
- *   → rate limit → concurrency → retry → postcheck → timeout → the action
+ *   → rate limit → concurrency → retry → postcheck → timeout → the operation
  *
  * The Run State and the Cache sit inside error handling, so only successes
  * are reused, and outside validation, so a reused result was already checked.
@@ -17,7 +17,7 @@
  */
 
 import {mapReferences, parseReference, resolveReference} from './reference.js'
-import {VALIDATION_NAMES, getServiceColorName, mapValues, defaults} from './common.js'
+import {VALIDATION_NAMES, getServiceColorName, mapValues, defaults, setPaths} from './common.js'
 import {hashOf} from './forms.js'
 import {validate} from './validation.js'
 
@@ -30,8 +30,8 @@ const labelOf = (call) => `[${call.address} - ${call.key}]`
 export const resolveArgs = (value, scope, nodes) =>
   mapReferences(value, text => resolveReference(parseReference(text), scope, nodes))
 
-// Resolves the call's data, injects settings-typed arguments, and hands each
-// service-typed argument over as a function of its input.
+// Resolves the call's data, injects settings-tagged fields, and hands each
+// call field over as a function of its input, each at its field path.
 const withArgs = (next, call) => {
   const positions = servicePositions(call)
   return async (_args, inv) => {
@@ -42,9 +42,9 @@ const withArgs = (next, call) => {
     const services = Object.fromEntries(positions.map(([field, position]) =>
       [field, (input) => run.runPosition(position, scope, input)]))
 
-    inv.inputs = {...data, ...settingsArgs}
+    inv.inputs = setPaths(data, settingsArgs)
     inv.input = hashOf(inv.inputs)
-    return next({...inv.inputs, ...services}, inv)
+    return next(setPaths(inv.inputs, services), inv)
   }
 }
 
@@ -234,12 +234,13 @@ const withTimeout = (next) => async (args, inv) => {
 const servicePositions = (call) => Object.entries(call.positions).filter(([field]) => field !== 'onError')
 
 // A call that holds other calls (an `each`) doesn't take a concurrency slot,
-// or it would starve the calls it is waiting on.
+// or it would starve the calls it is waiting on, and has no timeout of its
+// own unless it sets one: the calls it holds have theirs.
 const holdsCalls = (call) => servicePositions(call).length > 0
 
 // The wrappers a call needs, in canonical order, outermost first.
 function wrappersFor(call, run) {
-  const {settings, validators, noTimeout} = call
+  const {settings, validators} = call
   return [
     withArgs,
     settings.debug && withDebug,
@@ -251,12 +252,12 @@ function wrappersFor(call, run) {
     run.limit && !holdsCalls(call) && withConcurrency,
     settings.retry > 0 && withRetry,
     hasChecks(validators, 'postcheck') && withPostcheck,
-    settings.timeout > 0 && (!noTimeout || call.ownTimeout) && withTimeout
+    settings.timeout > 0 && (!holdsCalls(call) || call.ownTimeout) && withTimeout
   ].filter(Boolean)
 }
 
-// The call's action wrapped in its behaviour: a step `(args, invocation) => result`.
+// The call's operation wrapped in its behaviour: a step `(args, invocation) => result`.
 export function wrap(call, run) {
-  const action = (args) => call.action.call(call.service, args)
-  return wrappersFor(call, run).reduceRight((next, wrapper) => wrapper(next, call, run), action)
+  const operation = (args) => call.operation.call(args)
+  return wrappersFor(call, run).reduceRight((next, wrapper) => wrapper(next, call, run), operation)
 }

@@ -1,13 +1,13 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query from '../node.js'
+import query, {serviceFromTable} from '../index.js'
 
 describe('TearDown Tests', () => {
   it('should call tearDown on services that have it', async () => {
     let tearDownCalled = false
 
     // Mock service with tearDown method
-    const mockService = {
+    const mockService = serviceFromTable({
       async '/testAction'() {
         return 'test result'
       },
@@ -15,12 +15,12 @@ describe('TearDown Tests', () => {
       async tearDown() {
         tearDownCalled = true
       }
-    }
+    })
 
     await query({
       services: {mockService},
       phases: {
-        test: ['GET [mockService]/testAction', {}]
+        test: ['[mockService]/testAction', {}]
       }
     })
 
@@ -29,17 +29,17 @@ describe('TearDown Tests', () => {
 
   it('should not fail if service does not have tearDown', async () => {
     // Service without tearDown method
-    const serviceWithoutTearDown = {
+    const serviceWithoutTearDown = serviceFromTable({
       async '/testAction'() {
         return 'test result'
       }
-    }
+    })
 
     // This should not throw an error
     const result = await query({
       services: {serviceWithoutTearDown},
       phases: {
-        test: ['GET [serviceWithoutTearDown]/testAction', {}]
+        test: ['[serviceWithoutTearDown]/testAction', {}]
       }
     })
 
@@ -49,29 +49,29 @@ describe('TearDown Tests', () => {
   it('should call tearDown on multiple services', async () => {
     const tearDownCalls = []
 
-    const service1 = {
+    const service1 = serviceFromTable({
       async '/action'() {
         return 'result1'
       },
       async tearDown() {
         tearDownCalls.push('service1')
       }
-    }
+    })
 
-    const service2 = {
+    const service2 = serviceFromTable({
       async '/action'() {
         return 'result2'
       },
       async tearDown() {
         tearDownCalls.push('service2')
       }
-    }
+    })
 
     await query({
       services: {service1, service2},
       phases: {
-        test1: ['GET [service1]/action', {}],
-        test2: ['GET [service2]/action', {}]
+        test1: ['[service1]/action', {}],
+        test2: ['[service2]/action', {}]
       }
     })
 
@@ -93,7 +93,7 @@ describe('TearDown Tests', () => {
   it('should call tearDown even if query fails', async () => {
     let tearDownCalled = false
 
-    const serviceWithError = {
+    const serviceWithError = serviceFromTable({
       async '/failingAction'() {
         throw new Error('Test error')
       },
@@ -101,13 +101,13 @@ describe('TearDown Tests', () => {
       async tearDown() {
         tearDownCalled = true
       }
-    }
+    })
 
     try {
       await query({
         services: {serviceWithError},
         phases: {
-          test: ['GET [serviceWithError]/failingAction', {}]
+          test: ['[serviceWithError]/failingAction', {}]
         }
       })
       assert.fail('Query should have thrown an error')
@@ -126,25 +126,25 @@ describe('TearDown Tests', () => {
   it('should not call tearDown for unused services', async () => {
     let tearDownCalled = false
 
-    const usedService = {
+    const usedService = serviceFromTable({
       async '/action'() {
         return 'result'
       }
-    }
+    })
 
-    const unusedService = {
+    const unusedService = serviceFromTable({
       async '/action'() {
         return 'unused'
       },
       async tearDown() {
         tearDownCalled = true
       }
-    }
+    })
 
     await query({
       services: {usedService, unusedService},
       phases: {
-        test: ['GET [usedService]/action', {}]
+        test: ['[usedService]/action', {}]
       }
     })
 
@@ -158,20 +158,20 @@ describe('TearDown Tests', () => {
   it('should handle tearDown errors gracefully', async () => {
     const _queryCompleted = false
 
-    const serviceWithBadTearDown = {
+    const serviceWithBadTearDown = serviceFromTable({
       async '/action'() {
         return 'result'
       },
       async tearDown() {
         throw new Error('TearDown failed')
       }
-    }
+    })
 
     // Should not throw despite tearDown error
     const result = await query({
       services: {serviceWithBadTearDown},
       phases: {
-        test: ['GET [serviceWithBadTearDown]/action', {}]
+        test: ['[serviceWithBadTearDown]/action', {}]
       }
     })
 

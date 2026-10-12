@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
 import {readFile} from 'node:fs/promises'
+import {execFileSync} from 'node:child_process'
 import {ESLint} from 'eslint'
 
 const eslint = new ESLint()
@@ -19,7 +20,8 @@ describe('core is free of environment dependencies', () => {
     ['import {inspect} from \'util\'\ninspect()', 'wrappers.js', true],
     ['import fs from \'fs-extra\'\nfs()', 'services/util.js', true],
     ['import {sha256} from \'@noble/hashes/sha2.js\'\nsha256()', 'forms.js', false],
-    ['import fs from \'node:fs\'\nfs()', 'node.js', false],
+    ['import fs from \'node:fs\'\nfs()', 'core.js', true],
+    ['import fs from \'node:fs\'\nfs()', 'index.js', false],
     ['import fs from \'node:fs\'\nfs()', 'test/anything.test.js', false]
   ]
 
@@ -43,9 +45,10 @@ describe('core is free of environment dependencies', () => {
 })
 
 describe('entry points', () => {
-  it('exports the node entry point as microql and core as microql/core', async () => {
+  it('exports the node entry point, index.js, as microql and core.js as microql/core', async () => {
     const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
-    assert.deepEqual(pkg.exports, {'.': './node.js', './core': './index.js'})
+    assert.equal(pkg.main, 'index.js')
+    assert.deepEqual(pkg.exports, {'.': './index.js', './core': './core.js'})
   })
 
   it('resolves microql to core plus the node runtime', async () => {
@@ -59,5 +62,23 @@ describe('entry points', () => {
     assert.equal(typeof core.execute, 'function')
     assert.equal(core.nodeRuntime, undefined)
     assert.equal(core.defaultRuntime, undefined)
+  })
+})
+
+// What `npm publish` would ship: the library and its docs, never the tests,
+// tooling, or scratch directories, whose fixtures don't belong in a package.
+describe('published package', () => {
+  const packed = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {encoding: 'utf8'}))[0].files.map(f => f.path)
+
+  it('ships the entry points, core and the builtin service', () => {
+    for (const file of ['index.js', 'core.js', 'compile.js', 'declaration.js', 'service-table.js', 'services/util.js', 'README.md', 'package.json']) {
+      assert.ok(packed.includes(file), `${file} is shipped`)
+    }
+  })
+
+  it('ships nothing outside the library and its docs', () => {
+    const shipped = (file) => /^[^/]+\.(js|md|json)$/.test(file) || /^(services|docs)\//.test(file)
+    assert.deepEqual(packed.filter(file => !shipped(file)), [])
+    assert.deepEqual(packed.filter(file => ['eslint.config.js', 'performance.md', 'function-names.md'].includes(file)), [])
   })
 })

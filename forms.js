@@ -17,7 +17,7 @@ import {sha256} from '@noble/hashes/sha2.js'
 import {bytesToHex, utf8ToBytes} from '@noble/hashes/utils.js'
 import {mapReferences, parseReference, rootScope, enterPosition, scopedRoot} from './reference.js'
 import {columnsOf} from './graph.js'
-import {isPlainObject, getIn, omit} from './common.js'
+import {isPlainObject, getIn, omit, setPaths} from './common.js'
 
 // Settings that change how a call runs, never what it returns.
 const OPERATIONAL_SETTINGS = ['timeout', 'retry', 'debug', 'cache']
@@ -78,7 +78,7 @@ function stepsForm(steps, scope, env) {
 function callForm(call, scope, env) {
   const data = {
     key: call.key,
-    args: argumentsForm({...call.args, ...call.settingsArgs}, scope, env),
+    args: argumentsForm(setPaths(call.args, call.settingsArgs), scope, env),
     settings: omit(call.settings, [...OPERATIONAL_SETTINGS, 'rateLimit', 'inspect']),
     checks: call.checks
   }

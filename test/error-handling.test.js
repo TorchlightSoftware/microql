@@ -1,19 +1,20 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query from '../node.js'
+import {z} from 'zod'
+import query, {serviceFromTable} from '../index.js'
 
 describe('Error Handling Tests', () => {
   // Test services
-  const errorService = {
+  const errorService = serviceFromTable({
     '/fail': async () => {
       throw new Error('Service failed')
     },
     '/succeed': async () => {
       return {success: true}
     }
-  }
+  })
 
-  const logService = {
+  const logService = serviceFromTable({
     '/logError': async ({on}) => {
       const errorContext = on
       //console.log('logError received context:', errorContext)
@@ -31,7 +32,7 @@ describe('Error Handling Tests', () => {
         address: errorContext.address
       }
     }
-  }
+  })
 
   describe('Service-Level Error Handling', () => {
     it('should call onError handler when service fails', async () => {
@@ -39,7 +40,7 @@ describe('Error Handling Tests', () => {
         services: {error: errorService, log: logService},
         settings: {debug: false},
         phases: {
-          result: ['GET [error]/fail', {onError: ['GET [log]/logError', {on: '@'}]}]
+          result: ['[error]/fail', {onError: ['[log]/logError', {on: '@'}]}]
         }
       }
 
@@ -47,9 +48,9 @@ describe('Error Handling Tests', () => {
         query(config),
         (error) => {
           // Verify the error has all expected properties
-          assert.match(error.message, /\[\$result\.@1 - GET \[error\]\/fail\] Service failed/)
+          assert.match(error.message, /\[\$result\.@1 - \[error\]\/fail\] Service failed/)
           assert.strictEqual(error.address, '$result.@1')
-          assert.strictEqual(error.key, 'GET [error]/fail')
+          assert.strictEqual(error.key, '[error]/fail')
           return true
         }
       )
@@ -59,8 +60,8 @@ describe('Error Handling Tests', () => {
       const config = {
         services: {error: errorService},
         phases: {
-          failedQuery: ['GET [error]/fail', {ignoreErrors: true}],
-          successQuery: ['GET [error]/succeed', {}]
+          failedQuery: ['[error]/fail', {ignoreErrors: true}],
+          successQuery: ['[error]/succeed', {}]
         },
         select: ['$failedQuery', '$successQuery']
       }
@@ -73,18 +74,18 @@ describe('Error Handling Tests', () => {
     it('should work with both onError and ignoreErrors', async () => {
       let errorLogged = false
 
-      const customLog = {
+      const customLog = serviceFromTable({
         '/track': async ({_on}) => {
           errorLogged = true
           return {tracked: true}
         }
-      }
+      })
 
       const config = {
         services: {error: errorService, customLog},
         phases: {
-          result: ['GET [error]/fail', {
-            onError: ['GET [customLog]/track', {on: '@'}],
+          result: ['[error]/fail', {
+            onError: ['[customLog]/track', {on: '@'}],
             ignoreErrors: true
           }]
         }
@@ -101,28 +102,28 @@ describe('Error Handling Tests', () => {
       const config = {
         services: {error: errorService, log: logService},
         phases: {
-          willFail: ['GET [error]/fail', {}]
+          willFail: ['[error]/fail', {}]
         },
-        onError: ['GET [log]/logQueryError', {on: '@'}]
+        onError: ['[log]/logQueryError', {on: '@'}]
       }
 
       await assert.rejects(() => query(config), /Service failed/)
     })
 
     it('should handle errors in nested service chains', async () => {
-      const chainService = {
+      const chainService = serviceFromTable({
         '/step1': async () => ({value: 1}),
         '/step2': async () => {
           throw new Error('Chain step failed')
         }
-      }
+      })
 
       const config = {
         services: {chain: chainService},
         phases: {
           chained: [
-            ['GET [chain]/step1', {}],
-            ['GET [chain]/step2', {ignoreErrors: true}]
+            ['[chain]/step1', {}],
+            ['[chain]/step2', {ignoreErrors: true}]
           ]
         }
       }
@@ -132,32 +133,35 @@ describe('Error Handling Tests', () => {
     })
 
     it('should call onError chain when service fails', async () => {
-      const logService = {
-        '/addContext': async ({on, severity}) => {
-          // `on` should be the error object
-          on.severity = severity
-          on.timestamp = new Date().toISOString()
-          return on
+      // on is the target of both, for method syntax
+      const logService = serviceFromTable({
+        '/addContext': {
+          input: {on: ['target']},
+          call: async ({on, severity}) => {
+            // `on` should be the error object
+            on.severity = severity
+            on.timestamp = new Date().toISOString()
+            return on
+          }
         },
-        '/logError': async ({on}) => {
-          // `on` should be the enriched error from addContext
-          return {status: 'error', logged: true, severity: on.severity}
+        '/logError': {
+          input: {on: ['target']},
+          call: async ({on}) => {
+            // `on` should be the enriched error from addContext
+            return {status: 'error', logged: true, severity: on.severity}
+          }
         }
-      }
-
-      // Add argOrder metadata for method syntax
-      logService['/addContext']._argtypes = {on: {argOrder: 0}}
-      logService['/logError']._argtypes = {on: {argOrder: 0}}
+      })
 
       const config = {
         services: {error: errorService, log: logService},
         settings: {debug: false},
         phases: {
-          result: ['GET [error]/fail', {
+          result: ['[error]/fail', {
             onError: [
               // a chain's first step receives nothing; the error is @err
-              ['@err', 'GET [log]/addContext', {severity: 'bad'}],
-              ['@', 'GET [log]/logError']
+              ['@err', '[log]/addContext', {severity: 'bad'}],
+              ['@', '[log]/logError']
             ]
           }]
         }
@@ -168,9 +172,9 @@ describe('Error Handling Tests', () => {
         (error) => {
           // Verify the error has all expected properties
           assert.strictEqual(error.severity, 'bad')
-          assert.match(error.message, /\[\$result\.@1 - GET \[error\]\/fail\] Service failed/)
+          assert.match(error.message, /\[\$result\.@1 - \[error\]\/fail\] Service failed/)
           assert.strictEqual(error.address, '$result.@1')
-          assert.strictEqual(error.key, 'GET [error]/fail')
+          assert.strictEqual(error.key, '[error]/fail')
           assert.ok(error.timestamp)
           return true
         }
@@ -185,7 +189,7 @@ describe('Error Handling Tests', () => {
         services: {error: errorService},
         settings: {ignoreErrors: true},
         phases: {
-          failedQuery: ['GET [error]/fail', {}]
+          failedQuery: ['[error]/fail', {}]
         }
       }
 
@@ -196,18 +200,18 @@ describe('Error Handling Tests', () => {
     it('should call global onError handler', async () => {
       let errorLogged = false
 
-      const logService = {
+      const logService = serviceFromTable({
         '/logError': async ({on}) => {
           errorLogged = true
           return {globallyLogged: true, error: on.message}
         }
-      }
+      })
 
       const config = {
         services: {error: errorService, log: logService},
-        settings: {onError: ['GET [log]/logError', {on: '@'}]},
+        settings: {onError: ['[log]/logError', {on: '@'}]},
         phases: {
-          failedQuery: ['GET [error]/fail', {}]
+          failedQuery: ['[error]/fail', {}]
         }
       }
 
@@ -218,21 +222,21 @@ describe('Error Handling Tests', () => {
     it('should call global onError and ignore errors when both are set', async () => {
       let errorLogged = false
 
-      const logService = {
+      const logService = serviceFromTable({
         '/logError': async ({on}) => {
           errorLogged = true
           return {globallyLogged: true, error: on.message}
         }
-      }
+      })
 
       const config = {
         services: {error: errorService, log: logService},
         settings: {
           ignoreErrors: true,
-          onError: ['GET [log]/logError', {on: '@'}]
+          onError: ['[log]/logError', {on: '@'}]
         },
         phases: {
-          failedQuery: ['GET [error]/fail', {}]
+          failedQuery: ['[error]/fail', {}]
         }
       }
 
@@ -247,7 +251,7 @@ describe('Error Handling Tests', () => {
       const seen = []
       const services = {
         error: errorService,
-        log: {
+        log: serviceFromTable({
           async '/record'({inner, outer}) {
             seen.push({inner, outer})
             return 'recorded'
@@ -255,15 +259,15 @@ describe('Error Handling Tests', () => {
           async '/flaky'() {
             throw new Error('handler failed too')
           }
-        }
+        })
       }
 
       const result = await query({
         services,
         phases: {
-          result: ['GET [error]/fail', {
-            onError: ['GET [log]/flaky', {
-              onError: ['GET [log]/record', {inner: '@err.message', outer: '@@err.address'}],
+          result: ['[error]/fail', {
+            onError: ['[log]/flaky', {
+              onError: ['[log]/record', {inner: '@err.message', outer: '@@err.address'}],
               ignoreErrors: true
             }],
             ignoreErrors: true
@@ -273,7 +277,7 @@ describe('Error Handling Tests', () => {
       })
 
       assert.strictEqual(result, 'recorded')
-      assert.deepStrictEqual(seen, [{inner: '[$result.@1a1 - GET [log]/flaky] handler failed too', outer: '$result.@1'}])
+      assert.deepStrictEqual(seen, [{inner: '[$result.@1a1 - [log]/flaky] handler failed too', outer: '$result.@1'}])
     })
   })
 
@@ -281,20 +285,20 @@ describe('Error Handling Tests', () => {
     it('should provide complete error context to handlers', async () => {
       let capturedContext = null
 
-      const captureService = {
+      const captureService = serviceFromTable({
         '/capture': async ({on}) => {
           capturedContext = on
           return {captured: true}
         }
-      }
+      })
 
       const config = {
         services: {error: errorService, capture: captureService},
         settings: {debug: false},
         phases: {
-          testQuery: ['GET [error]/fail', {
+          testQuery: ['[error]/fail', {
             someArg: 'value',
-            onError: ['GET [capture]/capture', {on: '@'}],
+            onError: ['[capture]/capture', {on: '@'}],
             ignoreErrors: true
           }]
         }
@@ -303,37 +307,33 @@ describe('Error Handling Tests', () => {
       await query(config)
 
       assert.ok(capturedContext)
-      assert.match(capturedContext.message, /\[\$testQuery\.@1 - GET \[error\]\/fail\] Service failed/)
+      assert.match(capturedContext.message, /\[\$testQuery\.@1 - \[error\]\/fail\] Service failed/)
       assert.strictEqual(capturedContext.address, '$testQuery.@1')
-      assert.strictEqual(capturedContext.key, 'GET [error]/fail')
+      assert.strictEqual(capturedContext.key, '[error]/fail')
       assert.strictEqual(capturedContext.args.someArg, 'value')
     })
   })
 
   describe('Validation Error Attribution in Nested Services', () => {
     it('should attribute postcheck errors to nested service, not wrapper service', async () => {
-      const scraper = {
-        async '/extract'() {
-          return {
-            images: [], // Will fail postcheck
-            websites: []
+      const atLeastOne = z.array(z.object({})).min(1)
+      const scraper = serviceFromTable({
+        '/extract': {
+          output: [['type', {fromZod: z.object({images: atLeastOne, websites: atLeastOne})}]],
+          async call() {
+            return {
+              images: [], // Will fail postcheck
+              websites: []
+            }
           }
         }
-      }
-
-      scraper['/extract']._validators = {
-        postcheck: {
-          images: ['array', ['object'], {min: 1}],
-          websites: ['array', ['object'], {min: 1}]
-        }
-      }
+      })
 
       const config = {
         services: {scraper},
         phases: {
-          listings: ['$given.urls', 'GET [util]/each', {
-            flatten: true,
-            service: ['GET [scraper]/extract', {url: '@'}]
+          listings: ['$given.urls', '[util]/flattenEach', {
+            service: ['[scraper]/extract', {url: '@'}]
           }]
         },
         given: {
@@ -345,12 +345,12 @@ describe('Error Handling Tests', () => {
         query(config),
         (error) => {
           // Error properties should reflect the innermost service (where the error originated)
-          assert.strictEqual(error.key, 'GET [scraper]/extract')
+          assert.strictEqual(error.key, '[scraper]/extract')
           assert.strictEqual(error.address, '$listings.@1a1')
 
           // Error message should contain only the innermost service context
           // (outer services don't relabel an error that already has an address)
-          assert.match(error.message, /\[\$listings\.@1a1 - GET \[scraper\]\/extract\]/)
+          assert.match(error.message, /\[\$listings\.@1a1 - \[scraper\]\/extract\]/)
           assert.match(error.message, /Service Schema Validation postcheck failed/)
 
           // Validation details should be present

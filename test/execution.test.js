@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import query, {memoryStore, plan} from '../node.js'
+import query, {memoryStore, plan, serviceFromTable} from '../index.js'
 
 // A service that counts its calls by id, and fails the ids it's told to.
 const counting = (failing = new Set()) => ({
@@ -14,12 +14,12 @@ const counting = (failing = new Set()) => ({
 
 // categories → listings → records; summary depends only on categories
 const pipeline = (source) => ({
-  services: {source},
+  services: {source: serviceFromTable(source)},
   phases: {
-    categories: ['GET [source]/fetch', {id: 'categories'}],
-    listings: ['GET [source]/fetch', {id: 'listings', after: '$categories'}],
-    records: ['GET [source]/fetch', {id: 'records', after: '$listings'}],
-    summary: ['GET [source]/fetch', {id: 'summary', after: '$categories'}]
+    categories: ['[source]/fetch', {id: 'categories'}],
+    listings: ['[source]/fetch', {id: 'listings', after: '$categories'}],
+    records: ['[source]/fetch', {id: 'records', after: '$listings'}],
+    summary: ['[source]/fetch', {id: 'summary', after: '$categories'}]
   }
 })
 
@@ -137,8 +137,8 @@ describe('target', () => {
     const runState = memoryStore()
     const config = {
       given: {ids: [1, 2]},
-      services: {source},
-      phases: {fetched: ['$given.ids', 'GET [util]/each', {service: ['GET [source]/fetch', {id: '@'}]}]}
+      services: {source: serviceFromTable(source)},
+      phases: {fetched: ['$given.ids', '[util]/each', {service: ['[source]/fetch', {id: '@'}]}]}
     }
     await query(config, {runState})
     await query(config, {runState, target: '$fetched'})
@@ -174,11 +174,11 @@ describe('abort', () => {
   }
 
   const gatedQuery = (gate, onError) => ({
-    services: {gate},
+    services: {gate: serviceFromTable(gate)},
     settings: onError ? {onError} : {},
     phases: {
-      quick: ['GET [gate]/quick', {}],
-      waiting: [['GET [gate]/wait', {after: '$quick'}], ['GET [gate]/after', {}]]
+      quick: ['[gate]/quick', {}],
+      waiting: [['[gate]/wait', {after: '$quick'}], ['[gate]/after', {}]]
     }
   })
 
@@ -212,7 +212,7 @@ describe('abort', () => {
     const handled = []
     gate['/handle'] = async () => { handled.push('handled') }
     const controller = new AbortController()
-    const run = query(gatedQuery(gate, ['GET [gate]/handle', {}]), {signal: controller.signal})
+    const run = query(gatedQuery(gate, ['[gate]/handle', {}]), {signal: controller.signal})
 
     await gate.started
     controller.abort()

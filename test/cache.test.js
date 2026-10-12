@@ -1,7 +1,8 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query, {nodeRuntime, fileStore} from '../node.js'
+import query, {nodeRuntime, fileStore, serviceFromTable} from '../index.js'
 import {readdir, rm} from 'fs/promises'
+import {z} from 'zod'
 
 const CACHEDIR = '.cache-test-cache'
 // the node runtime with its Cache kept in a test directory
@@ -19,12 +20,12 @@ describe('Cache Tests', () => {
 
       let callCount = 0
       const services = {
-        counter: {
+        counter: serviceFromTable({
           async '/increment'({value}) {
             callCount++
             return {count: callCount, input: value}
           }
-        }
+        })
       }
 
       // First call - should execute and cache
@@ -33,7 +34,7 @@ describe('Cache Tests', () => {
         services,
         runtime,
         phases: {
-          count: ['GET [counter]/increment', {value: '$given.value', cache: true}]
+          count: ['[counter]/increment', {value: '$given.value', cache: true}]
         },
         select: '$count'
       })
@@ -48,7 +49,7 @@ describe('Cache Tests', () => {
         services,
         runtime,
         phases: {
-          count: ['GET [counter]/increment', {value: '$given.value', cache: true}]
+          count: ['[counter]/increment', {value: '$given.value', cache: true}]
         },
         select: '$count'
       })
@@ -63,7 +64,7 @@ describe('Cache Tests', () => {
         services,
         runtime,
         phases: {
-          count: ['GET [counter]/increment', {value: '$given.value', cache: true}]
+          count: ['[counter]/increment', {value: '$given.value', cache: true}]
         },
         select: '$count'
       })
@@ -78,12 +79,12 @@ describe('Cache Tests', () => {
 
       let callCount = 0
       const services = {
-        counter: {
+        counter: serviceFromTable({
           async '/increment'({value}) {
             callCount++
             return {count: callCount, input: value}
           }
-        }
+        })
       }
 
       // First call without cache
@@ -91,7 +92,7 @@ describe('Cache Tests', () => {
         given: {value: 'test'},
         services,
         phases: {
-          count: ['GET [counter]/increment', {value: '$given.value'}]
+          count: ['[counter]/increment', {value: '$given.value'}]
         },
         select: '$count'
       })
@@ -104,7 +105,7 @@ describe('Cache Tests', () => {
         given: {value: 'test'},
         services,
         phases: {
-          count: ['GET [counter]/increment', {value: '$given.value'}]
+          count: ['[counter]/increment', {value: '$given.value'}]
         },
         select: '$count'
       })
@@ -117,11 +118,11 @@ describe('Cache Tests', () => {
       await cleanup()
 
       const services = {
-        test: {
+        test: serviceFromTable({
           async '/action'({input}) {
             return {processed: input}
           }
-        }
+        })
       }
 
       await query({
@@ -129,7 +130,7 @@ describe('Cache Tests', () => {
         services,
         runtime,
         phases: {
-          result: ['GET [test]/action', {input: '$given.value', cache: true}]
+          result: ['[test]/action', {input: '$given.value', cache: true}]
         },
         select: '$result'
       })
@@ -150,11 +151,11 @@ describe('Cache Tests', () => {
       await cleanup()
 
       const services = {
-        test: {
+        test: serviceFromTable({
           async '/process'({input}) {
             return {processed: input, timestamp: Date.now()}
           }
-        }
+        })
       }
 
       // Create a cached entry
@@ -163,7 +164,7 @@ describe('Cache Tests', () => {
         services,
         runtime,
         phases: {
-          result: ['GET [test]/process', {input: '$given.value', cache: {ttl: '1h'}}]
+          result: ['[test]/process', {input: '$given.value', cache: {ttl: '1h'}}]
         },
         select: '$result'
       })
@@ -187,13 +188,13 @@ describe('Cache Tests', () => {
       const startTime = Date.now()
 
       const services = {
-        slow: {
+        slow: serviceFromTable({
           async '/process'({input}) {
             callCount++
             callTimes.push(Date.now() - startTime)
             return {processed: input, call: callCount}
           }
-        }
+        })
       }
 
       // First set of calls - should execute and cache with rate limiting
@@ -207,8 +208,8 @@ describe('Cache Tests', () => {
           }
         },
         phases: {
-          result1: ['GET [slow]/process', {input: '$given.values[0]', cache: true}],
-          result2: ['GET [slow]/process', {input: '$given.values[1]', cache: true}]
+          result1: ['[slow]/process', {input: '$given.values[0]', cache: true}],
+          result2: ['[slow]/process', {input: '$given.values[1]', cache: true}]
         },
         select: ['$result1', '$result2']
       })
@@ -232,8 +233,8 @@ describe('Cache Tests', () => {
           }
         },
         phases: {
-          result1: ['GET [slow]/process', {input: '$given.values[0]', cache: true}],
-          result2: ['GET [slow]/process', {input: '$given.values[1]', cache: true}]
+          result1: ['[slow]/process', {input: '$given.values[0]', cache: true}],
+          result2: ['[slow]/process', {input: '$given.values[1]', cache: true}]
         },
         select: ['$result1', '$result2']
       })
@@ -253,17 +254,15 @@ describe('Cache Tests', () => {
 
       let callCount = 0
       const services = {
-        validator: {
-          async '/process'({value}) {
-            callCount++
-            return {validated: value, count: callCount}
+        validator: serviceFromTable({
+          '/process': {
+            input: {value: [['type', {fromZod: z.string()}]]},
+            async call({value}) {
+              callCount++
+              return {validated: value, count: callCount}
+            }
           }
-        }
-      }
-
-      // Add simple validation
-      services.validator['/process']._validators = {
-        precheck: {value: ['string']}
+        })
       }
 
       // First call - should validate and cache
@@ -272,7 +271,7 @@ describe('Cache Tests', () => {
         services,
         runtime,
         phases: {
-          result: ['GET [validator]/process', {value: '$given.input', cache: true}]
+          result: ['[validator]/process', {value: '$given.input', cache: true}]
         },
         select: '$result'
       })
@@ -287,7 +286,7 @@ describe('Cache Tests', () => {
         services,
         runtime,
         phases: {
-          result: ['GET [validator]/process', {value: '$given.input', cache: true}]
+          result: ['[validator]/process', {value: '$given.input', cache: true}]
         },
         select: '$result'
       })

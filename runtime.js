@@ -6,7 +6,7 @@
  *   inspect(value, options)       render a value for output
  *   recordFailure(location, record)  keep a failure for later
  *   cache                         an entry store whose results outlive a Run
- * The node runtime (node.js) is the reference implementation.
+ * The node runtime (index.js) is the reference implementation.
  *
  * Entry stores hold call results by (form hash, input hash): a form holds one
  * entry per distinct input. The Run State and the Cache share this shape and

@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query from '../node.js'
+import query, {serviceFromTable} from '../index.js'
 import util from '../services/util.js'
 
 describe('Function Arguments Tests', () => {
@@ -11,7 +11,7 @@ describe('Function Arguments Tests', () => {
           given: {items: ['apple', 'banana', 'cherry']},
           services: {util},
           phases: {
-            filtered: ['GET [util]/filter', {
+            filtered: ['[util]/filter', {
               on: '$given.items',
               service: item => item.includes('a') // Raw function - should fail
             }]
@@ -32,7 +32,7 @@ describe('Function Arguments Tests', () => {
           given: {items: [1, 2, 3]},
           services: {util},
           phases: {
-            mapped: ['GET [util]/each', {
+            mapped: ['[util]/each', {
               on: '$given.items',
               service: x => x * 2 // Raw function - should fail
             }]
@@ -53,7 +53,7 @@ describe('Function Arguments Tests', () => {
           given: {items: ['apple', 'banana', 'cherry']},
           services: {util},
           phases: {
-            filtered: ['$given.items', 'GET [util]/filter', {
+            filtered: ['$given.items', '[util]/filter', {
               service: item => item.includes('a') // Raw function - should fail
             }]
           }
@@ -70,14 +70,14 @@ describe('Function Arguments Tests', () => {
   describe('Proper Service Descriptor Functions Should Work', () => {
     const testServices = {
       util,
-      string: {
+      string: serviceFromTable({
         async '/includesLetter'({text, letter}) {
           return text.includes(letter)
         },
         async '/toUpper'({text}) {
           return text.toUpperCase()
         }
-      }
+      })
     }
 
     it('should work with service descriptor in util.filter', async () => {
@@ -85,9 +85,9 @@ describe('Function Arguments Tests', () => {
         given: {items: ['apple', 'banana', 'cherry']},
         services: testServices,
         phases: {
-          filtered: ['GET [util]/filter', {
+          filtered: ['[util]/filter', {
             on: '$given.items',
-            service: ['GET [string]/includesLetter', {text: '@', letter: 'a'}]
+            service: ['[string]/includesLetter', {text: '@', letter: 'a'}]
           }]
         }
       })
@@ -100,9 +100,9 @@ describe('Function Arguments Tests', () => {
         given: {items: ['apple', 'banana']},
         services: testServices,
         phases: {
-          mapped: ['GET [util]/each', {
+          mapped: ['[util]/each', {
             on: '$given.items',
-            service: ['GET [string]/toUpper', {text: '@'}]
+            service: ['[string]/toUpper', {text: '@'}]
           }]
         }
       })
@@ -115,7 +115,7 @@ describe('Function Arguments Tests', () => {
         given: {items: ['apple', 'banana']},
         services: testServices,
         phases: {
-          mapped: ['GET [util]/each', {
+          mapped: ['[util]/each', {
             on: '$given.items',
             service: {
               original: '@',

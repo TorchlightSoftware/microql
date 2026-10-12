@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query from '../node.js'
+import query, {serviceFromTable} from '../index.js'
 
 describe('Service This Binding Tests', () => {
   it('should allow services to use this for internal state', async () => {
@@ -12,7 +12,7 @@ describe('Service This Binding Tests', () => {
       },
 
       async '/testMethod'({input}) {
-        // This should refer to the service object, not AST node
+        // `this` is the table the service was written as
         assert.strictEqual(this.internalState, 'service-internal-data')
         assert.strictEqual(this.internalMethod(), 'internal-method-result')
 
@@ -26,9 +26,9 @@ describe('Service This Binding Tests', () => {
 
     const result = await query({
       given: {value: 'test-input'},
-      services: {testService},
+      services: {testService: serviceFromTable(testService)},
       phases: {
-        result: ['GET [testService]/testMethod', {input: '$given.value'}]
+        result: ['[testService]/testMethod', {input: '$given.value'}]
       },
       select: '$result'
     })
@@ -56,11 +56,11 @@ describe('Service This Binding Tests', () => {
     }
 
     const result = await query({
-      services: {counterService},
+      services: {counterService: serviceFromTable(counterService)},
       phases: {
-        first: ['GET [counterService]/increment', {by: 5}],
-        second: ['GET [counterService]/increment', {by: 3}],
-        final: ['GET [counterService]/getCount', {}]
+        first: ['[counterService]/increment', {by: 5}],
+        second: ['[counterService]/increment', {by: 3}],
+        final: ['[counterService]/getCount', {}]
       },
       select: ['$first', '$second', '$final']
     })

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {describe, it, beforeEach} from 'node:test'
 import {rm, readdir} from 'node:fs/promises'
-import {fileStore, memoryStore} from '../node.js'
+import {fileStore, memoryStore} from '../index.js'
 
 const DIR = '.cache-test-file-store'
 const hour = 3600000

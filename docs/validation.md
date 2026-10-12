@@ -1,6 +1,6 @@
 # MicroQL Validation System
 
-MicroQL provides a powerful validation system based on [Zod](https://zod.dev/) that allows you to validate service inputs (precheck) and outputs (postcheck) using JSON-based schema descriptors.
+MicroQL validates with [Zod](https://zod.dev/): a call's input fields before it runs (precheck), and its result after (postcheck). A Query's author writes checks in a terse JSON-based shorthand that MicroQL turns into zod; a service's author declares zod schemas directly.
 
 ## Table of Contents
 
@@ -14,9 +14,9 @@ MicroQL provides a powerful validation system based on [Zod](https://zod.dev/) t
 Validation in MicroQL can be defined in two places:
 
 1. **Service Call Validations**: the Query's author adds `precheck` and `postcheck` to one service call, to enforce what that call should receive and return.
-2. **Service Schema Validations**: the service's author declares schemas for a resource's input fields and its result, in lieu of imperative input checks.
+2. **Service Schema Validations**: the service's author declares zod schemas for an operation's input fields and its result, in lieu of imperative input checks: the `fromZod` types in its declaration ([Service Development Guide](service_guide.md#declarations)).
 
-There is no validation spanning a whole Query. The closest is the schema a Query may declare for its trigger payload (`trigger.schema`), which uses the same syntax; see [Runtime Integration](runtime-integration.md#trigger).
+The shorthand below is for Service Call Validations and the trigger's schema; a raw zod schema is accepted anywhere shorthand is. There is no validation spanning a whole Query. The closest is the schema a Query may declare for its trigger payload (`trigger.schema`), which uses the same syntax; see [Runtime Integration](runtime-integration.md#trigger).
 
 ## Validation Execution Order
 
@@ -32,7 +32,7 @@ Service Call Validations wrap Service Schema Validations, which wrap the call it
 const config = {
   services: { userService },
   phases: {
-    newUser: ['GET [userService]/createUser', {
+    newUser: ['[userService]/createUser', {
       userData: {
         name: 'John Doe',
         email: 'john@example.com',
@@ -49,34 +49,23 @@ const config = {
   }
 }
 
-// Service definition
-const userService = {
-  async '/createUser'(args) {
-    return { id: 123, ...args.userData }
+// Service definition, with its Service Schema Validations: the declared types
+// of its input fields (precheck) and of its result (postcheck)
+const userService = serviceFromTable({
+  '/createUser': {
+    input: {
+      userData: [['type', {fromZod: z.object({name: z.string(), email: z.email(), age: z.number().positive()})}]]
+    },
+    output: [['type', {fromZod: z.object({id: z.number(), name: z.string(), email: z.email()})}]],
+    call: async ({userData}) => ({id: 123, ...userData})
   }
-}
-
-// Service Schema Validation: precheck and postcheck
-userService['/createUser']._validators = {
-  precheck: {
-    userData: {
-      name: ['string'],
-      email: ['string', 'email'],
-      age: ['number', 'positive']
-    }
-  },
-  postcheck: {
-    id: ['number'],
-    name: ['string'],
-    email: ['string', 'email']
-  }
-}
+})
 
 ```
 
 ## Schema Syntax
 
-MicroQL validators use a JSON-based syntax that gets transformed into Zod schemas. There are three main forms:
+A Query's validators use a JSON-based syntax that gets transformed into Zod schemas. There are three main forms:
 
 ### 1. Array Syntax (Most Common)
 
@@ -152,36 +141,17 @@ Wrapper types handle complex data structures and can be combined with modifiers:
 
 ### 4. Direct Zod Schema Usage
 
-For advanced cases not covered by the JSON syntax, you can use Zod schemas directly:
+For advanced cases not covered by the JSON syntax, you can use Zod schemas directly, whole or inside shorthand:
 
 ```javascript
 import {z} from 'zod'
 
 const CustomSchema = z.string().min(8).regex(/^[A-Z]/)
 
-// Usage in service validators
-userService['/create']._validators = {
-  precheck: {
-    username: CustomSchema
-  }
-}
+['[userService]/create', {username: '$given.username', precheck: {username: CustomSchema}}]
 ```
 
 See the [Zod documentation](https://zod.dev/) for full schema capabilities.
-
-### Service Arguments Convention
-
-Use 'any' for service arguments that accept other services (like `util.map`, `util.filter`):
-
-```javascript
-// Example from util.js
-util['/each']._validators = {
-  precheck: {
-    on: ['array'],
-    service: ['any'] // Service arguments are compiled by MicroQL - don't need special validation
-  }
-}
-```
 
 ## Error Messages
 
@@ -189,7 +159,7 @@ Validation errors provide clear, detailed messages with full context:
 
 ```
 // [<address> - <service key>] <Service Call Validation | Service Schema Validation> <precheck | postcheck> failed:
-[$newUser.@1 - GET [userService]/createUser] Service Schema Validation precheck failed:
+[$newUser.@1 - [userService]/createUser] Service Schema Validation precheck failed:
 - userData.age: -25 => Too small: expected number to be >0
 - userData.email: 'invalid-email' => Invalid email
 ```
@@ -198,41 +168,41 @@ The error names which validation failed. A schema that can't be parsed fails bef
 
 ## Examples
 
-Examples are mixed from Service Call Validations and Service Schema Validations. The syntax is the same for both, and for `precheck` and `postcheck`, so any of the examples here can be used anywhere a validator is expected.
+Each example is a call's own checks. The syntax is the same for `precheck` and `postcheck`, and for the trigger's schema, so any of them can be used anywhere a validator is expected.
 
 **For comprehensive examples and test cases**, see `test/validation.test.js` which contains data-driven tests demonstrating all syntax patterns, modifier combinations, and edge cases.
 
 ### Basic String Validation
 
 ```javascript
-// Service definition
-emailService['/send']._validators = {
+// A call's own checks
+['[emailService]/send', {
   precheck: {
     to: ['string', 'email'],
     subject: ['string', {min: 1, max: 200}],
     body: ['string']
   }
-}
+}]
 ```
 
 ### Number Validation with Constraints
 
 ```javascript
-// Service definition
-calculator['/divide']._validators = {
+// A call's own checks
+['[calculator]/divide', {
   precheck: {
     numerator: ['number'],
     denominator: ['number', {min: 0.0001}] // Prevent division by zero
   },
   postcheck: ['number', 'finite']
-}
+}]
 ```
 
 ### Array Validation
 
 ```javascript
-// Service definition
-dataProcessor['/batch']._validators = {
+// A call's own checks
+['[dataProcessor]/batch', {
   precheck: {
     items: ['array', ['string'], {min: 1, max: 100}],
     options: {
@@ -240,14 +210,14 @@ dataProcessor['/batch']._validators = {
       timeout: ['number', 'positive', 'optional']
     }
   }
-}
+}]
 ```
 
 ### Complex Nested Objects
 
 ```javascript
-// Service definition
-orderService['/create']._validators = {
+// A call's own checks
+['[orderService]/create', {
   precheck: {
     order: {
       customer: {
@@ -267,14 +237,14 @@ orderService['/create']._validators = {
       }
     }
   }
-}
+}]
 ```
 
 ### Optional Fields
 
 ```javascript
-// Service definition
-profileService['/update']._validators = {
+// A call's own checks
+['[profileService]/update', {
   precheck: {
     userId: ['string', 'uuid'],
     updates: {
@@ -284,7 +254,7 @@ profileService['/update']._validators = {
       age: ['number', 'positive', 'optional']
     }
   }
-}
+}]
 ```
 
 ### Using Validation in Chains
@@ -294,11 +264,11 @@ const config = {
   services: { transformer },
   phases: {
     pipeline: [
-      ['GET [transformer]/step1', {
+      ['[transformer]/step1', {
         value: 10,
         precheck: { value: ['number', {min: 0, max: 100}] }
       }],
-      ['GET [transformer]/step2', {
+      ['[transformer]/step2', {
         value: '@',
         precheck: { value: ['number', {max: 200}] }
       }]
@@ -310,21 +280,21 @@ const config = {
 ### Regex Validation
 
 ```javascript
-// Service definition
-userService['/register']._validators = {
+// A call's own checks
+['[userService]/register', {
   precheck: {
     username: ['string', {regex: /^[a-zA-Z0-9_]{3,20}$/}],
     password: ['string', {min: 8, regex: /^(?=.*[A-Za-z])(?=.*\d)/}],
     phone: ['string', {regex: /^\+?[1-9]\d{1,14}$/}, 'optional']
   }
-}
+}]
 ```
 
 ### Enum Validation
 
 ```javascript
-// Service definition
-settingsService['/update']._validators = {
+// A call's own checks
+['[settingsService]/update', {
   precheck: {
     theme: ['enum', ['light', 'dark', 'auto']],
     language: ['enum', ['en', 'es', 'fr', 'de']],
@@ -334,21 +304,21 @@ settingsService['/update']._validators = {
       frequency: ['enum', ['instant', 'daily', 'weekly'], 'optional']
     }
   }
-}
+}]
 ```
 
 ### Date Validation
 
 ```javascript
-// Service definition
-eventService['/schedule']._validators = {
+// A call's own checks
+['[eventService]/schedule', {
   precheck: {
     title: ['string'],
     startDate: ['date', {min: new Date()}], // Must be in the future
     endDate: ['date'],
     recurring: ['enum', ['none', 'daily', 'weekly', 'monthly'], 'optional']
   }
-}
+}]
 ```
 
 ## Conclusions

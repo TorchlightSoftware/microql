@@ -22,8 +22,10 @@ The platform is yours. [A suggested architecture](#a-suggested-architecture) at 
 
 | Import | Resolves to | Is |
 |---|---|---|
-| `microql` | `node.js` | core with the node runtime wired in. `query()` uses the node runtime, and a fresh in-memory Run State unless you pass one. Also exports `nodeRuntime` and `fileStore`. |
-| `microql/core` | `index.js` | core alone, with no runtime of its own. `execute` refuses to run without a `runtime` and a `runState`. A lint rule keeps node built-ins out of every core file. |
+| `microql` | `index.js` | core with the node runtime wired in. `query()` uses the node runtime, and a fresh in-memory Run State unless you pass one. Also exports `nodeRuntime` and `fileStore`. |
+| `microql/core` | `core.js` | core alone, with no runtime of its own. `execute` refuses to run without a `runtime` and a `runState`. A lint rule keeps node built-ins out of every core file. |
+
+MicroQL has an internal compile step that turns a Query into a plan - an internal memory representation which is also serializeable. "compile" does not infer any sort of language transpilation: MicroQL is just JavaScript. A plan's types are zod schemas, which [zodex](https://www.npmjs.com/package/zodex) serializes.
 
 Both export:
 
@@ -37,6 +39,7 @@ Both export:
 | `addressToPath(plan, address)`, `pathToAddress(plan, path)` | [Service Call Addresses](#service-call-addresses) ↔ JSON paths |
 | `memoryStore()` | an [entry store](#entry-stores) in memory |
 | `util` | the built-in service |
+| `serviceFromTable(table)` | a service written as a table of operations; see the [Service Development Guide](service_guide.md#writing-a-service-as-a-table) |
 
 ## Storage
 
@@ -123,7 +126,7 @@ Aborting the `signal` stops the Run at once:
 ```javascript
 {kind: 'phase', name: 'listings', status: 'running', startedAt: '2026-10-08T09:00:00.000Z'}
 {kind: 'phase', name: 'listings', status: 'done', startedAt: '…', duration: 4120, resultHash: '9f2c…', upstream: {categories: '41ab…'}}
-{kind: 'phase', name: 'listings', status: 'failed', startedAt: '…', duration: 512, error: '[$listings.@1a1 - GET [scraper]/extract] Timed out after 30000ms'}
+{kind: 'phase', name: 'listings', status: 'failed', startedAt: '…', duration: 512, error: '[$listings.@1a1 - [scraper]/extract] Timed out after 30000ms'}
 {kind: 'phase', name: 'listings', status: 'cancelled', startedAt: '…', duration: 230, inFlight: ['$listings.@1a1']}
 ```
 
@@ -175,7 +178,7 @@ Pass `trigger` only to look up results from a Run that had that payload. Form ha
 | `columns` | the phases that run together, in order |
 | `phases` | each phase's `name`, `dependencies`, `formHash` and return type |
 | `calls` | every call's `address`, `path`, `key`, `formHash`, readable `form`, and `types` |
-| `errors` | type mismatches, by address |
+| `errors` | type issues, by address and [code](#plan-errors) |
 | `warnings` | compile warnings, such as a binding that shares a phase's name |
 
 To show a call's results, the platform looks them up by the call's form hash in the Run State: `runState.list(formHash)`. Two addresses with one form hash are identical calls, which run once.
@@ -197,8 +200,8 @@ A moved subtree whose inputs didn't change has a new address and the same form, 
 
 An address names one call within one Query version, for editors, logs and errors. It is calculated, never stored in the Query, and never valid as a reference.
 
-- **Numbering.** Calls are numbered and service-typed fields are lettered, alternating. `$listings.@1` is the phase's first call, `@1a` is that call's first service-typed field, and `@1a2` is the second call in that field's chain. An address that names a call always ends in a digit.
-- **Letters.** Field letters follow sorted key order (the ordering RFC 8785 uses), so letters never depend on how a document was written. `onError` is lettered along with the other fields.
+- **Numbering.** Calls are numbered and call fields are lettered, alternating. `$listings.@1` is the phase's first call, `@1a` is that call's first call field, and `@1a2` is the second call in that field's chain. An address that names a call always ends in a digit.
+- **Letters.** Field letters follow sorted field-path order (the ordering RFC 8785 uses), so letters never depend on how a document was written. `onError` is lettered along with the other fields.
 - **Fields.** A call's fields follow its address by name: `$listings.@1.url`. Field names that begin with `@` (JSON-LD's `@type`) stay ordinary path segments.
 - **The global handler** is addressed `settings.onError.@1`.
 - **Versions.** An address is only meaningful against the Query version it came from, so errors carry `address`, `key` and `query` (the Query's form hash).
@@ -218,13 +221,54 @@ Hashes are SHA-256 over canonical JSON, computed synchronously in pure JS (`@nob
 
 ### Types
 
-`plan()` infers a type for every service call and every input field, in seven types: text, number, boolean, datetime, list (with element type), object (with fields), and mixed. Mixed is TypeScript's `any`: zod's `any`, `unknown` and unions map to it, as does a call with no schema. Optional and nullable are one flag.
+`plan()` infers a type for every service call and every input field, as zod schemas. An editor, such as a visual Builder, converts them to whatever types it displays; core has no types of its own. `z.any()` stands for a type that can't be known.
 
-- A field's **expected** type comes from the service's input schema. A service-typed field may declare the return its service must have; `util.filter` wants boolean.
-- Its **actual** type is a literal's own type, a phase's return type, or the flow at that point, with paths walking into them.
-- A call's **return** type comes from the service's output schema.
+- A field's **expected** type comes from the operation's declaration: its `fromZod` type, or a relationship to another field's type. A call field's expected type is what its nested call must return; `util/filter` wants boolean.
+- Its **actual** type is a literal's own type, a phase's return type, or the flow at that point, with paths walking into them. Inside a nested call, `@` is what the declaration says the call field receives (`util/each`: one item of `on`), or `z.any()`.
+- A call's **return** type is its own `postcheck`, else its declared output, resolved against its fields.
 
-The schemas are the service's own `_validators` today; see the [Service Development Guide](service_guide.md). Type mismatches are listed in `plan().errors`. `plan()` never runs anything, and run-time validation still decides whether a call runs.
+Declarations are described in the [Service Development Guide](service_guide.md#declarations). Type issues are listed in `plan().errors` ([Plan errors](#plan-errors)). `plan()` never runs anything, and run-time validation still decides whether a call runs.
+
+## Errors
+
+Every error core reports carries a `code`, so a platform can decide what each means to its users without reading messages. Messages are for people, and may change; codes and addresses are the API.
+
+### Compile errors
+
+`compile()`, `plan()` and `query()` throw on a Query that can't run. The error has `message`, `code` and `address`, the [Service Call Address](#service-call-addresses) of the call or node at fault (`$a.@1`, `$trigger`, `select`). A cycle between phases has no single address, so it carries `phases`, the phases in the cycle, instead.
+
+| Code | Means |
+|---|---|
+| `invalid-descriptor` | a call isn't `['[VERB] [service]/resource', {...}]`, or its arguments aren't an object |
+| `retired-key` | a key uses the retired `service:action` form; the message names its replacement |
+| `unknown-service` | no service is registered under the key's name |
+| `not-a-service` | the service has no `lookup(parts)` and `operations()` |
+| `unknown-resource` | the service's `lookup` answered nothing for the key |
+| `refused-key` | the service's `lookup` refused the key, such as a verb it doesn't take; the message is the service's |
+| `malformed-declaration` | the operation's declaration has an unknown tag or a malformed source |
+| `no-target` | method syntax was used for an operation that declares no target field |
+| `malformed-schema` | a Service Call Validation or the trigger schema can't be parsed |
+| `unknown-reference` | a reference names no phase, node, iteration or enclosing onError |
+| `invalid-reference` | a reference is malformed: bare `$`, `@@`, a Service Call Address, `@` where nothing flows in |
+| `reserved-name` | a phase named `given` or `trigger`, or an iteration named `err` |
+| `duplicate-binding` | an iteration name used twice in a Query |
+| `unreachable-input` | a chain in a call field, without `as:` to reach its input |
+| `misplaced-as` | `as:` on a call that holds no nested call |
+| `raw-function` | a JavaScript function where a call was expected |
+| `invalid-select` | `select` names something other than a reference |
+| `circular-dependency` | phases that depend on each other; see `phases` |
+
+### Plan errors
+
+Each of `plan().errors` is `{address, code, message, expected, actual}`. `address` is the field's, followed by the path inside its value where the issue is (`$a.@1.data.name`; `*` stands for any item of a list or value of a record). `expected` and `actual` are the zod schemas there.
+
+| Code | Means | Will the call run? |
+|---|---|---|
+| `type-mismatch` | the types are incompatible, or a required field isn't supplied | its validation will fail, if it has one for that field |
+| `maybe-missing` | an optional or nullable value goes into a required field | only when the value is there |
+| `type-narrowing` | a value whose type isn't known (`any`), or is wider (a string for an enum), goes into a narrower field | when the value fits; the field's validation decides |
+
+A `postcheck` on the call that produces a value gives it a type, which turns `type-narrowing` into either nothing or a definite answer.
 
 ## The runtime API
 
@@ -241,7 +285,7 @@ The Run State is per Run, so it is an option of `execute`, not a capability of t
 
 ### Services
 
-**Services are code.** Each is an object of async functions, one per resource, as the [Service Development Guide](service_guide.md) describes. Core needs nothing more. Turning a description of an API (a schema document, an OpenAPI spec) into such an object belongs outside core, in whatever builds services for the platform.
+**A service is an object with `lookup(parts)` and `operations()`**, as the [Service Development Guide](service_guide.md) describes. Core needs nothing more. Turning a description of an API (an OpenAPI spec, an MCP server's tool list, a platform's route map) into such an object belongs outside core, in whatever builds services for the platform. A service that discovers its operations asynchronously does so before the Query is compiled, since `lookup` answers synchronously.
 
 ### Service init and tearDown
 

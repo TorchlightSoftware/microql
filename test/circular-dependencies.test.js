@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query from '../node.js'
+import query from '../index.js'
 import util from '../services/util.js'
 import {math, test, data} from './test-services.js'
 
@@ -13,11 +13,24 @@ describe('Circular Dependency Detection Tests', () => {
         query({
           services,
           phases: {
-            a: ['GET [test]/identity', {value: '$b'}],
-            b: ['GET [test]/identity', {value: '$a'}]
+            a: ['[test]/identity', {value: '$b'}],
+            b: ['[test]/identity', {value: '$a'}]
           }
         }),
         /Circular dependency detected at compile time: a, b/
+      )
+    })
+
+    it('names the cycle\'s phases and its code on the error', async () => {
+      await assert.rejects(
+        query({
+          services,
+          phases: {
+            a: ['[test]/identity', {value: '$b'}],
+            b: ['[test]/identity', {value: '$a'}]
+          }
+        }),
+        {code: 'circular-dependency', phases: ['a', 'b']}
       )
     })
 
@@ -26,7 +39,7 @@ describe('Circular Dependency Detection Tests', () => {
         query({
           services,
           phases: {
-            a: ['GET [test]/identity', {value: '$a'}]
+            a: ['[test]/identity', {value: '$a'}]
           }
         }),
         /Circular dependency detected at compile time: a/
@@ -38,9 +51,9 @@ describe('Circular Dependency Detection Tests', () => {
         query({
           services,
           phases: {
-            a: ['GET [test]/identity', {value: '$c'}],
-            b: ['GET [test]/identity', {value: '$a'}],
-            c: ['GET [test]/identity', {value: '$b'}]
+            a: ['[test]/identity', {value: '$c'}],
+            b: ['[test]/identity', {value: '$a'}],
+            c: ['[test]/identity', {value: '$b'}]
           }
         }),
         /Circular dependency detected at compile time: a, b, c/
@@ -52,9 +65,9 @@ describe('Circular Dependency Detection Tests', () => {
         query({
           services,
           phases: {
-            a: ['GET [test]/combine', {a: '$b', b: '$c'}],
-            b: ['GET [test]/identity', {value: '$c'}],
-            c: ['GET [test]/identity', {value: '$a'}]
+            a: ['[test]/combine', {a: '$b', b: '$c'}],
+            b: ['[test]/identity', {value: '$c'}],
+            c: ['[test]/identity', {value: '$a'}]
           }
         }),
         /Circular dependency detected at compile time: a, b, c/
@@ -71,11 +84,11 @@ describe('Circular Dependency Detection Tests', () => {
           phases: {
             // Chain that depends on external query
             chainA: [
-              ['$given.input', 'GET [math]/add1'],
-              ['$external', 'GET [math]/add'] // Depends on external
+              ['$given.input', '[math]/add1'],
+              ['$external', '[math]/add'] // Depends on external
             ],
             // External query depends on result of chain
-            external: ['GET [test]/identity', {value: '$chainA'}]
+            external: ['[test]/identity', {value: '$chainA'}]
           }
         }),
         /Circular dependency detected at compile time: chainA, external/
@@ -90,16 +103,16 @@ describe('Circular Dependency Detection Tests', () => {
           phases: {
             // Complex chain with map that depends on result
             deepNested: [
-              ['$given.array', 'GET [util]/each', {
+              ['$given.array', '[util]/each', {
                 as: 'n',
                 service: [
-                  ['@n', 'GET [math]/times10'],
-                  ['$result', 'GET [math]/add'] // Circular dependency on result
+                  ['@n', '[math]/times10'],
+                  ['$result', '[math]/add'] // Circular dependency on result
                 ]
               }]
             ],
             // Result depends on the nested computation
-            result: ['GET [test]/identity', {value: '$deepNested'}]
+            result: ['[test]/identity', {value: '$deepNested'}]
           }
         }),
         /Circular dependency detected at compile time: deepNested, result/
@@ -113,12 +126,12 @@ describe('Circular Dependency Detection Tests', () => {
           services,
           phases: {
             processedData: [
-              ['$given.numbers', 'GET [util]/each', {
-                service: ['$multiplier', 'GET [math]/multiply'] // Depends on multiplier
+              ['$given.numbers', '[util]/each', {
+                service: ['$multiplier', '[math]/multiply'] // Depends on multiplier
               }]
             ],
-            multiplier: ['$processedData', 'GET [math]/sum'], // Depends on processedData
-            finalResult: ['GET [test]/identity', {value: '$processedData'}]
+            multiplier: ['$processedData', '[math]/sum'], // Depends on processedData
+            finalResult: ['[test]/identity', {value: '$processedData'}]
           }
         }),
         /Circular dependency detected at compile time: processedData, multiplier, finalResult/
@@ -131,10 +144,10 @@ describe('Circular Dependency Detection Tests', () => {
           given: {items: ['a', 'b', 'c']},
           services,
           phases: {
-            filtered: ['$given.items', 'GET [data]/filter', {
-              service: ['$validator', 'GET [test]/identity'] // Depends on validator
+            filtered: ['$given.items', '[data]/filter', {
+              service: ['$validator', '[test]/identity'] // Depends on validator
             }],
-            validator: ['GET [test]/identity', {value: '$filtered'}] // Depends on filtered
+            validator: ['[test]/identity', {value: '$filtered'}] // Depends on filtered
           }
         }),
         /Circular dependency detected at compile time: filtered, validator/
@@ -149,16 +162,16 @@ describe('Circular Dependency Detection Tests', () => {
           phases: {
             // First level chain
             levelOne: [
-              ['$given.input', 'GET [math]/add1'],
-              ['$levelTwo', 'GET [math]/add'] // Depends on levelTwo
+              ['$given.input', '[math]/add1'],
+              ['$levelTwo', '[math]/add'] // Depends on levelTwo
             ],
             // Second level chain
             levelTwo: [
-              ['$levelOne', 'GET [math]/times10'], // Depends on levelOne
-              ['@', 'GET [math]/add1']
+              ['$levelOne', '[math]/times10'], // Depends on levelOne
+              ['@', '[math]/add1']
             ],
             // Third query to make it more complex
-            levelThree: ['GET [test]/double', {value: '$levelTwo'}]
+            levelThree: ['[test]/double', {value: '$levelTwo'}]
           }
         }),
         /Circular dependency detected at compile time: levelOne, levelTwo/
@@ -174,14 +187,14 @@ describe('Circular Dependency Detection Tests', () => {
           services,
           phases: {
             // Valid independent query
-            validQuery: ['GET [math]/add1', {on: '$given.input'}],
+            validQuery: ['[math]/add1', {on: '$given.input'}],
 
             // Circular dependency pair
-            circular1: ['GET [test]/identity', {value: '$circular2'}],
-            circular2: ['GET [test]/identity', {value: '$circular1'}],
+            circular1: ['[test]/identity', {value: '$circular2'}],
+            circular2: ['[test]/identity', {value: '$circular1'}],
 
             // Another valid query that depends on valid query
-            anotherValid: ['GET [math]/times10', {on: '$validQuery'}]
+            anotherValid: ['[math]/times10', {on: '$validQuery'}]
           }
         }),
         /Circular dependency detected at compile time: circular1, circular2/
@@ -196,20 +209,20 @@ describe('Circular Dependency Detection Tests', () => {
           services,
           phases: {
             chainWithCycle: [
-              ['$given.input', 'GET [math]/add1'],
-              ['@', 'GET [math]/add1'],
-              ['$given.array', 'GET [util]/each', {
+              ['$given.input', '[math]/add1'],
+              ['@', '[math]/add1'],
+              ['$given.array', '[util]/each', {
                 as: 'n',
                 service: [
-                  ['$cyclicDep', 'GET [math]/times10'], // Depends on cyclicDep
-                  ['@', 'GET [math]/add1'],
-                  ['@', 'GET [math]/sequence'],
-                  ['GET [math]/reduce', {on: '@', service: ['GET [math]/sum', {on: '@'}]}]
+                  ['$cyclicDep', '[math]/times10'], // Depends on cyclicDep
+                  ['@', '[math]/add1'],
+                  ['@', '[math]/sequence'],
+                  ['[math]/reduce', {on: '@', service: ['[math]/sum', {on: '@'}]}]
                 ]
               }]
             ],
             // Creates the cycle
-            cyclicDep: ['GET [test]/identity', {value: '$chainWithCycle'}]
+            cyclicDep: ['[test]/identity', {value: '$chainWithCycle'}]
           }
         }),
         /Circular dependency detected at compile time: chainWithCycle, cyclicDep/

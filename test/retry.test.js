@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query from '../node.js'
+import query, {serviceFromTable} from '../index.js'
 
 describe('Retry Tests', () => {
   describe('Basic Retry Behavior', () => {
@@ -8,7 +8,7 @@ describe('Retry Tests', () => {
       let callCount = 0
 
       const services = {
-        flaky: {
+        flaky: serviceFromTable({
           async '/process'(_args) {
             callCount++
             if (callCount < 3) {
@@ -16,7 +16,7 @@ describe('Retry Tests', () => {
             }
             return {success: true, attempts: callCount}
           }
-        }
+        })
       }
 
       const result = await query({
@@ -24,7 +24,7 @@ describe('Retry Tests', () => {
         services,
         phases: {
           result: [
-            'GET [flaky]/process',
+            '[flaky]/process',
             {
               input: '$given.value',
               retry: 3 // Will try up to 4 times total (1 initial + 3 retries)
@@ -42,12 +42,12 @@ describe('Retry Tests', () => {
       let callCount = 0
 
       const services = {
-        broken: {
+        broken: serviceFromTable({
           async '/process'(_args) {
             callCount++
             throw new Error('Service permanently broken')
           }
-        }
+        })
       }
 
       try {
@@ -56,7 +56,7 @@ describe('Retry Tests', () => {
           services,
           phases: {
             result: [
-              'GET [broken]/process',
+              '[broken]/process',
               {
                 input: '$given.value',
                 retry: 2 // Will try 3 times total
@@ -76,12 +76,12 @@ describe('Retry Tests', () => {
       let callCount = 0
 
       const services = {
-        stable: {
+        stable: serviceFromTable({
           async '/process'(_args) {
             callCount++
             return {success: true}
           }
-        }
+        })
       }
 
       const result = await query({
@@ -89,7 +89,7 @@ describe('Retry Tests', () => {
         services,
         phases: {
           result: [
-            'GET [stable]/process',
+            '[stable]/process',
             {
               input: '$given.value'
               // No retry specified
@@ -104,21 +104,20 @@ describe('Retry Tests', () => {
     })
 
     it('should pass retry and timeout values via settings', async () => {
+      // The settings tag injects the call's settings
       const services = {
-        aware: {
-          async '/check'(args) {
-            return {
-              retryReceived: args.settings?.retry,
-              timeoutReceived: args.settings?.timeout,
-              inputReceived: args.input
+        aware: serviceFromTable({
+          '/check': {
+            input: {settings: ['settings']},
+            async call(args) {
+              return {
+                retryReceived: args.settings?.retry,
+                timeoutReceived: args.settings?.timeout,
+                inputReceived: args.input
+              }
             }
           }
-        }
-      }
-
-      // Add settings argtype so settings get injected
-      services.aware['/check']._argtypes = {
-        settings: {type: 'settings'}
+        })
       }
 
       const result = await query({
@@ -126,7 +125,7 @@ describe('Retry Tests', () => {
         services,
         phases: {
           result: [
-            'GET [aware]/check',
+            '[aware]/check',
             {
               input: '$given.value',
               retry: 3,
@@ -147,34 +146,37 @@ describe('Retry Tests', () => {
     it('should retry individual steps in a chain', async () => {
       const callCounts = {step1: 0, step2: 0}
 
+      // on is the target, for method syntax
       const services = {
-        chain: {
-          async '/step1'(args) {
-            callCounts.step1++
-            return {step: 1, data: args.input}
-          },
-          async '/step2'(args) {
-            callCounts.step2++
-            if (callCounts.step2 < 2) {
-              throw new Error('Step 2 failed')
+        chain: serviceFromTable({
+          '/step1': {
+            input: {on: ['target']},
+            async call(args) {
+              callCounts.step1++
+              return {step: 1, data: args.input}
             }
-            return {step: 2, data: args.input, previous: args.previous}
+          },
+          '/step2': {
+            input: {on: ['target']},
+            async call(args) {
+              callCounts.step2++
+              if (callCounts.step2 < 2) {
+                throw new Error('Step 2 failed')
+              }
+              return {step: 2, data: args.input, previous: args.previous}
+            }
           }
-        }
+        })
       }
-
-      // Add argOrder metadata for method syntax
-      services.chain['/step1']._argtypes = {on: {argOrder: 0}}
-      services.chain['/step2']._argtypes = {on: {argOrder: 0}}
 
       const result = await query({
         given: {value: 'test'},
         services,
         phases: {
           result: [
-            ['GET [chain]/step1', {input: '$given.value'}],
+            ['[chain]/step1', {input: '$given.value'}],
             [
-              'GET [chain]/step2',
+              '[chain]/step2',
               {
                 input: '$given.value',
                 previous: '@',
@@ -196,20 +198,21 @@ describe('Retry Tests', () => {
     it('should work with method syntax', async () => {
       let callCount = 0
 
+      // on is the target, for method syntax
       const services = {
-        processor: {
-          '/transform': async ({on, _retry}) => {
-            callCount++
-            if (callCount < 2) {
-              throw new Error('Transform failed')
+        processor: serviceFromTable({
+          '/transform': {
+            input: {on: ['target']},
+            call: async ({on, _retry}) => {
+              callCount++
+              if (callCount < 2) {
+                throw new Error('Transform failed')
+              }
+              return on.map((item) => ({...item, processed: true}))
             }
-            return on.map((item) => ({...item, processed: true}))
           }
-        }
+        })
       }
-
-      // Add argOrder metadata for method syntax
-      services.processor['/transform']._argtypes = {on: {argOrder: 0}}
 
       const result = await query({
         given: {
@@ -218,7 +221,7 @@ describe('Retry Tests', () => {
         services,
         phases: {
           // Method syntax with retry
-          result: ['$given.items', 'GET [processor]/transform', {retry: 2}]
+          result: ['$given.items', '[processor]/transform', {retry: 2}]
         },
         select: '$result'
       })
@@ -232,40 +235,40 @@ describe('Retry Tests', () => {
   describe('Retry and validation', () => {
     // A writer whose first drafts are too long.
     const writer = (badDrafts) => {
-      const service = {
+      const table = {
         calls: 0,
         async '/write'({topic}) {
-          service.calls++
-          return {text: service.calls <= badDrafts ? `${topic} `.repeat(100) : topic}
+          table.calls++
+          return {text: table.calls <= badDrafts ? `${topic} `.repeat(100) : topic}
         }
       }
-      return service
+      return {table, service: serviceFromTable(table)}
     }
-    const draft = (retry) => ['GET [writer]/write', {topic: 'retry', retry, postcheck: {text: ['string', {max: 50}]}}]
+    const draft = (retry) => ['[writer]/write', {topic: 'retry', retry, postcheck: {text: ['string', {max: 50}]}}]
 
     it('retries a call whose result fails its postcheck', async () => {
-      const service = writer(1)
+      const {table, service} = writer(1)
       const result = await query({services: {writer: service}, phases: {draft: draft(2)}, select: '$draft'})
       assert.deepStrictEqual(result, {text: 'retry'})
-      assert.strictEqual(service.calls, 2)
+      assert.strictEqual(table.calls, 2)
     })
 
     it('fails once its retries are spent', async () => {
-      const service = writer(5)
+      const {table, service} = writer(5)
       await assert.rejects(
         query({services: {writer: service}, phases: {draft: draft(2)}}),
         /Service Call Validation postcheck failed/
       )
-      assert.strictEqual(service.calls, 3)
+      assert.strictEqual(table.calls, 3)
     })
 
     it('does not retry a precheck failure, which no attempt can change', async () => {
-      const service = writer(0)
+      const {table, service} = writer(0)
       await assert.rejects(
-        query({services: {writer: service}, phases: {draft: ['GET [writer]/write', {topic: 5, retry: 3, precheck: {topic: ['string']}}]}}),
+        query({services: {writer: service}, phases: {draft: ['[writer]/write', {topic: 5, retry: 3, precheck: {topic: ['string']}}]}}),
         /Service Call Validation precheck failed/
       )
-      assert.strictEqual(service.calls, 0)
+      assert.strictEqual(table.calls, 0)
     })
   })
 })

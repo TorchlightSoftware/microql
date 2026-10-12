@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
 import compile from '../compile.js'
 import {canonical, hashOf, formsOf} from '../forms.js'
+import {serviceFromTable} from '../service-table.js'
 
 describe('canonical serialization', () => {
   // [value, canonical text]
@@ -34,24 +35,23 @@ describe('canonical serialization', () => {
 
 describe('form hashes', () => {
   const services = {
-    scraper: {
+    scraper: serviceFromTable({
       async '/extract'({url}) { return {url} },
-      async '/images'({on}) { return on }
-    }
+      '/images': {input: {on: ['target']}, call: async ({on}) => on}
+    })
   }
-  services.scraper['/images']._argtypes = {on: {argOrder: 0}}
 
   // a fresh Query on every call, so an edit never reaches another test
   const baseQuery = () => ({
     given: {baseUrl: 'https://a.example', unused: 1},
     services,
     phases: {
-      categories: ['GET [scraper]/extract', {url: '$given.baseUrl'}],
-      listings: ['$categories', 'GET [util]/each', {
+      categories: ['[scraper]/extract', {url: '$given.baseUrl'}],
+      listings: ['$categories', '[util]/each', {
         as: 'category',
         service: [
-          ['GET [scraper]/extract', {url: '@category.url'}],
-          ['@', 'GET [scraper]/images']
+          ['[scraper]/extract', {url: '@category.url'}],
+          ['@', '[scraper]/images']
         ]
       }]
     }
@@ -105,7 +105,7 @@ describe('form hashes', () => {
       ...base,
       phases: {
         categories: [
-          ['GET [util]/template', {note: 'added first'}],
+          ['[util]/template', {note: 'added first'}],
           base.phases.categories
         ],
         listings: base.phases.listings
@@ -122,15 +122,15 @@ describe('form hashes', () => {
       given: {u: 'x'},
       services,
       phases: {
-        a: ['GET [scraper]/extract', {url: '$given.u'}],
-        b: ['GET [scraper]/extract', {url: '$given.u'}]
+        a: ['[scraper]/extract', {url: '$given.u'}],
+        b: ['[scraper]/extract', {url: '$given.u'}]
       }
     })
     assert.equal(hashes['$a.@1'], hashes['$b.@1'])
   })
 
   it('distinguishes trigger payloads', () => {
-    const query = {trigger: {kind: 'webhook'}, services, phases: {a: ['GET [scraper]/extract', {url: '$trigger.url'}]}}
+    const query = {trigger: {kind: 'webhook'}, services, phases: {a: ['[scraper]/extract', {url: '$trigger.url'}]}}
     const one = formsOf(compile(query), {trigger: {url: 'one'}})
     const two = formsOf(compile(query), {trigger: {url: 'two'}})
     assert.notEqual(one.calls.get('$a.@1').hash, two.calls.get('$a.@1').hash)
@@ -140,7 +140,7 @@ describe('form hashes', () => {
   it('returns a readable form that holds upstream hashes, not upstream forms', () => {
     const forms = formsOf(compile(base))
     const {form} = forms.calls.get('$listings.@1')
-    assert.equal(form.key, 'GET [util]/each')
+    assert.equal(form.key, '[util]/each')
     assert.deepEqual(form.args.on, {phase: forms.calls.get('$categories.@1').hash, path: []})
     assert.match(form.positions.service[0], /^[0-9a-f]{64}$/)
   })

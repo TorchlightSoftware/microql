@@ -2,7 +2,7 @@
  * @fileoverview Service Call Addresses ↔ JSON paths.
  *
  * An address names one call within one Query version: `$listings.@1a2` is
- * the second call in the chain of the first service-typed field of the
+ * the second call in the chain of the first call field of the
  * phase's first call. A call's fields follow its address by name:
  * `$listings.@1.url`. Addresses are calculated, never stored in the Query.
  *
@@ -10,13 +10,16 @@
  * its address, its JSON path, and the path of its arguments.
  */
 
+import {parseFieldPath} from './common.js'
+
 // A call address, then an optional field path.
 const ADDRESS = /^(.+?\.@\d+(?:[a-z]\d+)*)(?:\.(.+))?$/
 
-// The JSON path of one of a call's fields: method syntax keeps its target at
-// index 0 of the descriptor; every other field lives in the arguments object.
+// The JSON path of one of a call's fields, by its field path: method syntax
+// keeps its target at index 0 of the descriptor; every other field lives in
+// the arguments object.
 export const fieldPathOf = (call, field) =>
-  call.targetField === field ? [...call.path, 0] : [...call.argsPath, field]
+  call.targetField === field ? [...call.path, 0] : [...call.argsPath, ...parseFieldPath(field)]
 
 // The JSON path within the Query of an address, or undefined.
 export function addressToPath(plan, address) {
@@ -24,8 +27,11 @@ export function addressToPath(plan, address) {
   const call = match && plan.calls.find(c => c.address === match[1])
   if (!call) return undefined
   if (!match[2]) return call.path
-  const [field, ...rest] = match[2].split('.')
-  return [...fieldPathOf(call, field), ...rest]
+  const target = call.targetField
+  if (target && (match[2] === target || match[2].startsWith(`${target}.`))) {
+    return [...call.path, 0, ...match[2].slice(target.length + 1).split('.').filter(Boolean)]
+  }
+  return [...call.argsPath, ...match[2].split('.')]
 }
 
 const startsWith = (path, prefix) => prefix.every((segment, i) => path[i] === segment)

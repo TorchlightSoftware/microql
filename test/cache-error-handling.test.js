@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import {describe, it, beforeEach} from 'node:test'
-import query, {nodeRuntime, fileStore} from '../node.js'
+import query, {nodeRuntime, fileStore, serviceFromTable} from '../index.js'
 import {rm} from 'fs/promises'
 
 const CACHEDIR = '.cache-test-cache-error-handling'
@@ -22,7 +22,7 @@ describe('Cache Error Handling Tests', () => {
 
   // Reusable services
   const unreliableService = {
-    unreliable: {
+    unreliable: serviceFromTable({
       async '/getData'({value}) {
         unreliableService.callCount++
         if (unreliableService.callCount === 1) {
@@ -30,29 +30,29 @@ describe('Cache Error Handling Tests', () => {
         }
         return {processed: value, attempt: unreliableService.callCount}
       }
-    }
+    })
   }
   unreliableService.callCount = 0
 
   const failingServices = {
-    failing: {
+    failing: serviceFromTable({
       async '/process'() {
         failingServices.serviceCallCount++
         throw new Error('Always fails')
       }
-    },
-    errorHandler: {
+    }),
+    errorHandler: serviceFromTable({
       async '/handleError'() {
         failingServices.errorHandlerCallCount++
         return {errorHandled: true, handlerCall: failingServices.errorHandlerCallCount}
       }
-    }
+    })
   }
   failingServices.serviceCallCount = 0
   failingServices.errorHandlerCallCount = 0
 
   const conditionalServices = {
-    conditional: {
+    conditional: serviceFromTable({
       async '/process'({shouldFail}) {
         conditionalServices.serviceCallCount++
         if (shouldFail) {
@@ -60,19 +60,19 @@ describe('Cache Error Handling Tests', () => {
         }
         return {serviceResult: true, call: conditionalServices.serviceCallCount}
       }
-    },
-    errorHandler: {
+    }),
+    errorHandler: serviceFromTable({
       async '/handleError'() {
         conditionalServices.errorHandlerCallCount++
         return {errorResult: true, call: conditionalServices.errorHandlerCallCount}
       }
-    }
+    })
   }
   conditionalServices.serviceCallCount = 0
   conditionalServices.errorHandlerCallCount = 0
 
   const testServices = {
-    test: {
+    test: serviceFromTable({
       async '/getData'({value}) {
         testServices.serviceCallCount++
         if (value === 'fail') {
@@ -80,10 +80,10 @@ describe('Cache Error Handling Tests', () => {
         }
         return {data: value, call: testServices.serviceCallCount}
       }
-    },
-    errorHandler: {
+    }),
+    errorHandler: serviceFromTable({
       async '/handle'() {return {error: 'handled'}}
-    }
+    })
   }
   testServices.serviceCallCount = 0
 
@@ -99,7 +99,7 @@ describe('Cache Error Handling Tests', () => {
         given: {input: 'test'},
         services: unreliableService,
         phases: {
-          result: ['GET [unreliable]/getData', {value: '$given.input', cache: true}]
+          result: ['[unreliable]/getData', {value: '$given.input', cache: true}]
         },
         select: '$result'
       }
@@ -123,8 +123,8 @@ describe('Cache Error Handling Tests', () => {
         ...baseQuery,
         services: failingServices,
         phases: {
-          result: ['GET [failing]/process', {
-            onError: ['GET [errorHandler]/handleError'],
+          result: ['[failing]/process', {
+            onError: ['[errorHandler]/handleError'],
             ignoreErrors: true,
             cache: true
           }]
@@ -158,24 +158,24 @@ describe('Cache Error Handling Tests', () => {
   describe('Timestamp-based verification of cache behavior', () => {
     it('should not cache error handler results between identical calls', async () => {
       const timestampServices = {
-        failingService: {
+        failingService: serviceFromTable({
           async '/process'() {
             throw new Error('Always fails')
           }
-        },
-        errorHandler: {
+        }),
+        errorHandler: serviceFromTable({
           async '/handle'() {
             return {handled: true, timestamp: Date.now()}
           }
-        }
+        })
       }
 
       const q = {
         ...baseQuery,
         services: timestampServices,
         phases: {
-          result: ['GET [failingService]/process', {
-            onError: ['GET [errorHandler]/handle'],
+          result: ['[failingService]/process', {
+            onError: ['[errorHandler]/handle'],
             ignoreErrors: true,
             cache: true
           }]
@@ -202,29 +202,29 @@ describe('Cache Error Handling Tests', () => {
   describe('Source tracking verification of cache behavior', () => {
     it('should return correct source type and not mix error handler with service results', async () => {
       const sourceTrackingServices = {
-        conditionalService: {
+        conditionalService: serviceFromTable({
           async '/getData'({shouldFail, id}) {
             if (shouldFail) {
               throw new Error('Intentional failure')
             }
             return {success: true, id, source: 'service'}
           }
-        },
-        errorService: {
+        }),
+        errorService: serviceFromTable({
           async '/handleError'() {
             return {success: false, source: 'error-handler'}
           }
-        }
+        })
       }
 
       const testQuery = {
         ...baseQuery,
         services: sourceTrackingServices,
         phases: {
-          result: ['GET [conditionalService]/getData', {
+          result: ['[conditionalService]/getData', {
             shouldFail: '$given.shouldFail',
             id: '$given.id',
-            onError: ['GET [errorService]/handleError'],
+            onError: ['[errorService]/handleError'],
             ignoreErrors: true,
             cache: true
           }]
@@ -257,9 +257,9 @@ describe('Cache Error Handling Tests', () => {
         given: {shouldFail: true},
         services: conditionalServices,
         phases: {
-          result: ['GET [conditional]/process', {
+          result: ['[conditional]/process', {
             shouldFail: '$given.shouldFail',
-            onError: ['GET [errorHandler]/handleError'],
+            onError: ['[errorHandler]/handleError'],
             ignoreErrors: true,
             cache: true
           }]
@@ -285,7 +285,7 @@ describe('Cache Error Handling Tests', () => {
     it('should not allow error handler results to pollute cache for successful service calls', async () => {
       let serviceCallCount = 0
       const services = {
-        test: {
+        test: serviceFromTable({
           async '/getData'({value}) {
             serviceCallCount++
             if (value === 'fail') {
@@ -293,10 +293,10 @@ describe('Cache Error Handling Tests', () => {
             }
             return {data: value, call: serviceCallCount}
           }
-        },
-        errorHandler: {
+        }),
+        errorHandler: serviceFromTable({
           async '/handle'() {return {error: 'handled'}}
-        }
+        })
       }
 
       const q = {
@@ -304,9 +304,9 @@ describe('Cache Error Handling Tests', () => {
         given: {input: 'fail'},
         services,
         phases: {
-          result: ['GET [test]/getData', {
+          result: ['[test]/getData', {
             value: '$given.input',
-            onError: ['GET [errorHandler]/handle'],
+            onError: ['[errorHandler]/handle'],
             ignoreErrors: true,
             cache: true
           }]

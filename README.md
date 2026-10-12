@@ -11,10 +11,10 @@ const leads = await query({
   given: {directory: 'https://chamber.example.org/member-directory'},
   services: {scraper, claude, hubspot},
   phases: {
-    members: ['GET [scraper]/listings', {url: '$given.directory', cache: true}],
+    members: ['[scraper]/listings', {url: '$given.directory', cache: true}],
 
     // every member is qualified in parallel; Claude calls are spaced out by the rate limit
-    qualified: ['$members', 'GET [util]/each', {
+    qualified: ['$members', '[util]/each', {
       service: ['POST [claude]/qualify', {
         company: '@',
         criteria: 'manufacturing, shipping, or industrial repair',
@@ -23,7 +23,7 @@ const leads = await query({
       }]
     }],
 
-    contacts: ['$qualified', 'GET [util]/filter', {service: ['GET [util]/exists', {value: '@.fit'}]}],
+    contacts: ['$qualified', '[util]/filter', {service: ['[util]/exists', {value: '@.fit'}]}],
     created: ['$contacts', 'POST [hubspot]/companies']
   },
   settings: {rateLimit: {claude: 1000}, retry: 2},
@@ -51,7 +51,7 @@ A Query's named nodes are **phases**. Each phase is a service call, or a chain o
 
 ```javascript
 phases: {
-  post: ['GET [cms]/post', {slug: '$given.slug'}],
+  post: ['[cms]/post', {slug: '$given.slug'}],
 
   // these three only need the post, so they're written in parallel
   linkedin: ['POST [claude]/write', {format: 'linkedin', source: '$post'}],
@@ -67,7 +67,7 @@ Circular references are caught before anything runs.
 
 ### Service Keys
 
-A call is named by its **service key**, `METHOD [service]/resource`: `POST [claude]/write` calls the `/write` resource of the `claude` service with `POST`. Services are passed in through `services`; a key naming a service, resource or method that doesn't exist is an error before anything runs.
+A call is named by its **service key**, `[VERB] [service]/resource`: `POST [claude]/write` calls the `/write` resource of the `claude` service with `POST`, and `[util]/each` calls `util`'s `/each`, which takes no verb. Whether a resource takes a verb, and which, is the service's business. Services are passed in through `services`; a key naming a service, resource or verb that doesn't exist is an error before anything runs.
 
 ### References
 
@@ -84,31 +84,35 @@ Every string beginning with `$` or `@` is a reference. A literal like `"$5.00"` 
 
 ### Services
 
-Services are just objects of async functions, one per resource. Each takes an object of named arguments and returns a promise. Wrapping an API, a model or a database takes a few lines:
+A service answers a key with an operation: an async function that takes an object of named fields and returns a promise, plus an optional declaration of those fields. Most services are a table of them, and wrapping an API, a model or a database takes a few lines:
 
 ```javascript
+import {serviceFromTable} from 'microql'
+
 const headers = {Authorization: `Bearer ${process.env.HUBSPOT_TOKEN}`, 'Content-Type': 'application/json'}
 
-export const hubspot = {
+export const hubspot = serviceFromTable({
   '/companies': {
     async GET({domain}) {
       const response = await fetch(`https://api.hubapi.com/crm/v3/objects/companies/${domain}?idProperty=domain`, {headers})
       return response.json()
     },
-    async POST({on: companies}) {
-      const response = await fetch('https://api.hubapi.com/crm/v3/objects/companies/batch/upsert', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({inputs: companies.map(c => ({idProperty: 'domain', id: c.domain, properties: c}))})
-      })
-      return response.json()
+    POST: {
+      input: {on: ['target']},
+      async call({on: companies}) {
+        const response = await fetch('https://api.hubapi.com/crm/v3/objects/companies/batch/upsert', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({inputs: companies.map(c => ({idProperty: 'domain', id: c.domain, properties: c}))})
+        })
+        return response.json()
+      }
     }
   }
-}
-hubspot['/companies'].POST._argtypes = {on: {argOrder: 0}}
+})
 ```
 
-A resource with several methods is an object with one function per method; a resource given as a plain function answers `GET`. See the [Service Development Guide](docs/service_guide.md).
+A resource with several verbs has one operation per verb; a resource given as one operation takes keys with no verb. A declaration's tags say which field method syntax fills, which fields hold nested calls, and the types of the input and output. See the [Service Development Guide](docs/service_guide.md).
 
 ### Chains
 
@@ -116,7 +120,7 @@ A chain runs its calls in order, each receiving the previous one's result as `@`
 
 ```javascript
 summary: [
-  ['GET [reviews]/google', {placeId: '$given.placeId'}],
+  ['[reviews]/google', {placeId: '$given.placeId'}],
   ['POST [claude]/summarize', {reviews: '@', focus: 'complaints'}],
   ['@', 'POST [slack]/post', {channel: '#customer-experience'}]
 ]
@@ -124,22 +128,22 @@ summary: [
 
 ### Iterating with each
 
-`GET [util]/each` runs a service for every item of a list, in parallel. A lone call receives the item as `@`; name the item with `as:` to reach it from a chain or a nested iteration:
+`[util]/each` runs a service for every item of a list, in parallel. A lone call receives the item as `@`; name the item with `as:` to reach it from a chain or a nested iteration:
 
 ```javascript
-ocr: ['$listings', 'GET [util]/each', {as: 'listing', flatten: true,
-  service: ['@listing.images', 'GET [util]/each', {as: 'image', service: [
+ocr: ['$listings', '[util]/flattenEach', {as: 'listing',
+  service: ['@listing.images', '[util]/each', {as: 'image', service: [
     ['POST [claude]/ocr', {imageUrl: '@image.src', lookFor: ['name', 'phone', 'website']}],
-    ['@', 'GET [util]/merge', {with: {industry: '@listing.industry'}}]
+    ['@', '[util]/merge', {with: {industry: '@listing.industry'}}]
   ]}]
 }],
 ```
 
-`flatten: true` concatenates the results. Iteration names are used once per Query, so `@listing` always means the same thing.
+`[util]/flattenEach` concatenates the lists its calls return. Iteration names are used once per Query, so `@listing` always means the same thing.
 
 ### Method Syntax
 
-The first argument may be written on the left: `['$members', 'GET [util]/each', {...}]` is `['GET [util]/each', {on: '$members', ...}]`. Services opt in by declaring which argument comes first: `{on: {argOrder: 0}}`.
+The first argument may be written on the left: `['$members', '[util]/each', {...}]` is `['[util]/each', {on: '$members', ...}]`. Services opt in by tagging the field that comes first: `input: {on: ['target']}`.
 
 ## Handling Failure
 
@@ -154,19 +158,19 @@ Real pipelines fail: a page won't load, a model returns junk, an API rate-limits
 | `ignoreErrors: true` | Carry on: the call returns the handler's result, or `null` |
 
 ```javascript
-listings: ['$categories', 'GET [util]/each', {as: 'category', flatten: true,
-  service: ['GET [scraper]/extract', {
+listings: ['$categories', '[util]/each', {as: 'category',
+  service: ['[scraper]/extract', {
     url: '@category.href',
     postcheck: {images: ['array', ['object'], {min: 1}]},
-    onError: ['@', 'GET [util]/recordFailure', {location: 'failed/listings'}],
+    onError: ['@', '[util]/recordFailure', {location: 'failed/listings'}],
     ignoreErrors: true
   }]
 }],
 // drop the pages that failed, keep going with the rest
-found: ['$listings', 'GET [util]/removeErrors'],
+found: ['$listings', '[util]/removeErrors'],
 ```
 
-An error names the call that raised it by its address: `[$listings.@1a1 - GET [scraper]/extract] Timed out after 30000ms`.
+An error names the call that raised it by its address: `[$listings.@1a1 - [scraper]/extract] Timed out after 30000ms`.
 
 `settings.onError` is a handler for the Run as a whole.
 
@@ -176,7 +180,8 @@ The `util` service is always available:
 
 | Resource | Does |
 |---|---|
-| `/each` | Run a service for every item; `flatten`, `skipInputErrors`, `skipOutputErrors` |
+| `/each` | Run a call for every item; `skipInputErrors`, `skipOutputErrors` |
+| `/flattenEach` | Run a call that returns a list for every item, and concatenate the lists |
 | `/filter` | Keep the items a service is truthy for; `mode: 'remove'` removes them |
 | `/when` | `then` when `test` is truthy, otherwise `otherwise` |
 | `/removeErrors`, `/removeNulls`, `/removeSuccesses`, `/partitionErrors` | Sort out the results of `ignoreErrors` |
@@ -257,16 +262,16 @@ await query({
   given: {business: {googlePlaceId: 'ChIJ...', yelpId: 'acme-bakery'}},
   services: {google, yelp, claude, zendesk, slack},
   phases: {
-    google: ['GET [google]/reviews', {placeId: '$given.business.googlePlaceId', since: '7d'}],
-    yelp: ['GET [yelp]/reviews', {businessId: '$given.business.yelpId', since: '7d'}],
+    google: ['[google]/reviews', {placeId: '$given.business.googlePlaceId', since: '7d'}],
+    yelp: ['[yelp]/reviews', {businessId: '$given.business.yelpId', since: '7d'}],
 
     scored: [
-      [['$google', '$yelp'], 'GET [util]/concat'],
-      ['@', 'GET [util]/each', {service: ['POST [claude]/sentiment', {review: '@', cache: true}]}]
+      [['$google', '$yelp'], '[util]/concat'],
+      ['@', '[util]/each', {service: ['POST [claude]/sentiment', {review: '@', cache: true}]}]
     ],
-    unhappy: ['$scored', 'GET [util]/filter', {service: ['GET [util]/lt', {l: '@.score', r: 3}]}],
+    unhappy: ['$scored', '[util]/filter', {service: ['[util]/lt', {l: '@.score', r: 3}]}],
 
-    tickets: ['$unhappy', 'GET [util]/each', {service: ['POST [zendesk]/ticket', {
+    tickets: ['$unhappy', '[util]/each', {service: ['POST [zendesk]/ticket', {
       subject: '@.summary', body: '@.text', priority: 'high'
     }]}],
     digest: ['POST [slack]/post', {channel: '#reviews', scored: '$scored', tickets: '$tickets'}]
@@ -283,7 +288,7 @@ await query({
   given: {slug: 'why-we-switched-to-four-day-weeks'},
   services: {cms, claude, buffer, mailchimp},
   phases: {
-    post: ['GET [cms]/post', {slug: '$given.slug'}],
+    post: ['[cms]/post', {slug: '$given.slug'}],
 
     linkedin: ['POST [claude]/write', {
       format: 'linkedin', voice: 'warm, plain-spoken', source: '$post',

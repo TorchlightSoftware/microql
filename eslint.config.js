@@ -4,7 +4,7 @@ import js from '@eslint/js'
 
 // Files that may use node: the node entry point (core plus the node runtime),
 // the tests, and tooling. Everything else is core, and must run on any platform.
-const NODE_FILES = ['node.js', 'test/**', 'scripts/**', 'eslint.config.js']
+const NODE_FILES = ['index.js', 'test/**', 'scripts/**', 'eslint.config.js']
 
 const nodeGlobals = {
   process: 'readonly',
@@ -98,9 +98,9 @@ export default [
       'no-restricted-imports': ['error', {
         paths: [...builtinModules, 'fs-extra'].map(name => ({
           name,
-          message: 'Core runs on any platform; node-only code belongs in node.js'
+          message: 'Core runs on any platform; node-only code belongs in index.js'
         })),
-        patterns: [{group: ['node:*'], message: 'Core runs on any platform; node-only code belongs in node.js'}]
+        patterns: [{group: ['node:*'], message: 'Core runs on any platform; node-only code belongs in index.js'}]
       }]
     }
   },

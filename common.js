@@ -49,6 +49,32 @@ const omit = (object, keys) => filterObject(object, (_value, key) => !keys.inclu
 // The value at a path of keys; undefined once the path runs out of values.
 const getIn = (value, path) => path.reduce((at, key) => at?.[key], value)
 
+// The object with the value at a path set, creating objects on the way; what
+// lies on the way and isn't an object is replaced.
+const setIn = (object, [key, ...rest], value) => ({
+  ...object,
+  [key]: rest.length ? setIn(isPlainObject(object?.[key]) ? object[key] : {}, rest, value) : value
+})
+
+// The object without the key at a path; unchanged when the path isn't there.
+const omitIn = (object, [key, ...rest]) => {
+  if (!rest.length) return omit(object, [key])
+  return isPlainObject(object[key]) ? {...object, [key]: omitIn(object[key], rest)} : object
+}
+
+// The fields of a path as a declaration writes it: dots separate fields, and
+// two dots stand for a dot inside a field name ('a..b.c' → ['a.b', 'c']).
+const ESCAPED_DOT = '\u0000'
+const parseFieldPath = (path) => {
+  const fields = path.replaceAll('..', ESCAPED_DOT).split('.').map(field => field.replaceAll(ESCAPED_DOT, '.'))
+  if (fields.includes('')) throw new Error(`Field path '${path}' names an empty field`)
+  return fields
+}
+
+// The object with values set by field path ({'params.fn': value}).
+const setPaths = (object, valuesByPath) =>
+  Object.entries(valuesByPath).reduce((result, [path, value]) => setIn(result, parseFieldPath(path), value), object)
+
 // One object from several: for each key, the first source's defined value wins.
 const defaults = (...sources) => {
   const result = {}
@@ -60,4 +86,4 @@ const defaults = (...sources) => {
   return result
 }
 
-export {RESERVE_ARGS, VALIDATION_NAMES, COLOR_NAMES, getServiceColorName, isPlainObject, mapValues, filterObject, pick, omit, getIn, defaults}
+export {RESERVE_ARGS, VALIDATION_NAMES, COLOR_NAMES, getServiceColorName, isPlainObject, mapValues, filterObject, pick, omit, getIn, setIn, omitIn, setPaths, parseFieldPath, defaults}

@@ -1,239 +1,218 @@
 # MicroQL Service Development Guide
 
-This guide explains how to write and structure services for MicroQL. Services are the core building blocks that contain your business logic and can be composed together to create complex workflows.
+This guide is the spec for MicroQL services: what core asks of a service, how a service declares its operations, and how to write one. `util`, MicroQL's builtin service, is the reference implementation ([services/util.js](../services/util.js)).
+
+**Why MicroQL?** A service can do more than answer fixed inputs with fixed outputs: it can take other calls as arguments and decide when to run them, so flow control (`each`, `filter`, a branch, a retry policy) is itself a service.
 
 ## Table of Contents
 
-- [Service Basics](#service-basics)
-- [Service Keys](#service-keys)
-- [Service Structure](#service-structure)
+- [What a service is](#what-a-service-is)
+- [Service keys](#service-keys)
+- [Writing a service as a table](#writing-a-service-as-a-table)
+- [Declarations](#declarations)
+- [Types and plan()](#types-and-plan)
 - [init and tearDown](#init-and-teardown)
-- [Argument Types](#argument-types)
-- [Validation and Descriptors](#validation-and-descriptors)
-- [Error Handling](#error-handling)
-- [Testing Services](#testing-services)
-- [Best Practices](#best-practices)
-- [Built-in Services](#built-in-services)
+- [Error handling](#error-handling)
+- [Testing services](#testing-services)
+- [Best practices](#best-practices)
+- [Built-in services](#built-in-services)
 
-## Service Basics
+## What a service is
 
-A MicroQL service is a JavaScript object of **resources**. Each resource is keyed by its path — `'/getUser'` — and answers one or more **methods**. A Query names a call to it with a service key: `GET [users]/getUser`.
+A service is an object that core asks two things of:
 
-### Simple Service Example
+- **`lookup(parts)`** returns the operation that answers a key's parts (see [Service keys](#service-keys)), or `undefined` when the service has no such resource. It throws, with a message naming the key, when it refuses one: a verb it doesn't expect, or a missing verb it needs. Core calls it while compiling a Query, so it must answer synchronously.
+- **`operations()`** returns every operation the service has, each with its `resource` and `method`. A service whose operations can't be listed up front returns `[]`.
 
-```javascript
-const userService = {
-  // a resource given as a function answers GET
-  async '/getUser'({id}) {
-    return db.users.findById(id)
-  },
+An **operation** is:
 
-  // a resource with several methods has one function per method
-  '/users': {
-    async GET({id}) {
-      return db.users.findById(id)
-    },
-    async POST({userData}) {
-      return db.users.create(userData)
-    },
-    async PATCH({id, updates}) {
-      return db.users.updateById(id, updates)
-    }
-  }
-}
-```
+| Field | Is |
+|---|---|
+| `call(fields)` | the async function core calls with the call's resolved fields; returns the result |
+| `description` | a short sentence saying what it does |
+| `input` | its input fields by path, each with a list of tags ([Declarations](#declarations)) |
+| `output` | a list of tags for what it returns |
+| `resource`, `method` | what it answers to; listed by `operations()` |
 
-Resource keys keep their leading `/`, and may contain more of them (`'/users/preferences'`), so they are written as quoted keys and read with `service['/users']`.
+Everything but `call` is optional: an operation with no declaration takes any fields and returns any value. A service may also have `init` and `tearDown` ([init and tearDown](#init-and-teardown)).
 
-### Key Principles
+**Core never reads where a declaration came from.** A service may be written by hand, read from an OpenAPI document, an MCP server's tool list or a protobuf file, or generated from route definitions. Its implementation turns that into operations whose types are zod schemas. A service that discovers its operations asynchronously (fetching a spec, connecting to a server) does so before the Query is compiled, so that `lookup` can answer synchronously.
 
-1. **Async Functions**: All resource functions should be `async`
-2. **Single Argument**: Functions take exactly one argument object (destructured)
-3. **Return Values**: Functions return the data that will be available to other phases
-4. **Pure Logic**: Services should contain pure business logic, not MicroQL-specific code
+## Service keys
 
-## Service Keys
+A service key is `[VERB] [service]/resource`, from [`@tlsft/service-key`](https://www.npmjs.com/package/@tlsft/service-key). It parses to parts, `{method, service, resource, local}`, and the parts are the contract between a Query and a service: the Query names a call with a string, the service answers to parts.
 
-A service key is `METHOD [service]/resource`, from [`@tlsft/service-key`](https://www.npmjs.com/package/@tlsft/service-key). It parses to parts — `{method, service, resource, local}` — and the parts are the contract between a Query and a service definition: the Query names a call with a string, the service definition answers to parts.
+- `service` is the name the service is registered under in `config.services`. Core finds the service by it, and keeps settings such as `rateLimit` by it.
+- `resource` and `method` are the service's business, handed to its `lookup`. The verb is optional, and `method` is `null` without one. A service that doesn't use verbs (`util`, a gRPC adapter) takes keys without one, `[util]/each`; an HTTP service takes its routes' verbs, `POST [orders]/orders`. A service should refuse a verb it doesn't expect, so a mistyped key fails at compile time.
+- `[@service]` names a service embedded in the caller's own page. The `@` is syntax (`local: true` in the parts); what it means is the host's business.
 
-- `service` is the name the service is registered under in `config.services`.
-- `resource` is the key of the resource on that service, leading `/` included.
-- `method` must be one the resource declares: `GET` for a resource given as a function, or one of the keys of a resource given as an object of methods. A key whose method the resource doesn't declare is a compile error naming both.
-- `[@service]` names a service embedded in the caller's own page. The `@` is syntax (`local: true` in the parts); what it means is the host's business. MicroQL looks the service up by name either way.
+The grammar fits most API styles, so one key format covers them:
+
+| Style | Key |
+|---|---|
+| REST | `GET [books]/years/:year` |
+| gRPC | `[helloworld.Greeter]/SayHello` |
+| JSON-RPC, SOAP | `[ethereum]/eth_getBalance`, `[currency]/ConvertRate` |
+| GraphQL | `QUERY [github]/viewer`, `MUTATION [github]/createIssue` |
+| MCP tools | `[github-mcp]/create_issue` |
+| EDI, queues (sending) | `SEND [acme]/850`, `PUBLISH [orders]/created` |
+
+Calls are request and reply. A stream, or a message that arrives later (an EDI acknowledgment, a queue consumer), is a trigger, not a call.
 
 The retired `service:action` form is a compile error that names its replacement.
 
-Dispatch is the caller's: services arrive through `config.services`, and a host may supply services backed by its own dispatcher (an HTTP router, a queue) as long as they answer to parts.
+## Writing a service as a table
 
-## Service Structure
-
-### Function Signature
-
-All resource functions follow this pattern:
+Most services are a table: resources mapped to operations. `serviceFromTable` gives a table `lookup` and `operations`:
 
 ```javascript
-async '/resourceName'({arg1, arg2, ...otherArgs}) {
-  // Your logic here
-  return result
-}
-```
+import {z} from 'zod'
+import {serviceFromTable} from 'microql'
 
-**Important**: The function receives a single object argument. Use destructuring to extract the values you need. It is called with `this` bound to the service object, so it can reach the service's other members.
-
-### Example: Math Service
-
-```javascript
-const mathService = {
-  async '/add'({a, b}) {
-    return a + b
+const orders = serviceFromTable({
+  // a verbless operation, with a declaration
+  '/total': {
+    description: 'The sum of an order\'s prices',
+    input: {on: ['target', ['type', {fromZod: z.array(z.number())}]]},
+    output: [['type', {fromZod: z.number()}]],
+    call: async ({on}) => on.reduce((sum, price) => sum + price, 0)
   },
 
-  async '/multiply'({values}) {
-    return values.reduce((acc, val) => acc * val, 1)
-  },
+  // a bare function: an operation with no declaration
+  async '/ping'() { return 'pong' },
 
-  async '/statistics'({numbers}) {
-    const sum = numbers.reduce((a, b) => a + b, 0)
-    return {sum, avg: sum / numbers.length, min: Math.min(...numbers), max: Math.max(...numbers), count: numbers.length}
-  }
-}
-```
-
-### Using the Service
-
-```javascript
-const result = await query({
-  given: {numbers: [1, 2, 3, 4, 5]},
-  services: {math: mathService},
-  phases: {
-    sum: ['GET [math]/add', {a: 10, b: 20}],
-    product: ['GET [math]/multiply', {values: '$given.numbers'}],
-    stats: ['GET [math]/statistics', {numbers: '$given.numbers'}]
+  // one operation per verb
+  '/orders': {
+    GET: async ({id}) => db.orders.find(id),
+    POST: {description: 'Place an order', call: async ({items}) => db.orders.create(items)}
   }
 })
 ```
 
-## init and tearDown
+- A resource maps to an operation (an object with `call`, or a bare function), which answers verbless keys only, or to an object of one operation per verb, which needs one of those verbs.
+- Resource keys keep their leading `/` and may contain more of them (`'/orders/:id/items'`).
+- Operations, `init` and `tearDown` run with the table as `this`, so a table can keep what `init` gave it.
 
-A service may define two lifecycle functions. Neither is a resource (they have no leading `/`), so a Query can't call them.
+`serviceFromTable` is a convenience, not part of the spec: any object with `lookup` and `operations` is a service.
 
-- **`init(runtime)`** — called before orchestration begins, on each service the plan uses, at most once per runtime. It receives the runtime's instance-wide capabilities: `print`, `inspect`, `recordFailure` and `cache`. A service that writes output or records failures should use these rather than reaching for the environment itself (the file system, stdout), so it runs wherever MicroQL does.
-- **`tearDown()`** — called after a Run, on each service the Run used. Errors thrown here are logged and swallowed.
+## Declarations
+
+An operation's `input` maps field paths to tags; its `output` is a list of tags. A tag is a name, or a pair of a name and its config:
 
 ```javascript
-const reporter = {
+input: {
+  on: ['target', ['type', {fromZod: z.array(z.any())}]],
+  service: [['call', {fromList: 'on'}]],
+  skipInputErrors: ['reserve', ['type', {fromZod: z.boolean().optional()}]]
+},
+output: [['type', {toList: {fromField: 'service'}}]]
+```
+
+| Tag | Config | Means |
+|---|---|---|
+| `'target'` | none | method syntax fills this field: `['$items', '[orders]/total']`. At most one per operation. |
+| `'reserve'` | none | the field configures the call rather than feeding it data |
+| `'settings'` | none | the field receives the call's merged settings (`inspect`, `timeout`, ...) |
+| `'call'` | optional source | the field holds a nested call or chain, handed to `call` as a function of one input; the source says what the nested call receives as `@` |
+| `'type'` | source | the field's type; on a call field, what the nested call returns; in `output`, what the operation returns |
+
+**Field paths** are dotted, `'params.messages'`, with `..` for a dot inside a field name (`'a..b'` is the field `a.b`).
+
+**A source** names a type, by reading one or building one:
+
+| Source | Names |
+|---|---|
+| `{fromZod: schema}` | a zod schema |
+| `{fromField: path}` | the type of another field; for a call field, what its nested call returns |
+| `{fromList: path}` | one item of a list field |
+| `{fromObject: path}` | one value of an object field |
+| `{toList: source}` | a list of the source's type |
+| `{toObject: source}` | an object whose values are the source's type |
+
+Sources compose: `{toObject: {fromList: 'on'}}` is an object whose values are the items of `on`.
+
+**Only `fromZod` is checked at run time.** Core builds one schema from an operation's `fromZod` input fields and checks every call's fields against it (its Service Schema Validation precheck); a `fromZod` output is checked against what the call returns (its postcheck). The other sources are relationships between fields, which `plan()` resolves ([Types and plan()](#types-and-plan)). A path and its parent can't both have a schema.
+
+**A call that holds other calls has no timeout of its own**, unless it sets one: the calls it holds have theirs. It doesn't take a concurrency slot either, so it can't starve the calls it waits on.
+
+### Field roles: what `util/each` looks like to a Query
+
+```javascript
+['$given.urls', '[util]/each', {
+  as: 'url',                                         // names what `service` receives
+  service: ['[scraper]/extract', {url: '@url'}],     // a call field: compiled, then handed over as a function
+  skipInputErrors: true                              // a reserve field
+}]
+```
+
+- **`target`** lets `$given.urls` stand first, in method syntax.
+- **`call`** makes `service` a nested call. A lone call receives its input as `@`; a chain reaches it by the name `as:` gives it. An object in a call field is a template of its input. A reference or literal in a call field stays data.
+- `onError` is always a call field; core runs it, and services never see it.
+
+## Types and plan()
+
+`plan()` types every call's fields and result as zod schemas, without running anything. A field's type is what flows into it: a `$given` value's own type, the trigger's schema, or the output type of the call that feeds it. When nothing known flows in, the field's declared `fromZod` type stands in. What can't be known is `z.any()`. Where it reaches a typed field, the plan says so with a `type-narrowing` error, which a platform may treat as a warning: the field's own validation checks the value when the call runs ([Runtime Integration § Errors](runtime-integration.md#errors)).
+
+**Relationships carry types through flow control.** `util/each` declares that its nested call receives one item of `on`, and that it returns a list of what its nested call returns:
+
+```javascript
+['$given.urls', '[util]/each', {service: ['[scraper]/extract', {url: '@'}]}]
+// @ inside service: string, an item of $given.urls (an array of string)
+// the each call: array of scraper's declared output
+```
+
+A service that declares nothing about what its call fields receive gets `any` for `@` inside them. **A validation takes `any` back to a type**: a nested call's own declared output types everything after it, and a `postcheck` on a call ([Validation](validation.md)) gives that call its type in the plan.
+
+## init and tearDown
+
+A service may define two lifecycle functions:
+
+- **`init(runtime)`** is called before orchestration begins, on each service the plan uses, at most once per runtime. It receives the runtime's instance-wide capabilities: `print`, `inspect`, `recordFailure` and `cache`. A service that writes output or records failures should use these rather than reaching for the environment itself (the file system, stdout), so it runs wherever MicroQL does.
+- **`tearDown()`** is called after a Run, on each service the Run used. Errors thrown here are logged and swallowed.
+
+```javascript
+const reporter = serviceFromTable({
   init(runtime) {
     this.runtime = runtime
   },
-  async '/report'({on}) {
-    this.runtime.print(this.runtime.inspect(on), {color: 'cyan'})
-    return on
+  '/report': {
+    input: {on: ['target']},
+    async call({on}) {
+      this.runtime.print(this.runtime.inspect(on), {color: 'cyan'})
+      return on
+    }
   },
   async tearDown() {
     await flushBuffers()
   }
-}
+})
 ```
 
-`init` receives instance-wide capabilities only. Per-Run state — the Run State, which Run is executing — never passes through a service, so a host may keep its initialized services in a long-lived registry. A service object shared between two runtimes is initialized again when the runtime it is used with changes.
+`init` receives instance-wide capabilities only. Per-Run state, such as the Run State or which Run is executing, never passes through a service, so a host may keep its initialized services in a long-lived registry. A service shared between two runtimes is initialized again when the runtime it is used with changes.
 
-## Argument Types
+**Authentication is the service's business.** A service may read credentials from its configuration, run an OAuth flow in `init`, or authenticate on its first call; core neither knows nor cares.
 
-Declare how MicroQL should treat a resource's arguments with `_argtypes`:
+## Error handling
 
-```javascript
-const transformService = {
-  async '/transform'({on, transformer, settings}) {
-    return Promise.all(on.map(item => transformer(item)))
-  }
-}
-
-transformService['/transform']._argtypes = {
-  on: {argOrder: 0},              // the target of method syntax: ['$items', 'GET [transform]/transform', {...}]
-  transformer: {type: 'service'}, // compiled as a service call; the function receives one input
-  settings: {type: 'settings'}    // receives the call's merged MicroQL settings
-}
-```
-
-- **`{argOrder: 0}`** — the argument method syntax fills. By convention it is `on`.
-- **`{type: 'service'}`** — the argument is compiled as a call or chain and handed to the function as `(input) => Promise<result>`. A lone call receives `input` as `@`; a chain reaches it by the name the Query gives it with `as:`. An object in this position is a template of its input. `{type: 'service', returns: ['boolean']}` declares what the service must return, for the Builder's type checks (`util.filter` declares it).
-- **`{type: 'settings'}`** — the argument receives the call's settings (`inspect`, `timeout`, ...), merged with any it is given.
-- **`{reserve: true}`** — the argument configures the call rather than feeding it data (`util.each`'s `skipInputErrors`), so the Builder groups it under Config.
-
-Usage:
+Services throw errors for exceptional conditions. MicroQL labels each error with the `address` and `key` of the call that raised it, and the inputs it was given.
 
 ```javascript
-const phases = {
-  result: ['$given.items', 'GET [transform]/transform', {
-    transformer: ['GET [util]/template', {name: '@.name'}]
-  }]
-}
-```
-
-Set `_noTimeout = true` on a resource that only orchestrates other calls (as `util.each` does), so the default timeout applies to the calls it makes, not to it.
-
-## Validation and Descriptors
-
-MicroQL validates with Zod. A resource's `_validators` are its descriptor, and its Service Schema Validations: `precheck` is the schema of its arguments, `postcheck` the schema of its return. They are enforced on every call, and `plan()` converts them to its seven types to infer what each argument expects and each call returns. See the [Validation Guide](validation.md) for the schema syntax; a raw Zod schema is accepted anywhere a descriptor is.
-
-```javascript
-const userService = {
-  async '/createUser'({userData}) {
-    return {id: generateId(), ...userData}
-  }
-}
-
-userService['/createUser']._validators = {
-  precheck: {
-    userData: {
-      name: ['string'],
-      email: ['string', 'email'],
-      age: ['number', 'positive', {min: 13}]
-    }
-  },
-  postcheck: {
-    id: ['string'],
-    name: ['string'],
-    email: ['string', 'email'],
-    age: ['number']
-  }
-}
-```
-
-A Query may add a [Service Call Validation](validation.md), its own `precheck` and `postcheck`, to any call; those run alongside these Service Schema Validations. A resource with no `postcheck` returns the type mixed, which fits every slot.
-
-Service definitions are due a revision of their own: one JSON descriptor per action, with schemas in zodex rather than this descriptor syntax, so that service definitions can be built and shared as documents. Until then, `_argtypes` and `_validators` are the descriptor.
-
-## Error Handling
-
-Services should throw errors for exceptional conditions. MicroQL labels each error with the `address` and `key` of the call that raised it, and the inputs it was given.
-
-### Throwing Errors
-
-```javascript
-const userService = {
+const users = serviceFromTable({
   async '/getUser'({id}) {
-    if (!id) {
-      throw new Error('User ID is required')
-    }
-
     const user = await db.users.findById(id)
-    if (!user) {
-      throw new Error(`User not found: ${id}`)
-    }
-
+    if (!user) throw new Error(`User not found: ${id}`)
     return user
   }
-}
+})
 ```
 
-### Using Error Handling in Queries
+A Query decides what a failure means:
 
 ```javascript
 const phases = {
-  user: ['GET [users]/getUser', {
+  user: ['[users]/getUser', {
     id: '$given.userId',
-    onError: ['GET [users]/getDefaultUser', {failed: '@.message'}],  // receives the error as @, or @err
+    onError: ['[users]/getDefaultUser', {failed: '@.message'}],  // receives the error as @, or @err
     ignoreErrors: true,                    // return the handler's result instead of failing
     retry: 3,                              // Retry 3 times
     timeout: 5000                          // 5 second timeout
@@ -241,55 +220,41 @@ const phases = {
 }
 ```
 
-A handler that is a chain reaches the error as `@err`, since a chain's first call receives nothing. Inside a handler's own handler, `@err` is the inner error and `@@err` the outer one:
+A handler that is a chain reaches the error as `@err`, since a chain's first call receives nothing. Inside a handler's own handler, `@err` is the inner error and `@@err` the outer one.
+
+## Testing services
+
+Every service can be checked against the spec without knowing its key format or its calls:
+
+- `operations()` returns an array, and each operation has a `call` function, a `resource` and a `method`.
+- `lookup` answers each listed operation's own resource and method with that operation.
+- Each operation's declaration compiles: every call to it in a Query compiles without a declaration error.
+- `init`, when present, runs once per runtime.
+
+Behaviour can't be checked generically, so a service's own tests give example rows, (key, fields, expected), and run them through MicroQL:
 
 ```javascript
-onError: [
-  ['@err', 'POST [sentry]/capture', {tags: {address: '@err.address'}}],
-  ['GET [users]/getDefaultUser', {}]
-]
-```
-
-## Testing Services
-
-Services are just regular JavaScript objects, so they're easy to unit test.
-
-### Unit Testing
-
-```javascript
-import assert from 'node:assert'
+import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-
-describe('Math Service', () => {
-  it('should add two numbers', async () => {
-    const result = await mathService['/add']({a: 5, b: 3})
-    assert.strictEqual(result, 8)
-  })
-})
-```
-
-### Integration Testing with MicroQL
-
-```javascript
 import query from 'microql'
 
-describe('User Service Integration', () => {
-  it('should create and retrieve user', async () => {
-    const result = await query({
-      given: {userData: {name: 'John', email: 'john@example.com', age: 25}},
-      services: {users: userService},
-      phases: {
-        created: ['POST [users]/users', {userData: '$given.userData'}],
-        retrieved: ['GET [users]/users', {id: '$created.id'}]
-      }
-    })
+describe('orders', () => {
+  // [key, fields, expected]
+  const examples = [
+    ['[orders]/total', {on: [2, 3]}, 5],
+    ['[orders]/ping', {}, 'pong']
+  ]
 
-    assert.strictEqual(result.retrieved.name, 'John')
-  })
+  for (const [key, fields, expected] of examples) {
+    it(`${key} answers ${JSON.stringify(expected)}`, async () => {
+      const result = await query({services: {orders}, phases: {a: [key, fields]}, select: '$a'})
+      assert.deepEqual(result, expected)
+    })
+  }
 })
 ```
 
-To test against a runtime of your own — capturing output, or keeping the cache in memory — pass it as `runtime`:
+To test against a runtime of your own, capturing output or keeping the cache in memory, pass it as `runtime`:
 
 ```javascript
 import query, {memoryStore} from 'microql'
@@ -299,165 +264,64 @@ const runtime = {print: (text) => printed.push(text), inspect: JSON.stringify, r
 await query({runtime, phases: {...}})
 ```
 
-## Best Practices
+## Best practices
 
-### 1. Single Responsibility
+1. **One responsibility per operation.** Compose in the Query, where MicroQL can see the dependencies and run independent calls in parallel, rather than calling one service from another.
+2. **Clear field names.** `{to, subject, body}`, not `{a, b, c}`.
+3. **Declare what you can.** A `fromZod` type on each input field and on the output catches bad calls at their first run, and lets `plan()` type everything downstream.
+4. **Stateless calls.** MicroQL runs identical calls once and reuses results from the Run State and the Cache, so a call's result should depend only on its fields. What `init` gives a service isn't call state.
+5. **Reach the environment through the runtime**, so a service runs wherever MicroQL does.
 
-Each resource should do one thing well:
+## Built-in services
 
-```javascript
-// Good: Focused responsibilities
-const userService = {
-  '/users': {
-    async GET({id}) { /* ... */ },
-    async POST({userData}) { /* ... */ },
-    async DELETE({id}) { /* ... */ }
-  }
-}
+### Util
 
-// Avoid: Mixed responsibilities
-const messyService = {
-  async '/getUserAndSendEmail'({id}) { /* ... */ }  // Does too many things
-}
-```
-
-### 2. Clear Argument Names
-
-Use descriptive argument names that make the intent clear:
-
-```javascript
-// Good: Clear intent
-async '/sendEmail'({to, subject, body, attachments}) { /* ... */ }
-
-// Avoid: Unclear arguments
-async '/send'({a, b, c, d}) { /* ... */ }
-```
-
-### 3. Consistent Return Types
-
-Be consistent about what your resources return, and declare it with a `postcheck` so `plan()` can type everything downstream.
-
-### 4. Use Validation
-
-Add validation to catch errors early and document your contracts:
-
-```javascript
-apiService['/fetchData']._validators = {
-  precheck: {
-    url: ['string', 'url'],
-    options: {
-      method: ['enum', ['GET', 'POST', 'PUT', 'DELETE'], 'optional'],
-      headers: ['object', 'optional'],
-      timeout: ['number', 'positive', 'optional']
-    }
-  }
-}
-```
-
-### 5. Handle Edge Cases
-
-Think about and handle edge cases in your services:
-
-```javascript
-const mathService = {
-  async '/divide'({numerator, denominator}) {
-    if (denominator === 0) {
-      throw new Error('Cannot divide by zero')
-    }
-    return numerator / denominator
-  }
-}
-```
-
-### 6. Keep Services Stateless
-
-Services should not keep state between calls. MicroQL runs identical calls once and reuses results from the Run State and the Cache, so a call's result should depend only on its arguments. Capabilities received at `init` are not call state.
-
-## Built-in Services
-
-### Util Service
-
-The `util` service is registered automatically, and provides common data operations:
+The `util` service is registered automatically. Its keys take no verb:
 
 ```javascript
 const phases = {
-  // Array operations
-  active: ['GET [util]/filter', {on: '$data', service: ['GET [data]/isActive', {item: '@'}]}],
-  names: ['GET [util]/each', {on: '$active', service: ['GET [data]/getName', {item: '@'}]}],
-  children: ['$nested', 'GET [util]/each', {flatten: true, service: ['@', 'GET [data]/getChildren']}],
-
-  // Object operations
-  picked: ['GET [util]/pick', {on: '$user', fields: ['name', 'email']}],
-
-  // Conditional logic
-  result: ['GET [util]/when', {test: '$user.isAdmin', then: 'admin_data', otherwise: 'regular_data'}],
-
-  // Utilities
-  length: ['GET [util]/length', {value: '$items'}],
-  exists: ['GET [util]/exists', {value: '$optionalField'}]
+  active: ['[util]/filter', {on: '$data', service: ['[data]/isActive', {item: '@'}]}],
+  names: ['[util]/each', {on: '$active', service: ['[data]/getName', {item: '@'}]}],
+  children: ['$nested', '[util]/flattenEach', {service: ['@', '[data]/getChildren']}],
+  picked: ['[util]/pick', {on: '$user', fields: ['name', 'email']}],
+  result: ['[util]/when', {test: '$user.isAdmin', then: 'admin_data', otherwise: 'regular_data'}],
+  length: ['[util]/length', {value: '$items'}]
 }
 ```
 
-### Available Util Resources
-
-All answer `GET`.
-
-- `/each({on, service, as, flatten, skipInputErrors, skipOutputErrors})` - Run a service for every item; `flatten` concatenates the results
-- `/filter({on, service, mode})` - Keep the items the service is truthy for; `mode: 'remove'` removes them instead
+- `/each({on, service, as, skipInputErrors, skipOutputErrors})` - Run a call for every item, returning their results in order
+- `/flattenEach({on, service, as, skipInputErrors, skipOutputErrors})` - Run a call that returns a list for every item, returning one list of all their items
+- `/filter({on, service, mode})` - Keep the items the call is truthy for; `mode: 'remove'` removes them instead
 - `/when({test, then, otherwise})` - `then` when `test` is truthy, otherwise `otherwise`
-- `/concat({args})` - Concatenate arrays
-- `/pick({on, fields})` - Extract object fields
-- `/merge({on, with})` - Deep merge of `with` onto `on`: objects merge key by key, arrays are a set union by value (`on`'s items, then those of `with` not already present), and `undefined` in `with` keeps `on`'s value. Merging the same `with` twice changes nothing; to replace an array, shape it with `/template` first
-- `/length({value})` - Get length of an array or string
-- `/exists({value})` - Check that a value is not null or undefined
+- `/concat({args})` - Concatenate lists
+- `/pick({on, fields})` - The listed fields an object has
+- `/merge({on, with})` - Deep merge of `with` onto `on`: objects merge key by key, lists are a set union by value (`on`'s items, then those of `with` not already present), and `undefined` in `with` keeps `on`'s value. Merging the same `with` twice changes nothing; to replace a list, shape it with `/template` first
+- `/length({value})` - The length of a list or string
+- `/exists({value})` - Whether a value is neither null nor undefined
 - `/eq`, `/gt`, `/lt` `({l, r})` - Comparisons
-- `/removeErrors`, `/removeNulls`, `/removeSuccesses`, `/partitionErrors` `({on})` - Clean up results of `ignoreErrors`
+- `/removeErrors`, `/removeNulls`, `/removeSuccesses`, `/partitionErrors` `({on})` - Clean up the results of `ignoreErrors`
 - `/print({on, color, settings})` - Print through the runtime, returning `on`
 - `/recordFailure({on, location})` - Record an error through the runtime, returning it
-- `/template({...})` - Return its arguments, resolved
+- `/template({...})` - Its own fields, with every reference resolved
 
-See the [util service source](../services/util.js) for complete details.
+`util.operations()` lists them with their declarations.
 
-## Creating Reusable Services
+## Configured services
 
-### Configured Services
-
-For services that need configuration, close over it:
+For a service that needs configuration, close over it:
 
 ```javascript
-function apiService(baseUrl, apiKey) {
-  return {
+function api(baseUrl, apiKey) {
+  return serviceFromTable({
     async '/get'({endpoint, params}) {
       const url = new URL(endpoint, baseUrl)
       Object.entries(params ?? {}).forEach(([key, value]) => url.searchParams.set(key, value))
-
       const response = await fetch(url, {headers: {Authorization: `Bearer ${apiKey}`}})
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status} ${response.statusText}`)
-      }
+      if (!response.ok) throw new Error(`API error: ${response.status} ${response.statusText}`)
       return response.json()
     }
-  }
+  })
 }
 
-// Usage
-const services = {
-  github: apiService('https://api.github.com', process.env.GITHUB_TOKEN)
-}
+const services = {github: api('https://api.github.com', process.env.GITHUB_TOKEN)}
 ```
-
-### Service Composition
-
-Prefer composing services in the Query, where MicroQL can see the dependencies and run independent calls in parallel, over calling one service from another.
-
-## Summary
-
-Good MicroQL services are:
-
-1. **Simple**: One responsibility per resource
-2. **Async**: All resources are async functions
-3. **Stateless**: A call's result depends only on its arguments
-4. **Described**: `_argtypes` and `_validators` say what goes in and what comes out
-5. **Portable**: They reach the environment through the runtime received at `init`
-6. **Testable**: Easy to unit test in isolation
-7. **Composable**: Can be combined with other services

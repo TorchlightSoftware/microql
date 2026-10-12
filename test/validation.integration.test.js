@@ -3,70 +3,38 @@
  * Tests validation through the query system with services
  */
 
-import query from '../node.js'
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
+import {z} from 'zod'
+import query, {serviceFromTable} from '../index.js'
+
+// A declaration's input: each field typed by its zod schema.
+const typedInput = (schemas) => Object.fromEntries(Object.entries(schemas).map(([field, schema]) => [field, [['type', {fromZod: schema}]]]))
+const typedOutput = (schema) => [['type', {fromZod: schema}]]
+
+// A service with one operation, '/process', with an optional declaration.
+const processor = (call, declaration = {}) => serviceFromTable({'/process': {...declaration, call}})
 
 describe('Validation Integration Tests', () => {
-  // Reusable test services
-  const testServices = {
-    echo: {
-      async '/process'(args) { return args.value }
-    },
-    double: {
-      async '/process'(args) { return args.value * 2 }
-    },
-    transform: {
-      async '/process'(args) { return {...args, processed: true} }
-    },
-    divide: {
-      async '/process'(args) { return args.numerator / args.denominator }
-    },
-    createUser: {
-      async '/process'(args) { return {id: 123, ...args.userData} }
-    },
-    updateTheme: {
-      async '/process'(args) { return {theme: args.theme, updated: true} }
-    },
-    validateUsername: {
-      async '/process'(args) { return `Valid: ${args.username}` }
-    },
-    createProfile: {
-      async '/process'(args) { return {name: args.name, bio: args.bio || 'No bio'} }
-    },
-    extract: {
-      async '/process'(args) { return args.url }
-    },
-    scrape: {
-      async '/process'(args) {
-        return {
-          url: args.url,
-          queries: args.queries || {},
-          validate: args.validate || null
-        }
-      }
-    }
+  // Reusable operations
+  const operations = {
+    echo: async (args) => args.value,
+    double: async (args) => args.value * 2,
+    divide: async (args) => args.numerator / args.denominator,
+    createUser: async (args) => ({id: 123, ...args.userData}),
+    updateTheme: async (args) => ({theme: args.theme, updated: true}),
+    validateUsername: async (args) => `Valid: ${args.username}`,
+    createProfile: async (args) => ({name: args.name, bio: args.bio || 'No bio'}),
+    extract: async (args) => args.url,
+    scrape: async (args) => ({url: args.url, queries: args.queries || {}, validate: args.validate || null})
   }
 
-  /**
-   * Helper to create a service with validators
-   */
-  function createService(name, validators) {
-    const service = {...testServices[name]}
-    if (validators) {
-      service['/process']._validators = validators
-    }
-    return service
-  }
-
-  /**
-   * Helper to run validation tests
-   */
-  async function runValidationTest(serviceName, validators, input, expectedError = null) {
-    const service = createService(serviceName, validators)
+  // Runs one call to the service's '/process', returning its result or
+  // expecting it to fail.
+  async function runValidationTest(service, input, expectedError = null) {
     const config = {
       services: {testService: service},
-      phases: {result: ['GET [testService]/process', input]}
+      phases: {result: ['[testService]/process', input]}
     }
 
     if (expectedError) {
@@ -81,8 +49,7 @@ describe('Validation Integration Tests', () => {
     const serviceValidationTests = [
       {
         name: 'service-level precheck validation',
-        service: 'double',
-        validators: {precheck: {value: ['number', 'positive']}},
+        service: processor(operations.double, {input: typedInput({value: z.number().positive()})}),
         validInput: {value: 10},
         expectedResult: 20,
         invalidInput: {value: -5},
@@ -90,11 +57,10 @@ describe('Validation Integration Tests', () => {
       },
       {
         name: 'service-level postcheck validation',
-        service: 'divide',
-        validators: {
-          precheck: {numerator: ['number'], denominator: ['number']},
-          postcheck: ['number', 'positive']
-        },
+        service: processor(operations.divide, {
+          input: typedInput({numerator: z.number(), denominator: z.number()}),
+          output: typedOutput(z.number().positive())
+        }),
         validInput: {numerator: 10, denominator: 2},
         expectedResult: 5,
         invalidInput: {numerator: -10, denominator: 2},
@@ -102,8 +68,7 @@ describe('Validation Integration Tests', () => {
       },
       {
         name: 'enum validation',
-        service: 'updateTheme',
-        validators: {precheck: {theme: ['enum', ['light', 'dark', 'auto']]}},
+        service: processor(operations.updateTheme, {input: typedInput({theme: z.enum(['light', 'dark', 'auto'])})}),
         validInput: {theme: 'dark'},
         expectedResult: {theme: 'dark', updated: true},
         invalidInput: {theme: 'blue'},
@@ -111,8 +76,7 @@ describe('Validation Integration Tests', () => {
       },
       {
         name: 'regex pattern validation',
-        service: 'validateUsername',
-        validators: {precheck: {username: ['string', {regex: /^[a-zA-Z0-9_]{3,20}$/}]}},
+        service: processor(operations.validateUsername, {input: typedInput({username: z.string().regex(/^[a-zA-Z0-9_]{3,20}$/)})}),
         validInput: {username: 'valid_user123'},
         expectedResult: 'Valid: valid_user123',
         invalidInput: {username: 'no-dashes'},
@@ -120,21 +84,14 @@ describe('Validation Integration Tests', () => {
       },
       {
         name: 'optional fields validation',
-        service: 'createProfile',
-        validators: {
-          precheck: {
-            name: ['string'],
-            bio: ['string', 'optional']
-          }
-        },
+        service: processor(operations.createProfile, {input: typedInput({name: z.string(), bio: z.string().optional()})}),
         validInput: {name: 'John'},
         expectedResult: {name: 'John', bio: 'No bio'},
         invalidInput: null // No invalid case for this test
       },
       {
         name: 'URL validation',
-        service: 'extract',
-        validators: {precheck: {url: ['string', 'url']}},
+        service: processor(operations.extract, {input: typedInput({url: z.string().url()})}),
         validInput: {url: 'https://example.com'},
         expectedResult: 'https://example.com',
         invalidInput: {url: 'not a url'},
@@ -146,49 +103,23 @@ describe('Validation Integration Tests', () => {
     serviceValidationTests.forEach(testCase => {
       it(`should validate with ${testCase.name}`, async () => {
         // Test valid input
-        const result = await runValidationTest(
-          testCase.service,
-          testCase.validators,
-          testCase.validInput
-        )
+        const result = await runValidationTest(testCase.service, testCase.validInput)
         assert.deepStrictEqual(result, testCase.expectedResult)
 
         // Test invalid input if provided
         if (testCase.invalidInput) {
-          await runValidationTest(
-            testCase.service,
-            testCase.validators,
-            testCase.invalidInput,
-            testCase.expectedError
-          )
+          await runValidationTest(testCase.service, testCase.invalidInput, testCase.expectedError)
         }
       })
     })
 
-    it('should fail compilation with invalid schema descriptor', async () => {
-      const service = {async '/test'(args) { return args.value }}
-      service['/test']._validators = {precheck: {value: ['invalidType']}}
-
-      const config = {
-        services: {testService: service},
-        phases: {result: ['GET [testService]/test', {value: 'hello'}]}
-      }
-
-      await assert.rejects(
-        query(config),
-        /Invalid option: expected one of "string"\|"number"\|"boolean"/
-      )
-    })
-
     it('should allow user-level validation to override service validation', async () => {
-      const service = createService('double', {
-        precheck: {value: ['number']}
-      })
+      const service = processor(operations.double, {input: typedInput({value: z.number()})})
 
       const config = {
         services: {testService: service},
         phases: {
-          result: ['GET [testService]/process', {
+          result: ['[testService]/process', {
             value: 5,
             precheck: {value: ['number', {min: 10, max: 20}]}
           }]
@@ -200,18 +131,15 @@ describe('Validation Integration Tests', () => {
     })
 
     it('should handle validation in chains', async () => {
-      const step1 = {async '/process'(args) { return args.value + 10 }}
-      const step2 = {async '/process'(args) { return args.value * 2 }}
-      step2['/process']._validators = {
-        precheck: {value: ['number', {max: 50}]}
-      }
+      const step1 = processor(async (args) => args.value + 10)
+      const step2 = processor(async (args) => args.value * 2, {input: typedInput({value: z.number().max(50)})})
 
       const config = {
         services: {step1, step2},
         phases: {
           chain: [
-            ['GET [step1]/process', {value: 45}], // Returns 55
-            ['GET [step2]/process', {value: '@'}] // Should fail validation
+            ['[step1]/process', {value: 45}], // Returns 55
+            ['[step2]/process', {value: '@'}] // Should fail validation
           ]
         }
       }
@@ -220,15 +148,14 @@ describe('Validation Integration Tests', () => {
     })
 
     it('should validate arrays with service validation', async () => {
-      const service = {async '/process'(args) { return args.items.map(i => i.toUpperCase()) }}
-      service['/process']._validators = {
-        precheck: {items: ['array', ['string'], {min: 2, max: 5}]}
-      }
+      const service = processor(async (args) => args.items.map(i => i.toUpperCase()), {
+        input: typedInput({items: z.array(z.string()).min(2).max(5)})
+      })
 
       const config = {
         services: {testService: service},
         phases: {
-          result: ['GET [testService]/process', {items: ['hello', 'world']}]
+          result: ['[testService]/process', {items: ['hello', 'world']}]
         }
       }
 
@@ -239,26 +166,26 @@ describe('Validation Integration Tests', () => {
       const failConfig = {
         services: {testService: service},
         phases: {
-          result: ['GET [testService]/process', {items: ['only-one']}]
+          result: ['[testService]/process', {items: ['only-one']}]
         }
       }
       await assert.rejects(query(failConfig), /Too small/)
     })
 
     it('should handle complex nested validation', async () => {
-      const service = createService('createUser', {
-        precheck: {
-          userData: {
-            name: ['string'],
-            age: ['number', 'positive'],
-            address: {
-              street: ['string'],
-              city: ['string'],
-              zip: ['string', {regex: /^\d{5}$/}]
-            },
-            tags: ['array', ['string'], {max: 5}]
-          }
-        }
+      const service = processor(operations.createUser, {
+        input: typedInput({
+          userData: z.object({
+            name: z.string(),
+            age: z.number().positive(),
+            address: z.object({
+              street: z.string(),
+              city: z.string(),
+              zip: z.string().regex(/^\d{5}$/)
+            }),
+            tags: z.array(z.string()).max(5)
+          })
+        })
       })
 
       const validData = {
@@ -276,7 +203,7 @@ describe('Validation Integration Tests', () => {
 
       const config = {
         services: {testService: service},
-        phases: {result: ['GET [testService]/process', validData]}
+        phases: {result: ['[testService]/process', validData]}
       }
 
       const result = await query(config)
@@ -285,20 +212,15 @@ describe('Validation Integration Tests', () => {
     })
 
     it('should validate both precheck and postcheck in sequence', async () => {
-      const service = {
-        async '/process'(args) {
-          // Transform data that may fail postcheck
-          return {value: args.value, doubled: args.value * 2}
-        }
-      }
-      service['/process']._validators = {
-        precheck: {value: ['number', {min: 1, max: 10}]},
-        postcheck: {doubled: ['number', {max: 15}]}
-      }
+      // Transform data that may fail postcheck
+      const service = processor(async (args) => ({value: args.value, doubled: args.value * 2}), {
+        input: typedInput({value: z.number().min(1).max(10)}),
+        output: typedOutput(z.object({doubled: z.number().max(15)}))
+      })
 
       const config1 = {
         services: {testService: service},
-        phases: {result: ['GET [testService]/process', {value: 5}]}
+        phases: {result: ['[testService]/process', {value: 5}]}
       }
       const result = await query(config1)
       assert.deepStrictEqual(result.result, {value: 5, doubled: 10})
@@ -306,19 +228,17 @@ describe('Validation Integration Tests', () => {
       // Should fail postcheck
       const config2 = {
         services: {testService: service},
-        phases: {result: ['GET [testService]/process', {value: 9}]} // doubled = 18, exceeds max
+        phases: {result: ['[testService]/process', {value: 9}]} // doubled = 18, exceeds max
       }
       await assert.rejects(query(config2), /Validation postcheck failed/)
     })
 
     it('should accept date with constraints', async () => {
-      const service = createService('echo', {
-        precheck: {value: ['date', {min: new Date('2020-01-01')}]}
-      })
+      const service = processor(operations.echo, {input: typedInput({value: z.date().min(new Date('2020-01-01'))})})
 
       const config = {
         services: {testService: service},
-        phases: {result: ['GET [testService]/process', {value: new Date('2023-01-01')}]}
+        phases: {result: ['[testService]/process', {value: new Date('2023-01-01')}]}
       }
 
       const result = await query(config)
@@ -326,18 +246,18 @@ describe('Validation Integration Tests', () => {
     })
 
     it('should accept URL string modifier', async () => {
-      const service = createService('scrape', {
-        precheck: {
-          url: ['string', 'url'],
-          queries: ['object', 'optional'],
-          validate: ['boolean', 'optional']
-        }
+      const service = processor(operations.scrape, {
+        input: typedInput({
+          url: z.string().url(),
+          queries: z.object({}).optional(),
+          validate: z.boolean().optional()
+        })
       })
 
       const config = {
         services: {testService: service},
         phases: {
-          result: ['GET [testService]/process', {
+          result: ['[testService]/process', {
             url: 'https://example.com',
             queries: {limit: 10}
           }]
@@ -350,25 +270,14 @@ describe('Validation Integration Tests', () => {
     })
 
     it('should accept object with optional modifier', async () => {
-      const service = {
-        async '/process'(args) {
-          return {
-            required: args.required,
-            optional: args.optional || 'default'
-          }
-        }
-      }
-      service['/process']._validators = {
-        precheck: {
-          required: ['string'],
-          optional: ['object', 'optional']
-        }
-      }
+      const service = processor(async (args) => ({required: args.required, optional: args.optional || 'default'}), {
+        input: typedInput({required: z.string(), optional: z.object({}).optional()})
+      })
 
       const config = {
         services: {testService: service},
         phases: {
-          result: ['GET [testService]/process', {required: 'value'}]
+          result: ['[testService]/process', {required: 'value'}]
         }
       }
 
@@ -378,21 +287,12 @@ describe('Validation Integration Tests', () => {
     })
 
     it('should accept array with constraints', async () => {
-      const service = {
-        async '/process'(args) {
-          return args.values
-        }
-      }
-      service['/process']._validators = {
-        precheck: {
-          values: ['array', ['string'], {min: 1, max: 3}]
-        }
-      }
+      const service = processor(async (args) => args.values, {input: typedInput({values: z.array(z.string()).min(1).max(3)})})
 
       const config = {
         services: {testService: service},
         phases: {
-          result: ['GET [testService]/process', {values: ['one', 'two', 'three']}]
+          result: ['[testService]/process', {values: ['one', 'two', 'three']}]
         }
       }
 
@@ -403,7 +303,7 @@ describe('Validation Integration Tests', () => {
       const failConfig = {
         services: {testService: service},
         phases: {
-          result: ['GET [testService]/process', {values: ['one', 'two', 'three', 'four']}]
+          result: ['[testService]/process', {values: ['one', 'two', 'three', 'four']}]
         }
       }
       await assert.rejects(query(failConfig), /Too big: expected array to have/)
@@ -411,297 +311,87 @@ describe('Validation Integration Tests', () => {
   })
 
   describe('Invalid validation syntax in user queries', () => {
-    it('should handle undefined schema descriptors gracefully', async () => {
-      const testService = {
-        async '/test'(args) {
-          return args.value
-        }
+    const testService = serviceFromTable({
+      async '/test'(args) {
+        return args.value
       }
-
-      const config = {
-        services: {testService},
-        phases: {
-          result: ['GET [testService]/test', {
-            value: 'hello',
-            precheck: {
-              value: undefined // Invalid: undefined schema
-            }
-          }]
-        }
-      }
-
-      await assert.rejects(
-        query(config),
-        /Invalid option: expected one of/
-      )
     })
 
-    it('should handle null schema descriptors gracefully', async () => {
-      const testService = {
-        async '/test'(args) {
-          return args.value
+    // [description, the call's precheck, error]
+    const malformed = [
+      ['undefined schema descriptors', {value: undefined}, /Invalid option: expected one of/],
+      ['null schema descriptors', {value: null}, /Invalid option: expected one of/],
+      ['invalid array format - non-string first element', {value: [123, 'modifier']}, /Invalid option: expected one of/],
+      ['invalid array format - empty array', {value: []}, /Invalid option: expected one of/],
+      ['malformed enum - no values', {value: ['enum']}, /Enum must have an array of values/],
+      ['malformed enum - empty values array', {value: ['enum', []]}, /Enum must have an array of values/]
+    ]
+
+    for (const [description, precheck, error] of malformed) {
+      it(`should handle ${description} gracefully`, async () => {
+        const config = {
+          services: {testService},
+          phases: {result: ['[testService]/test', {value: 'hello', precheck}]}
         }
-      }
-
-      const config = {
-        services: {testService},
-        phases: {
-          result: ['GET [testService]/test', {
-            value: 'hello',
-            precheck: {
-              value: null // Invalid: null schema
-            }
-          }]
-        }
-      }
-
-      await assert.rejects(
-        query(config),
-        /Invalid option: expected one of/
-      )
-    })
-
-    it('should handle invalid array format - non-string first element', async () => {
-      const testService = {
-        async '/test'(args) {
-          return args.value
-        }
-      }
-
-      const config = {
-        services: {testService},
-        phases: {
-          result: ['GET [testService]/test', {
-            value: 'hello',
-            precheck: {
-              value: [123, 'modifier'] // Invalid: first element must be string
-            }
-          }]
-        }
-      }
-
-      await assert.rejects(
-        query(config),
-        /Invalid option: expected one of/
-      )
-    })
-
-    it('should handle invalid array format - empty array', async () => {
-      const testService = {
-        async '/test'(args) {
-          return args.value
-        }
-      }
-
-      const config = {
-        services: {testService},
-        phases: {
-          result: ['GET [testService]/test', {
-            value: 'hello',
-            precheck: {
-              value: [] // Invalid: empty array
-            }
-          }]
-        }
-      }
-
-      await assert.rejects(
-        query(config),
-        /Invalid option: expected one of/
-      )
-    })
-
-    it('should handle malformed enum - no values', async () => {
-      const testService = {
-        async '/test'(args) {
-          return args.value
-        }
-      }
-
-      const config = {
-        services: {testService},
-        phases: {
-          result: ['GET [testService]/test', {
-            value: 'hello',
-            precheck: {
-              value: ['enum'] // Invalid: no enum values
-            }
-          }]
-        }
-      }
-
-      await assert.rejects(
-        query(config),
-        /Enum must have an array of values/
-      )
-    })
-
-    it('should handle malformed enum - empty values array', async () => {
-      const testService = {
-        async '/test'(args) {
-          return args.value
-        }
-      }
-
-      const config = {
-        services: {testService},
-        phases: {
-          result: ['GET [testService]/test', {
-            value: 'hello',
-            precheck: {
-              value: ['enum', []] // Invalid: empty enum values
-            }
-          }]
-        }
-      }
-
-      await assert.rejects(
-        query(config),
-        /Enum must have an array of values/
-      )
-    })
+        await assert.rejects(query(config), error)
+      })
+    }
   })
 
-  describe('Invalid validation syntax in service definitions', () => {
-    it('should handle undefined in service validators', async () => {
-      const service = {
-        async '/test'(args) {
-          return args.value
-        }
-      }
-      service['/test']._validators = {
-        precheck: {
-          value: undefined // Invalid: undefined schema
-        }
-      }
+  describe('Invalid declarations in service definitions', () => {
+    // [description, input declaration]
+    const malformed = [
+      ['a schema that is not zod', {value: [['type', {fromZod: ['notARealType']}]]}],
+      ['a type with no source', {value: ['type']}],
+      ['an unknown tag', {value: ['notARealTag']}]
+    ]
 
-      const config = {
-        services: {testService: service},
-        phases: {
-          result: ['GET [testService]/test', {value: 'hello'}]
+    for (const [description, input] of malformed) {
+      it(`should fail compilation for ${description}`, async () => {
+        const config = {
+          services: {testService: serviceFromTable({'/test': {input, call: async (args) => args.value}})},
+          phases: {result: ['[testService]/test', {value: 'hello'}]}
         }
-      }
-
-      await assert.rejects(
-        query(config),
-        /Invalid option: expected one of/
-      )
-    })
-
-    it('should handle null in service validators', async () => {
-      const service = {
-        async '/test'(args) {
-          return args.value
-        }
-      }
-      service['/test']._validators = {
-        precheck: {
-          value: null // Invalid: null schema
-        }
-      }
-
-      const config = {
-        services: {testService: service},
-        phases: {
-          result: ['GET [testService]/test', {value: 'hello'}]
-        }
-      }
-
-      await assert.rejects(
-        query(config),
-        /Invalid option: expected one of/
-      )
-    })
-
-    it('should handle invalid type names in service validators', async () => {
-      const service = {
-        async '/test'(args) {
-          return args.value
-        }
-      }
-      service['/test']._validators = {
-        precheck: {
-          value: ['notARealType'] // Invalid: unknown type
-        }
-      }
-
-      const config = {
-        services: {testService: service},
-        phases: {
-          result: ['GET [testService]/test', {value: 'hello'}]
-        }
-      }
-
-      await assert.rejects(
-        query(config),
-        /Invalid option: expected one of/
-      )
-    })
+        await assert.rejects(query(config), /The declaration of \[testService\]\/test is malformed/)
+      })
+    }
   })
 
   describe('Edge cases in validation compilation', () => {
-    it('should handle deeply nested validation schemas', async () => {
-      const service = {
-        async '/process'(args) {
-          return args
-        }
-      }
-      service['/process']._validators = {
-        precheck: {
-          level1: {
-            level2: {
-              level3: {
-                level4: {
-                  value: ['string']
-                }
-              }
-            }
-          }
-        }
-      }
+    it('should handle deeply nested validation schemas, declared by dotted path', async () => {
+      const service = processor(async (args) => args, {input: typedInput({'level1.level2.level3.level4.value': z.string()})})
+      const deep = (value) => ({level1: {level2: {level3: {level4: {value}}}}})
 
       const config = {
         services: {testService: service},
-        phases: {
-          result: ['GET [testService]/process', {
-            level1: {
-              level2: {
-                level3: {
-                  level4: {
-                    value: 'deep'
-                  }
-                }
-              }
-            }
-          }]
-        }
+        phases: {result: ['[testService]/process', deep('deep')]}
       }
 
       const result = await query(config)
       assert.strictEqual(result.result.level1.level2.level3.level4.value, 'deep')
+
+      await assert.rejects(
+        query({...config, phases: {result: ['[testService]/process', deep(5)]}}),
+        /level1\.level2\.level3\.level4\.value: 5 => Invalid input: expected string, received number/
+      )
     })
 
     it('should handle validation with all modifier types', async () => {
-      const service = {
-        async '/process'(args) {
-          return args
-        }
-      }
-      service['/process']._validators = {
-        precheck: {
-          email: ['string', 'email'],
-          url: ['string', 'url'],
-          positive: ['number', 'positive'],
-          integer: ['number', 'int'],
-          finite: ['number', 'finite'],
-          safe: ['number', 'safe']
-        }
-      }
+      const service = processor(async (args) => args, {
+        input: typedInput({
+          email: z.string().email(),
+          url: z.string().url(),
+          positive: z.number().positive(),
+          integer: z.number().int(),
+          finite: z.number().finite(),
+          safe: z.number().safe()
+        })
+      })
 
       const config = {
         services: {testService: service},
         phases: {
-          result: ['GET [testService]/process', {
+          result: ['[testService]/process', {
             email: 'test@example.com',
             url: 'https://example.com',
             positive: 5,
@@ -717,66 +407,24 @@ describe('Validation Integration Tests', () => {
     })
 
     it('should handle validation with complex union types', async () => {
-      const service = {
-        async '/process'(args) {
-          return args.value
-        }
-      }
-      service['/process']._validators = {
-        precheck: {
-          value: ['union', ['string'], ['number'], ['boolean']]
-        }
-      }
+      const service = processor(operations.echo, {input: typedInput({value: z.union([z.string(), z.number(), z.boolean()])})})
+      const run = (value) => query({services: {testService: service}, phases: {result: ['[testService]/process', {value}]}})
 
-      // Test with string
-      const config1 = {
-        services: {testService: service},
-        phases: {
-          result: ['GET [testService]/process', {value: 'hello'}]
-        }
-      }
-      const result1 = await query(config1)
-      assert.strictEqual(result1.result, 'hello')
-
-      // Test with number
-      const config2 = {
-        services: {testService: service},
-        phases: {
-          result: ['GET [testService]/process', {value: 42}]
-        }
-      }
-      const result2 = await query(config2)
-      assert.strictEqual(result2.result, 42)
-
-      // Test with invalid type
-      const config3 = {
-        services: {testService: service},
-        phases: {
-          result: ['GET [testService]/process', {value: {object: true}}]
-        }
-      }
-      await assert.rejects(query(config3), /Invalid input/)
+      assert.strictEqual((await run('hello')).result, 'hello')
+      assert.strictEqual((await run(42)).result, 42)
+      await assert.rejects(run({object: true}), /Invalid input/)
     })
   })
 
   describe('Validation sequencing (service-level + user-level)', () => {
     it('should apply service validation before user validation on precheck', async () => {
-      const service = {
-        async '/process'(args) {
-          return args.value
-        }
-      }
       // Service requires a number
-      service['/process']._validators = {
-        precheck: {
-          value: ['number']
-        }
-      }
+      const service = processor(operations.echo, {input: typedInput({value: z.number()})})
 
       const config = {
         services: {testService: service},
         phases: {
-          result: ['GET [testService]/process', {
+          result: ['[testService]/process', {
             value: 'not-a-number', // Will fail service validation first
             precheck: {
               value: ['number', {min: 10}] // User validation won't even run
@@ -792,22 +440,15 @@ describe('Validation Integration Tests', () => {
     })
 
     it('should apply user validation after service validation on postcheck', async () => {
-      const service = {
-        async '/process'(args) {
-          return {result: args.value * 2}
-        }
-      }
       // Service validates output is positive
-      service['/process']._validators = {
-        postcheck: {
-          result: ['number', 'positive']
-        }
-      }
+      const service = processor(async (args) => ({result: args.value * 2}), {
+        output: typedOutput(z.object({result: z.number().positive()}))
+      })
 
       const config = {
         services: {testService: service},
         phases: {
-          result: ['GET [testService]/process', {
+          result: ['[testService]/process', {
             value: 10, // Will produce 20
             postcheck: {
               result: ['number', {max: 15}] // User validation should fail
@@ -823,25 +464,12 @@ describe('Validation Integration Tests', () => {
     })
 
     it('should handle errors in nested service validation gracefully', async () => {
-      const service = {
-        async '/process'(args) {
-          return args
-        }
-      }
-      service['/process']._validators = {
-        precheck: {
-          data: {
-            nested: {
-              value: ['string', 'email']
-            }
-          }
-        }
-      }
+      const service = processor(async (args) => args, {input: typedInput({data: z.object({nested: z.object({value: z.string().email()})})})})
 
       const config = {
         services: {testService: service},
         phases: {
-          result: ['GET [testService]/process', {
+          result: ['[testService]/process', {
             data: {
               nested: {
                 value: 'not-an-email'

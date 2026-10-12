@@ -1,6 +1,7 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query from '../node.js'
+import {z} from 'zod'
+import query, {serviceFromTable} from '../index.js'
 
 describe('Rate Limit Tests', () => {
   describe('Basic Rate Limiting', () => {
@@ -9,12 +10,12 @@ describe('Rate Limit Tests', () => {
       const callTimes = []
 
       const services = {
-        claude: {
+        claude: serviceFromTable({
           async '/process'({input}) {
             callTimes.push(Date.now() - startTime)
             return {processed: input, callNumber: callTimes.length}
           }
-        }
+        })
       }
 
       const result = await query({
@@ -26,9 +27,9 @@ describe('Rate Limit Tests', () => {
           }
         },
         phases: {
-          result1: ['GET [claude]/process', {input: '$given.values[0]'}],
-          result2: ['GET [claude]/process', {input: '$given.values[1]'}],
-          result3: ['GET [claude]/process', {input: '$given.values[2]'}]
+          result1: ['[claude]/process', {input: '$given.values[0]'}],
+          result2: ['[claude]/process', {input: '$given.values[1]'}],
+          result3: ['[claude]/process', {input: '$given.values[2]'}]
         },
         select: ['$result1', '$result2', '$result3']
       })
@@ -58,18 +59,18 @@ describe('Rate Limit Tests', () => {
       const callTimes = []
 
       const services = {
-        fast: {
+        fast: serviceFromTable({
           async '/process'({input}) {
             callTimes.push(Date.now() - startTime)
             return {processed: input}
           }
-        },
-        claude: {
+        }),
+        claude: serviceFromTable({
           async '/process'({input}) {
             callTimes.push(Date.now() - startTime)
             return {processed: input}
           }
-        }
+        })
       }
 
       const result = await query({
@@ -82,9 +83,9 @@ describe('Rate Limit Tests', () => {
         },
         phases: {
           // Multiple calls to non-rate-limited service should be fast
-          fast1: ['GET [fast]/process', {input: '$given.value'}],
-          fast2: ['GET [fast]/process', {input: '$given.value'}],
-          fast3: ['GET [fast]/process', {input: '$given.value'}]
+          fast1: ['[fast]/process', {input: '$given.value'}],
+          fast2: ['[fast]/process', {input: '$given.value'}],
+          fast3: ['[fast]/process', {input: '$given.value'}]
         },
         select: ['$fast1', '$fast2', '$fast3']
       })
@@ -102,18 +103,18 @@ describe('Rate Limit Tests', () => {
       const callTimesB = []
 
       const services = {
-        serviceA: {
+        serviceA: serviceFromTable({
           async '/process'({input}) {
             callTimesA.push(Date.now() - startTime)
             return {service: 'A', processed: input}
           }
-        },
-        serviceB: {
+        }),
+        serviceB: serviceFromTable({
           async '/process'({input}) {
             callTimesB.push(Date.now() - startTime)
             return {service: 'B', processed: input}
           }
-        }
+        })
       }
 
       const result = await query({
@@ -126,10 +127,10 @@ describe('Rate Limit Tests', () => {
           }
         },
         phases: {
-          a1: ['GET [serviceA]/process', {input: '1'}],
-          b1: ['GET [serviceB]/process', {input: '1'}],
-          a2: ['GET [serviceA]/process', {input: '2'}],
-          b2: ['GET [serviceB]/process', {input: '2'}]
+          a1: ['[serviceA]/process', {input: '1'}],
+          b1: ['[serviceB]/process', {input: '1'}],
+          a2: ['[serviceA]/process', {input: '2'}],
+          b2: ['[serviceB]/process', {input: '2'}]
         },
         select: ['$a1', '$a2', '$b1', '$b2']
       })
@@ -156,23 +157,17 @@ describe('Rate Limit Tests', () => {
       const startTime = Date.now()
 
       const services = {
-        validated: {
-          async '/process'({value}) {
-            callTimes.push(Date.now() - startTime)
-            return {processed: value, timestamp: Date.now()}
+        validated: serviceFromTable({
+          '/process': {
+            input: {value: [['type', {fromZod: z.string()}]]},
+            output: [['type', {fromZod: z.object({processed: z.string()})}]],
+            async call({value}) {
+              callTimes.push(Date.now() - startTime)
+              return {processed: value, timestamp: Date.now()}
+            }
           }
-        }
+        })
       }
-
-      // Skip validation for now to isolate the issue
-      // services.validated['/process']._validators = {
-      //   precheck: {
-      //     service: {value: ['string']}
-      //   },
-      //   postcheck: {
-      //     service: {processed: ['string']}
-      //   }
-      // }
 
       const result = await query({
         given: {values: ['first', 'second']},
@@ -183,8 +178,8 @@ describe('Rate Limit Tests', () => {
           }
         },
         phases: {
-          result1: ['GET [validated]/process', {value: '$given.values[0]'}],
-          result2: ['GET [validated]/process', {value: '$given.values[1]'}]
+          result1: ['[validated]/process', {value: '$given.values[0]'}],
+          result2: ['[validated]/process', {value: '$given.values[1]'}]
         },
         select: ['$result1', '$result2']
       })
@@ -201,7 +196,7 @@ describe('Rate Limit Tests', () => {
       const startTime = Date.now()
 
       const services = {
-        flaky: {
+        flaky: serviceFromTable({
           async '/process'({input}) {
             callTimes.push(Date.now() - startTime)
             callCount++
@@ -210,7 +205,7 @@ describe('Rate Limit Tests', () => {
             }
             return {processed: input, attempt: callCount}
           }
-        }
+        })
       }
 
       const result = await query({
@@ -222,8 +217,8 @@ describe('Rate Limit Tests', () => {
           }
         },
         phases: {
-          result1: ['GET [flaky]/process', {input: '$given.values[0]'}],
-          result2: ['GET [flaky]/process', {input: '$given.values[1]', retry: 2}]
+          result1: ['[flaky]/process', {input: '$given.values[0]'}],
+          result2: ['[flaky]/process', {input: '$given.values[1]', retry: 2}]
         },
         select: ['$result1', '$result2']
       })
@@ -247,13 +242,13 @@ describe('Rate Limit Tests', () => {
       const startTime = Date.now()
 
       const services = {
-        timed: {
+        timed: serviceFromTable({
           async '/process'({input}) {
             callTimes.push(Date.now() - startTime)
             await new Promise(resolve => setTimeout(resolve, 50))
             return {processed: input}
           }
-        }
+        })
       }
 
       const result = await query({
@@ -265,8 +260,8 @@ describe('Rate Limit Tests', () => {
           }
         },
         phases: {
-          result1: ['GET [timed]/process', {input: '$given.values[0]', timeout: 200}],
-          result2: ['GET [timed]/process', {input: '$given.values[1]', timeout: 200}]
+          result1: ['[timed]/process', {input: '$given.values[0]', timeout: 200}],
+          result2: ['[timed]/process', {input: '$given.values[1]', timeout: 200}]
         },
         select: ['$result1', '$result2']
       })
@@ -283,7 +278,7 @@ describe('Rate Limit Tests', () => {
       let callCount = 0
 
       const services = {
-        errorProne: {
+        errorProne: serviceFromTable({
           async '/process'({input}) {
             callCount++
             if (input === 'bad') {
@@ -291,7 +286,7 @@ describe('Rate Limit Tests', () => {
             }
             return {processed: input}
           }
-        }
+        })
       }
 
       try {
@@ -304,8 +299,8 @@ describe('Rate Limit Tests', () => {
             }
           },
           phases: {
-            good: ['GET [errorProne]/process', {input: 'good'}],
-            bad: ['GET [errorProne]/process', {input: 'bad'}]
+            good: ['[errorProne]/process', {input: 'good'}],
+            bad: ['[errorProne]/process', {input: 'bad'}]
           },
           select: '$bad'
         })
@@ -321,7 +316,7 @@ describe('Rate Limit Tests', () => {
       const startTime = Date.now()
 
       const services = {
-        sometimes: {
+        sometimes: serviceFromTable({
           async '/process'({input}) {
             callTimes.push(Date.now() - startTime)
             if (input === 'fail') {
@@ -329,7 +324,7 @@ describe('Rate Limit Tests', () => {
             }
             return {processed: input}
           }
-        }
+        })
       }
 
       const result = await query({
@@ -341,10 +336,10 @@ describe('Rate Limit Tests', () => {
           }
         },
         phases: {
-          first: ['GET [sometimes]/process', {input: 'ok'}],
-          second: ['GET [sometimes]/process', {input: 'fail', ignoreErrors: true}],
+          first: ['[sometimes]/process', {input: 'ok'}],
+          second: ['[sometimes]/process', {input: 'fail', ignoreErrors: true}],
           // a distinct input: identical calls share one result and run once
-          third: ['GET [sometimes]/process', {input: 'ok again'}]
+          third: ['[sometimes]/process', {input: 'ok again'}]
         },
         select: ['$first', '$second', '$third']
       })

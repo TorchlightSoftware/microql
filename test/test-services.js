@@ -2,38 +2,38 @@
  * Shared test services for MicroQL tests
  */
 
+import {serviceFromTable} from '../service-table.js'
+import {mapValues} from '../common.js'
+
+// Services by name, each written as a table of operations.
+export const servicesFromTables = (tables) => mapValues(tables, serviceFromTable)
+
+const onTarget = {on: ['target']}
+const withTarget = (call) => ({input: onTarget, call})
+
 // Math service with common mathematical operations
-export const math = {
-  '/add1': async ({on}) => on + 1,
-  '/times10': async ({on}) => on * 10,
-  '/reduce': async ({on, fn}) => on.reduce(async (l, r) => fn([await l, r])),
-  '/sequence': async ({on}) => Array.from({length: on}, (v, k) => k + 1),
-  '/sum': async ({on}) => on.reduce((l, r) => l + r),
-  '/multiply': async ({a, b}) => a * b,
+export const math = serviceFromTable({
+  '/add1': withTarget(async ({on}) => on + 1),
+  '/times10': withTarget(async ({on}) => on * 10),
+  '/reduce': {input: {...onTarget, service: ['call']}, call: async ({on, fn}) => on.reduce(async (l, r) => fn([await l, r]))},
+  '/sequence': withTarget(async ({on}) => Array.from({length: on}, (v, k) => k + 1)),
+  '/sum': withTarget(async ({on}) => on.reduce((l, r) => l + r)),
+  '/multiply': withTarget(async ({a, b}) => a * b),
   '/divide': async ({a, b}) => a / b,
   '/subtract': async ({a, b}) => a - b,
-  '/add': async ({a, b}) => a + b
-}
-// Add argOrder metadata for method syntax support
-math['/add1']._argtypes = {on: {argOrder: 0}}
-math['/times10']._argtypes = {on: {argOrder: 0}}
-math['/reduce']._argtypes = {on: {argOrder: 0}, service: {type: 'service'}}
-math['/sequence']._argtypes = {on: {argOrder: 0}}
-math['/sum']._argtypes = {on: {argOrder: 0}}
-math['/add']._argtypes = {on: {argOrder: 0}}
-math['/multiply']._argtypes = {on: {argOrder: 0}}
+  '/add': withTarget(async ({a, b}) => a + b)
+})
 
 // Simple test service for basic operations
-export const test = {
-  async '/identity'({value}) { return value },
+export const test = serviceFromTable({
+  '/identity': {input: {value: ['target']}, call: async ({value}) => value},
   async '/increment'({value}) { return value + 1 },
   async '/double'({value}) { return value * 2 },
   async '/combine'({a, b}) { return `${a}-${b}` }
-}
-test['/identity']._argtypes = {value: {argOrder: 0}}
+})
 
 // Data manipulation service
-export const data = {
+export const data = serviceFromTable({
   async '/transform'({input, operation}) {
     switch (operation) {
       case 'uppercase': return input.toUpperCase()
@@ -45,8 +45,5 @@ export const data = {
   async '/merge'({arrays}) {
     return arrays.flat()
   },
-  async '/filter'({on, service}) {
-    return on.filter(service)
-  }
-}
-data['/filter']._argtypes = {on: {argOrder: 0}, service: {type: 'service'}}
+  '/filter': {input: {...onTarget, service: ['call']}, call: async ({on, service}) => on.filter(service)}
+})

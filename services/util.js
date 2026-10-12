@@ -1,13 +1,15 @@
 /**
  * @fileoverview Utility service for common data transformations in MicroQL.
- * Resources are addressed by service key: `GET [util]/each`.
+ * Resources are addressed by verbless service keys: `[util]/each`.
  *
  * `print` and `recordFailure` reach the outside world through the runtime,
  * which MicroQL hands to the service at init.
  */
 
+import {z} from 'zod'
 import {isPlainObject, mapValues, filterObject, pick} from '../common.js'
 import {canonical} from '../forms.js'
+import {serviceFromTable} from '../service-table.js'
 
 // An item that failed: an Error, or the null left by ignoreErrors.
 const isFailure = (item) => item === null || item instanceof Error
@@ -57,255 +59,192 @@ function mergeValues(on, withValue) {
 const truncate = (str, maxStr) => !!maxStr && typeof str === 'string' ?
   str.slice(0, maxStr) : str
 
-const util = {
+// Shared types and tags
+const list = z.array(z.any())
+const object = z.record(z.string(), z.any())
+const optionalBoolean = z.boolean().optional()
+const typed = (schema) => ['type', {fromZod: schema}]
+const listTarget = {on: ['target', typed(list)]}
+
+// What `each` and `flattenEach` share: a nested call for every item of `on`.
+const eachInput = {
+  ...listTarget,
+  service: [['call', {fromList: 'on'}]],
+  skipInputErrors: ['reserve', typed(optionalBoolean)],
+  skipOutputErrors: ['reserve', typed(optionalBoolean)]
+}
+
+async function eachItem({on, service, skipInputErrors = false, skipOutputErrors = false}) {
+  const input = skipInputErrors ? successes(on) : on
+  const results = await Promise.all(input.map(item => service(item)))
+  return skipOutputErrors ? successes(results) : results
+}
+
+// MicroQL's builtin service, as a table of operations (see service-table.js).
+// It is also the reference for writing one: each operation's declaration
+// says which field method syntax fills, which fields hold nested calls and
+// what they receive, and the types of its input and output.
+const table = {
   // Receives the runtime's capabilities before a Run uses this service.
   init(runtime) {
     this.runtime = runtime
   },
 
-  /**
-   * Run a service for every item; `flatten` concatenates the results.
-   */
-  async '/each'({on, service, flatten = false, skipInputErrors = false, skipOutputErrors = false}) {
-    const input = skipInputErrors ? successes(on) : on
-    const results = await Promise.all(input.map(item => service(item)))
-    const kept = skipOutputErrors ? successes(results) : results
-    return flatten ? kept.flat() : kept
+  '/each': {
+    description: 'Run a call for every item of a list, returning their results in order',
+    input: eachInput,
+    output: [['type', {toList: {fromField: 'service'}}]],
+    call: eachItem
   },
 
-  /**
-   * Keep (or remove, with mode: 'remove') the items for which the service is truthy.
-   */
-  async '/filter'({on, service, mode = 'keep'}) {
-    const tests = await Promise.all(on.map(item => service(item)))
-    const keep = mode === 'keep'
-    return on.filter((_, index) => Boolean(tests[index]) === keep)
+  '/flattenEach': {
+    description: 'Run a call that returns a list for every item of a list, returning one list of all their items',
+    input: {...eachInput, service: [['call', {fromList: 'on'}], typed(list)]},
+    output: [['type', {fromField: 'service'}]],
+    call: async (args) => (await eachItem(args)).flat()
   },
 
-  /**
-   * Remove Error objects and null values from an array
-   * Useful for removing failed items when ignoreErrors is used
-   */
-  async '/removeErrors'({on}) {
-    return successes(on)
-  },
-
-  /**
-   * Remove only null values from an array, keeping Error objects
-   */
-  async '/removeNulls'({on}) {
-    return on.filter(item => item !== null)
-  },
-
-  /**
-   * Remove successful results, keeping only Error objects and nulls
-   */
-  async '/removeSuccesses'({on}) {
-    return on.filter(isFailure)
-  },
-
-  /**
-   * Partition an array into {successes, failures}; failures include Errors and nulls
-   */
-  async '/partitionErrors'({on}) {
-    return {successes: successes(on), failures: on.filter(isFailure)}
-  },
-
-  /**
-   * Concatenate multiple arrays into a single array
-   */
-  async '/concat'({args}) {
-    return [].concat(...args)
-  },
-
-  /**
-   * Conditional logic - `then` when test is truthy, otherwise `otherwise`
-   */
-  async '/when'({test, then, otherwise}) {
-    return test ? then : otherwise
-  },
-
-  async '/eq'({l, r}) {
-    return l === r
-  },
-
-  async '/gt'({l, r}) {
-    return l > r
-  },
-
-  async '/lt'({l, r}) {
-    return l < r
-  },
-
-  /**
-   * Check if value exists (not null/undefined)
-   */
-  async '/exists'({value}) {
-    return value != null
-  },
-
-  /**
-   * Get length of array or string
-   */
-  async '/length'({value}) {
-    return value?.length || 0
-  },
-
-  /**
-   * Pick the listed fields that the object has
-   */
-  async '/pick'({on, fields}) {
-    return pick(on, fields)
-  },
-
-  /**
-   * Deep merge of 'with' onto 'on', returning a new object; arrays are a set union
-   */
-  async '/merge'({on, with: withObj}) {
-    return mergeValues(on, withObj)
-  },
-
-  /**
-   * Print a value through the runtime, formatted with the Query's inspect settings
-   */
-  async '/print'({on, settings, color}) {
-    const timestamp = settings?.ts ? `[${new Date().toISOString()}] ` : ''
-    const formatted = typeof on === 'string' ? truncate(on, settings?.inspect?.maxStringLength) :
-      this.runtime.inspect(filterHidden(on), settings?.inspect)
-
-    this.runtime.print(timestamp + formatted, {color})
-
-    // Return the original value for chaining
-    return on
-  },
-
-  /**
-   * Record a failure, with the error context MicroQL attached, through the runtime
-   */
-  async '/recordFailure'({on, location}) {
-    await this.runtime.recordFailure(location, {
-      timestamp: new Date().toISOString(),
-      error: on.message,
-      address: on.address,
-      key: on.key,
-      args: on.args,
-      stack: on.stack
-    })
-
-    // Return the error for potential chaining
-    return on
-  },
-
-  /**
-   * Template service - returns the provided template object
-   * MicroQL handles @ symbol resolution automatically through arg compilation
-   */
-  '/template'(args) {
-    return args
-  }
-}
-
-// Argument type metadata for MicroQL service compilation. `reserve` marks
-// arguments that configure the call rather than feed it data.
-util['/each']._argtypes = {
-  on: {argOrder: 0},
-  service: {type: 'service'},
-  skipInputErrors: {reserve: true},
-  skipOutputErrors: {reserve: true}
-}
-util['/filter']._argtypes = {
-  on: {argOrder: 0},
-  service: {type: 'service', returns: ['boolean']}
-}
-
-for (const resource of ['/each', '/filter', '/removeErrors', '/removeNulls', '/removeSuccesses', '/partitionErrors']) {
-  util[resource]._noTimeout = true
-}
-
-const takesTarget = {on: {argOrder: 0}}
-for (const resource of ['/removeErrors', '/removeNulls', '/removeSuccesses', '/partitionErrors', '/pick', '/merge', '/recordFailure', '/template']) {
-  util[resource]._argtypes = takesTarget
-}
-util['/print']._argtypes = {on: {argOrder: 0}, settings: {type: 'settings'}}
-util['/concat']._argtypes = {args: {argOrder: 0}}
-
-// Argument (precheck) and return (postcheck) schemas for each resource
-const listOfAnything = {precheck: {on: ['array']}, postcheck: ['array']}
-
-util['/each']._validators = {
-  precheck: {
-    on: ['array'],
-    service: ['any'],
-    flatten: ['boolean', 'optional'],
-    skipInputErrors: ['boolean', 'optional'],
-    skipOutputErrors: ['boolean', 'optional']
-  },
-  postcheck: ['array']
-}
-
-util['/filter']._validators = {
-  precheck: {
-    on: ['array'],
-    service: ['any'],
-    mode: ['enum', ['keep', 'remove'], 'optional']
-  },
-  postcheck: ['array']
-}
-
-util['/removeErrors']._validators = listOfAnything
-util['/removeNulls']._validators = listOfAnything
-util['/removeSuccesses']._validators = listOfAnything
-
-util['/partitionErrors']._validators = {
-  precheck: {on: ['array']},
-  postcheck: {successes: ['array'], failures: ['array']}
-}
-
-util['/concat']._validators = {
-  precheck: {args: ['array', ['array'], {min: 1}]},
-  postcheck: ['array']
-}
-
-util['/when']._validators = {
-  precheck: {test: ['any'], then: ['any'], otherwise: ['any']}
-}
-
-const comparison = (type) => ({precheck: {l: [type], r: [type]}, postcheck: ['boolean']})
-util['/eq']._validators = comparison('any')
-util['/gt']._validators = comparison('number')
-util['/lt']._validators = comparison('number')
-
-util['/exists']._validators = {precheck: {value: ['any']}, postcheck: ['boolean']}
-util['/length']._validators = {precheck: {value: ['any']}, postcheck: ['number']}
-
-util['/pick']._validators = {
-  precheck: {on: ['object'], fields: ['array', ['string'], {min: 1}]},
-  postcheck: ['object']
-}
-
-util['/merge']._validators = {
-  precheck: {on: ['object'], with: ['object']},
-  postcheck: ['object']
-}
-
-util['/print']._validators = {
-  precheck: {
-    on: ['any'],
-    settings: ['any', 'optional'],
-    color: ['string', 'optional']
-  }
-}
-
-util['/recordFailure']._validators = {
-  precheck: {
-    on: {
-      message: ['string'],
-      address: ['string'],
-      key: ['string'],
-      args: ['any']
+  '/filter': {
+    description: 'Keep the items for which a call is truthy, or remove them with mode: remove',
+    input: {
+      ...listTarget,
+      service: [['call', {fromList: 'on'}], typed(z.boolean())],
+      mode: [typed(z.enum(['keep', 'remove']).optional())]
     },
-    location: ['string', {min: 1, regex: /^[^<>:"|?*\t\n\r\0]+$/}]
+    output: [['type', {fromField: 'on'}]],
+    async call({on, service, mode = 'keep'}) {
+      const tests = await Promise.all(on.map(item => service(item)))
+      const keep = mode === 'keep'
+      return on.filter((_, index) => Boolean(tests[index]) === keep)
+    }
+  },
+
+  '/removeErrors': {
+    description: 'Remove failed items, Errors and the nulls ignoreErrors leaves, from a list',
+    input: listTarget,
+    output: [['type', {fromField: 'on'}]],
+    call: async ({on}) => successes(on)
+  },
+
+  '/removeNulls': {
+    description: 'Remove nulls from a list, keeping Errors',
+    input: listTarget,
+    output: [['type', {fromField: 'on'}]],
+    call: async ({on}) => on.filter(item => item !== null)
+  },
+
+  '/removeSuccesses': {
+    description: 'Keep only the failed items, Errors and nulls, of a list',
+    input: listTarget,
+    output: [['type', {fromField: 'on'}]],
+    call: async ({on}) => on.filter(isFailure)
+  },
+
+  '/partitionErrors': {
+    description: 'Split a list into {successes, failures}; failures are Errors and nulls',
+    input: listTarget,
+    output: [typed(z.object({successes: list, failures: list}))],
+    call: async ({on}) => ({successes: successes(on), failures: on.filter(isFailure)})
+  },
+
+  '/concat': {
+    description: 'Concatenate several lists into one',
+    input: {args: ['target', typed(z.array(list).min(1))]},
+    output: [typed(list)],
+    call: async ({args}) => [].concat(...args)
+  },
+
+  '/when': {
+    description: '`then` when test is truthy, otherwise `otherwise`',
+    call: async ({test, then, otherwise}) => test ? then : otherwise
+  },
+
+  '/eq': {
+    description: 'Whether l and r are the same value',
+    output: [typed(z.boolean())],
+    call: async ({l, r}) => l === r
+  },
+
+  '/gt': {
+    description: 'Whether l is greater than r',
+    input: {l: [typed(z.number())], r: [typed(z.number())]},
+    output: [typed(z.boolean())],
+    call: async ({l, r}) => l > r
+  },
+
+  '/lt': {
+    description: 'Whether l is less than r',
+    input: {l: [typed(z.number())], r: [typed(z.number())]},
+    output: [typed(z.boolean())],
+    call: async ({l, r}) => l < r
+  },
+
+  '/exists': {
+    description: 'Whether value is neither null nor undefined',
+    output: [typed(z.boolean())],
+    call: async ({value}) => value != null
+  },
+
+  '/length': {
+    description: 'The length of a list or string, 0 for anything else',
+    output: [typed(z.number())],
+    call: async ({value}) => value?.length || 0
+  },
+
+  '/pick': {
+    description: 'The listed fields that an object has',
+    input: {on: ['target', typed(object)], fields: [typed(z.array(z.string()).min(1))]},
+    output: [typed(object)],
+    call: async ({on, fields}) => pick(on, fields)
+  },
+
+  '/merge': {
+    description: 'Deep merge of `with` onto `on`, as a new object; lists are a set union',
+    input: {on: ['target', typed(object)], with: [typed(object)]},
+    output: [typed(object)],
+    call: async ({on, with: withObj}) => mergeValues(on, withObj)
+  },
+
+  '/print': {
+    description: 'Print a value through the runtime, formatted with the Query\'s inspect settings, and return it',
+    input: {on: ['target'], settings: ['settings'], color: [typed(z.string().optional())]},
+    output: [['type', {fromField: 'on'}]],
+    async call({on, settings, color}) {
+      const timestamp = settings?.ts ? `[${new Date().toISOString()}] ` : ''
+      const formatted = typeof on === 'string' ? truncate(on, settings?.inspect?.maxStringLength) :
+        this.runtime.inspect(filterHidden(on), settings?.inspect)
+      this.runtime.print(timestamp + formatted, {color})
+      return on
+    }
+  },
+
+  '/recordFailure': {
+    description: 'Record a failure, with the error context MicroQL attached, through the runtime, and return it',
+    input: {
+      on: ['target', typed(z.object({message: z.string(), address: z.string(), key: z.string(), args: z.any()}))],
+      location: [typed(z.string().min(1).regex(/^[^<>:"|?*\t\n\r\0]+$/))]
+    },
+    output: [['type', {fromField: 'on'}]],
+    async call({on, location}) {
+      await this.runtime.recordFailure(location, {
+        timestamp: new Date().toISOString(),
+        error: on.message,
+        address: on.address,
+        key: on.key,
+        args: on.args,
+        stack: on.stack
+      })
+      return on
+    }
+  },
+
+  '/template': {
+    description: 'Its own fields, with every reference resolved',
+    input: {on: ['target']},
+    call: async (args) => args
   }
 }
+
+const util = serviceFromTable(table)
 
 export default util

@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query, {nodeRuntime, fileStore} from '../node.js'
+import query, {nodeRuntime, fileStore, serviceFromTable} from '../index.js'
 import {existsSync} from 'fs'
 import {rm} from 'fs/promises'
 
@@ -23,7 +23,7 @@ describe('Cache and Rate Limit Integration Tests', () => {
     const startTime = Date.now()
 
     const services = {
-      heavy: {
+      heavy: serviceFromTable({
         async '/process'({input}) {
           callCount++
           callTimes.push(Date.now() - startTime)
@@ -31,7 +31,7 @@ describe('Cache and Rate Limit Integration Tests', () => {
           await new Promise(resolve => setTimeout(resolve, 10))
           return {processed: input, call: callCount, timestamp: Date.now()}
         }
-      }
+      })
     }
 
     // Single query with multiple calls - some cached, some not
@@ -45,10 +45,10 @@ describe('Cache and Rate Limit Integration Tests', () => {
         }
       },
       phases: {
-        result1: ['GET [heavy]/process', {input: '$given.value', cache: {}}], // First execution
-        result2: ['GET [heavy]/process', {input: '$given.value', cache: {}}], // Cache hit
-        result3: ['GET [heavy]/process', {input: 'different', cache: {}}], // Second execution (rate limited)
-        result4: ['GET [heavy]/process', {input: '$given.value', cache: {}}] // Cache hit
+        result1: ['[heavy]/process', {input: '$given.value', cache: {}}], // First execution
+        result2: ['[heavy]/process', {input: '$given.value', cache: {}}], // Cache hit
+        result3: ['[heavy]/process', {input: 'different', cache: {}}], // Second execution (rate limited)
+        result4: ['[heavy]/process', {input: '$given.value', cache: {}}] // Cache hit
       },
       select: ['$result1', '$result2', '$result3', '$result4']
     })
@@ -80,13 +80,13 @@ describe('Cache and Rate Limit Integration Tests', () => {
 
     let callCount = 0
     const services = {
-      heavy: {
+      heavy: serviceFromTable({
         async '/process'({input}) {
           callCount++
           await new Promise(resolve => setTimeout(resolve, 50)) // Slow operation
           return {processed: input, call: callCount}
         }
-      }
+      })
     }
 
     // First query - create cache entry
@@ -96,7 +96,7 @@ describe('Cache and Rate Limit Integration Tests', () => {
       services,
       runtime,
       phases: {
-        result: ['GET [heavy]/process', {input: '$given.value', cache: {}}]
+        result: ['[heavy]/process', {input: '$given.value', cache: {}}]
       },
       select: '$result'
     })
@@ -112,7 +112,7 @@ describe('Cache and Rate Limit Integration Tests', () => {
       services,
       runtime,
       phases: {
-        result: ['GET [heavy]/process', {input: '$given.value', cache: {}}]
+        result: ['[heavy]/process', {input: '$given.value', cache: {}}]
       },
       select: '$result'
     })
@@ -126,12 +126,12 @@ describe('Cache and Rate Limit Integration Tests', () => {
 
     let callCount = 0
     const services = {
-      timed: {
+      timed: serviceFromTable({
         async '/process'({input}) {
           callCount++
           return {processed: input, call: callCount, created: new Date().toISOString()}
         }
-      }
+      })
     }
 
     // Create cached result with short invalidation time
@@ -145,7 +145,7 @@ describe('Cache and Rate Limit Integration Tests', () => {
         }
       },
       phases: {
-        result: ['GET [timed]/process', {input: '$given.value', cache: {ttl: '1h'}}]
+        result: ['[timed]/process', {input: '$given.value', cache: {ttl: '1h'}}]
       },
       select: '$result'
     })
@@ -164,7 +164,7 @@ describe('Cache and Rate Limit Integration Tests', () => {
         }
       },
       phases: {
-        result: ['GET [timed]/process', {input: '$given.value', cache: {ttl: '1h'}}]
+        result: ['[timed]/process', {input: '$given.value', cache: {ttl: '1h'}}]
       },
       select: '$result'
     })
