@@ -1,15 +1,13 @@
 /**
  * @fileoverview MicroQL for node — core plus the node runtime, wired by default.
  *
- * The node runtime prints in colour to stdout, inspects with util.inspect,
- * writes each failure to a JSON file, and keeps the Cache in a `.cache`
- * directory. `fileStore` is the same entry store on disk, for a Run State
+ * The node runtime logs in colour to stdout, or appends to the file a log
+ * names with `to:`, and keeps the Cache in a `.cache` directory. `fileStore` is the same entry store on disk, for a Run State
  * that should survive the process.
  */
 
-import {inspect} from 'node:util'
 import path from 'node:path'
-import {mkdir, readFile, readdir, rm, writeFile} from 'node:fs/promises'
+import {appendFile, mkdir, readFile, readdir, rm, writeFile} from 'node:fs/promises'
 import coreQuery from './query.js'
 import {memoryStore} from './runtime.js'
 
@@ -87,23 +85,21 @@ export function fileStore(dir) {
   }
 }
 
-function print(text, {color} = {}) {
+// A line to stdout, in colour; or appended to the file `to` names, relative
+// to the working directory.
+async function log(text, {color, to} = {}) {
+  if (to) {
+    await mkdir(path.dirname(to), {recursive: true})
+    await appendFile(to, `${text}\n`)
+    return
+  }
   const colorCode = ANSI_COLORS[color] || ''
   const resetCode = colorCode ? ANSI_COLORS.reset : ''
   process.stdout.write(`${colorCode}${text}${resetCode}\n`)
 }
 
-async function recordFailure(location, record) {
-  await mkdir(location, {recursive: true})
-  const filePath = path.join(location, `failure-${Date.now()}.json`)
-  await writeFile(filePath, JSON.stringify(record, null, 2))
-  console.error(`❌ Failure recorded: ${path.relative(process.cwd(), filePath)}`)
-}
-
 export const nodeRuntime = {
-  print,
-  inspect,
-  recordFailure,
+  log,
   cache: fileStore('.cache')
 }
 

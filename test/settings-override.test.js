@@ -39,7 +39,7 @@ describe('Settings Override Tests', () => {
       },
       phases: {
         result: [
-          '[util]/print',
+          '[util]/inspect',
           {
             on: '$given',
             color: 'blue',
@@ -91,7 +91,7 @@ describe('Settings Override Tests', () => {
       },
       phases: {
         result: [
-          '[util]/print',
+          '[util]/inspect',
           {
             on: '$given',
             ts: false,
@@ -131,7 +131,7 @@ describe('Settings Override Tests', () => {
       },
       phases: {
         result: [
-          '[util]/print',
+          '[util]/inspect',
           {
             on: '$given',
             ts: false,
@@ -162,7 +162,7 @@ describe('Settings Override Tests', () => {
       },
       phases: {
         result: [
-          '[util]/print',
+          '[util]/inspect',
           {
             on: '$given',
             ts: false,

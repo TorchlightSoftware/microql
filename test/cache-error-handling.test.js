@@ -118,15 +118,16 @@ describe('Cache Error Handling Tests', () => {
       assert.strictEqual(result.attempt, 2)
     })
 
-    it('should not cache onError handler results when ignoreErrors is true', async () => {
+    it('should not cache a catch\'s results', async () => {
       const q = {
         ...baseQuery,
         services: failingServices,
         phases: {
-          result: ['[failing]/process', {
-            onError: ['[errorHandler]/handleError'],
-            ignoreErrors: true,
-            cache: true
+          result: ['[util]/try', {
+            service: ['[failing]/process', {
+              cache: true
+            }],
+            catch: ['[errorHandler]/handleError']
           }]
         },
         select: '$result'
@@ -174,10 +175,11 @@ describe('Cache Error Handling Tests', () => {
         ...baseQuery,
         services: timestampServices,
         phases: {
-          result: ['[failingService]/process', {
-            onError: ['[errorHandler]/handle'],
-            ignoreErrors: true,
-            cache: true
+          result: ['[util]/try', {
+            service: ['[failingService]/process', {
+              cache: true
+            }],
+            catch: ['[errorHandler]/handle']
           }]
         },
         select: '$result'
@@ -221,12 +223,13 @@ describe('Cache Error Handling Tests', () => {
         ...baseQuery,
         services: sourceTrackingServices,
         phases: {
-          result: ['[conditionalService]/getData', {
-            shouldFail: '$given.shouldFail',
-            id: '$given.id',
-            onError: ['[errorService]/handleError'],
-            ignoreErrors: true,
-            cache: true
+          result: ['[util]/try', {
+            service: ['[conditionalService]/getData', {
+              shouldFail: '$given.shouldFail',
+              id: '$given.id',
+              cache: true
+            }],
+            catch: ['[errorService]/handleError']
           }]
         },
         select: '$result'
@@ -257,11 +260,12 @@ describe('Cache Error Handling Tests', () => {
         given: {shouldFail: true},
         services: conditionalServices,
         phases: {
-          result: ['[conditional]/process', {
-            shouldFail: '$given.shouldFail',
-            onError: ['[errorHandler]/handleError'],
-            ignoreErrors: true,
-            cache: true
+          result: ['[util]/try', {
+            service: ['[conditional]/process', {
+              shouldFail: '$given.shouldFail',
+              cache: true
+            }],
+            catch: ['[errorHandler]/handleError']
           }]
         },
         select: '$result'
@@ -304,11 +308,12 @@ describe('Cache Error Handling Tests', () => {
         given: {input: 'fail'},
         services,
         phases: {
-          result: ['[test]/getData', {
-            value: '$given.input',
-            onError: ['[errorHandler]/handle'],
-            ignoreErrors: true,
-            cache: true
+          result: ['[util]/try', {
+            service: ['[test]/getData', {
+              value: '$given.input',
+              cache: true
+            }],
+            catch: ['[errorHandler]/handle']
           }]
         },
         select: '$result'

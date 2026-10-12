@@ -2,29 +2,18 @@
  * @fileoverview Utility service for common data transformations in MicroQL.
  * Resources are addressed by verbless service keys: `[util]/each`.
  *
- * `print` and `recordFailure` reach the outside world through the runtime,
- * which MicroQL hands to the service at init.
+ * `inspect` and `log` reach the outside world through the runtime's `log`,
+ * which MicroQL hands to the service at init. Both return what they were
+ * given, so they sit anywhere in a chain.
  */
 
 import {z} from 'zod'
-import {isPlainObject, mapValues, filterObject, pick} from '../common.js'
+import {isPlainObject, mapValues, pick} from '../common.js'
 import {canonical} from '../forms.js'
 import {serviceFromTable} from '../service-table.js'
-
-// An item that failed: an Error, or the null left by ignoreErrors.
-const isFailure = (item) => item === null || item instanceof Error
-const successes = (list) => list.filter(item => !isFailure(item))
-
-// Filter hidden properties (starting with _) before formatting
-const filterHidden = (val) => {
-  if (Array.isArray(val)) {
-    return val.map(filterHidden)
-  }
-  if (typeof val === 'object' && val !== null) {
-    return filterObject(val, (_v, k) => !k.startsWith('_'))
-  }
-  return val
-}
+import {format} from '../format.js'
+import {isErrorData, fromErrorData} from '../errors.js'
+import {parseSchema} from '../zodly.js'
 
 // A copy of plain data: arrays and plain objects are rebuilt, everything else
 // (dates, errors, instances) is shared.
@@ -56,28 +45,41 @@ function mergeValues(on, withValue) {
   return copyPlain(withValue)
 }
 
-const truncate = (str, maxStr) => !!maxStr && typeof str === 'string' ?
-  str.slice(0, maxStr) : str
-
 // Shared types and tags
 const list = z.array(z.any())
 const object = z.record(z.string(), z.any())
-const optionalBoolean = z.boolean().optional()
+const destination = z.string().min(1).optional()
 const typed = (schema) => ['type', {fromZod: schema}]
 const listTarget = {on: ['target', typed(list)]}
 
-// What `each` and `flattenEach` share: a nested call for every item of `on`.
+// What `each` and `flattenEach` share: a nested call for every item of `on`,
+// and a zodly schema of the results to leave out.
 const eachInput = {
   ...listTarget,
   service: [['call', {fromList: 'on'}]],
-  skipInputErrors: ['reserve', typed(optionalBoolean)],
-  skipOutputErrors: ['reserve', typed(optionalBoolean)]
+  skip: [typed(z.any().optional())]
 }
 
-async function eachItem({on, service, skipInputErrors = false, skipOutputErrors = false}) {
-  const input = skipInputErrors ? successes(on) : on
-  const results = await Promise.all(input.map(item => service(item)))
-  return skipOutputErrors ? successes(results) : results
+const eachItem = ({on, service}) => Promise.all(on.map(item => service(item)))
+
+// The list without the items that fit the skip schema, if there is one.
+function leaveOut(list, skip) {
+  if (skip === undefined) return list
+  const schema = parseSchema(skip)
+  return list.filter(item => !schema.safeParse(item).success)
+}
+
+// A value as an Error: error data as the error it describes, anything else
+// as an error saying what it is.
+const asError = (value) => isErrorData(value) ? fromErrorData(value) : new Error(format(value))
+
+// Resources that are gone, with what replaced them.
+const RETIRED = {
+  '/print': 'Use [util]/inspect',
+  '/recordFailure': 'Use [util]/log with to:',
+  '/removeErrors': 'Use skip: [\'error\'] on the iteration',
+  '/removeNulls': 'Use skip: [\'null\'] on the iteration',
+  '/removeSuccesses': 'Use [util]/partitionErrors and take its failures'
 }
 
 // MicroQL's builtin service, as a table of operations (see service-table.js).
@@ -85,23 +87,41 @@ async function eachItem({on, service, skipInputErrors = false, skipOutputErrors 
 // says which field method syntax fills, which fields hold nested calls and
 // what they receive, and the types of its input and output.
 const table = {
+  requires: ['log'],
+
   // Receives the runtime's capabilities before a Run uses this service.
   init(runtime) {
     this.runtime = runtime
   },
 
   '/each': {
-    description: 'Run a call for every item of a list, returning their results in order',
+    description: 'Run a call for every item of a list, returning their results in order, less those that fit skip',
     input: eachInput,
-    output: [['type', {toList: {fromField: 'service'}}]],
-    call: eachItem
+    output: [['type', {toList: {without: [{fromField: 'service'}, 'skip']}}]],
+    call: async (args) => leaveOut(await eachItem(args), args.skip)
   },
 
   '/flattenEach': {
-    description: 'Run a call that returns a list for every item of a list, returning one list of all their items',
+    description: 'Run a call that returns a list for every item of a list, returning one list of all their items, less those that fit skip',
     input: {...eachInput, service: [['call', {fromList: 'on'}], typed(list)]},
+    output: [['type', {without: [{fromField: 'service'}, 'skip']}]],
+    call: async (args) => leaveOut((await eachItem(args)).flat(), args.skip)
+  },
+
+  '/try': {
+    description: 'Run a call on `on`, returning its result: a catch here handles its failure',
+    input: {on: ['target'], service: [['call', {fromField: 'on'}]]},
     output: [['type', {fromField: 'service'}]],
-    call: async (args) => (await eachItem(args)).flat()
+    call: async ({on, service}) => service(on)
+  },
+
+  '/throw': {
+    description: 'Fail with `on`: error data as the error it describes, anything else as an error saying it; `cause` is the error behind it',
+    input: {on: ['target'], cause: [typed(z.any().optional())]},
+    output: [typed(z.never())],
+    async call({on, cause}) {
+      throw Object.assign(asError(on), cause === undefined ? {} : {cause: asError(cause)})
+    }
   },
 
   '/filter': {
@@ -119,32 +139,11 @@ const table = {
     }
   },
 
-  '/removeErrors': {
-    description: 'Remove failed items, Errors and the nulls ignoreErrors leaves, from a list',
-    input: listTarget,
-    output: [['type', {fromField: 'on'}]],
-    call: async ({on}) => successes(on)
-  },
-
-  '/removeNulls': {
-    description: 'Remove nulls from a list, keeping Errors',
-    input: listTarget,
-    output: [['type', {fromField: 'on'}]],
-    call: async ({on}) => on.filter(item => item !== null)
-  },
-
-  '/removeSuccesses': {
-    description: 'Keep only the failed items, Errors and nulls, of a list',
-    input: listTarget,
-    output: [['type', {fromField: 'on'}]],
-    call: async ({on}) => on.filter(isFailure)
-  },
-
   '/partitionErrors': {
-    description: 'Split a list into {successes, failures}; failures are Errors and nulls',
+    description: 'Split a list into {successes, failures}; failures are errors as data',
     input: listTarget,
     output: [typed(z.object({successes: list, failures: list}))],
-    call: async ({on}) => ({successes: successes(on), failures: on.filter(isFailure)})
+    call: async ({on}) => ({successes: on.filter(item => !isErrorData(item)), failures: on.filter(isErrorData)})
   },
 
   '/concat': {
@@ -205,35 +204,30 @@ const table = {
     call: async ({on, with: withObj}) => mergeValues(on, withObj)
   },
 
-  '/print': {
-    description: 'Print a value through the runtime, formatted with the Query\'s inspect settings, and return it',
-    input: {on: ['target'], settings: ['settings'], color: [typed(z.string().optional())]},
+  '/format': {
+    description: 'A value as text, shown with the Query\'s inspect settings',
+    input: {on: ['target'], settings: ['settings']},
+    output: [typed(z.string())],
+    call: async ({on, settings}) => format(on, settings?.inspect)
+  },
+
+  '/inspect': {
+    description: 'Show a value through the runtime\'s log, formatted with the Query\'s inspect settings, and return it',
+    input: {on: ['target'], settings: ['settings'], color: [typed(z.string().optional())], to: [typed(destination)]},
     output: [['type', {fromField: 'on'}]],
-    async call({on, settings, color}) {
+    async call({on, settings, color, to}) {
       const timestamp = settings?.ts ? `[${new Date().toISOString()}] ` : ''
-      const formatted = typeof on === 'string' ? truncate(on, settings?.inspect?.maxStringLength) :
-        this.runtime.inspect(filterHidden(on), settings?.inspect)
-      this.runtime.print(timestamp + formatted, {color})
+      await this.runtime.log(timestamp + format(on, settings?.inspect), {color, to})
       return on
     }
   },
 
-  '/recordFailure': {
-    description: 'Record a failure, with the error context MicroQL attached, through the runtime, and return it',
-    input: {
-      on: ['target', typed(z.object({message: z.string(), address: z.string(), key: z.string(), args: z.any()}))],
-      location: [typed(z.string().min(1).regex(/^[^<>:"|?*\t\n\r\0]+$/))]
-    },
+  '/log': {
+    description: 'Write a value, as text, through the runtime\'s log, and return it',
+    input: {on: ['target'], to: [typed(destination)]},
     output: [['type', {fromField: 'on'}]],
-    async call({on, location}) {
-      await this.runtime.recordFailure(location, {
-        timestamp: new Date().toISOString(),
-        error: on.message,
-        address: on.address,
-        key: on.key,
-        args: on.args,
-        stack: on.stack
-      })
+    async call({on, to}) {
+      await this.runtime.log(format(on), {to})
       return on
     }
   },
@@ -245,6 +239,15 @@ const table = {
   }
 }
 
-const util = serviceFromTable(table)
+const tableService = serviceFromTable(table)
+
+// A retired resource is refused with what replaced it.
+const util = {
+  ...tableService,
+  lookup(parts) {
+    if (Object.hasOwn(RETIRED, parts.resource)) throw new Error(`[util]${parts.resource} is retired. ${RETIRED[parts.resource]}`)
+    return tableService.lookup(parts)
+  }
+}
 
 export default util

@@ -103,9 +103,9 @@ An operation's `input` maps field paths to tags; its `output` is a list of tags.
 input: {
   on: ['target', ['type', {fromZod: z.array(z.any())}]],
   service: [['call', {fromList: 'on'}]],
-  skipInputErrors: ['reserve', ['type', {fromZod: z.boolean().optional()}]]
+  skip: [['type', {fromZod: z.any().optional()}]]
 },
-output: [['type', {toList: {fromField: 'service'}}]]
+output: [['type', {toList: {without: [{fromField: 'service'}, 'skip']}}]]
 ```
 
 | Tag | Config | Means |
@@ -128,6 +128,7 @@ output: [['type', {toList: {fromField: 'service'}}]]
 | `{fromObject: path}` | one value of an object field |
 | `{toList: source}` | a list of the source's type |
 | `{toObject: source}` | an object whose values are the source's type |
+| `{without: [source, path]}` | the source's type less the members that fit the [zodly](validation.md) schema written in the field at `path`; `util/each` uses it for `skip` |
 
 Sources compose: `{toObject: {fromList: 'on'}}` is an object whose values are the items of `on`.
 
@@ -141,13 +142,14 @@ Sources compose: `{toObject: {fromList: 'on'}}` is an object whose values are th
 ['$given.urls', '[util]/each', {
   as: 'url',                                         // names what `service` receives
   service: ['[scraper]/extract', {url: '@url'}],     // a call field: compiled, then handed over as a function
-  skipInputErrors: true                              // a reserve field
+  catch: ['[util]/log', {on: '@url'}],               // core's: handles a failure of any call `service` makes; sees @url and @err
+  timeout: 60000                                     // a reserve field: configures the call
 }]
 ```
 
 - **`target`** lets `$given.urls` stand first, in method syntax.
 - **`call`** makes `service` a nested call. A lone call receives its input as `@`; a chain reaches it by the name `as:` gives it. An object in a call field is a template of its input. A reference or literal in a call field stays data.
-- `onError` is always a call field; core runs it, and services never see it.
+- `catch` is core's, on any call that holds calls; services never see it. Core runs it when an invocation of a call field fails, and hands the operation its result in the failed invocation's place, so flow control needs no error handling of its own.
 
 ## Types and plan()
 
@@ -167,18 +169,21 @@ A service that declares nothing about what its call fields receive gets `any` fo
 
 A service may define two lifecycle functions:
 
-- **`init(runtime)`** is called before orchestration begins, on each service the plan uses, at most once per runtime. It receives the runtime's instance-wide capabilities: `print`, `inspect`, `recordFailure` and `cache`. A service that writes output or records failures should use these rather than reaching for the environment itself (the file system, stdout), so it runs wherever MicroQL does.
+- **`init(runtime)`** is called before orchestration begins, on each service the plan uses, at most once per runtime. It receives the runtime's instance-wide capabilities: `log` and `cache`, and whatever more the runtime offers. A service that writes output should use these rather than reaching for the environment itself (the file system, stdout), so it runs wherever MicroQL does. A service lists the runtime keys it uses in `requires`; a Run on a runtime without one of them fails before it starts ([Runtime Integration § Capabilities beyond the standard](runtime-integration.md#capabilities-beyond-the-standard)).
 - **`tearDown()`** is called after a Run, on each service the Run used. Errors thrown here are logged and swallowed.
 
 ```javascript
+import {serviceFromTable, format} from 'microql'
+
 const reporter = serviceFromTable({
+  requires: ['log'],
   init(runtime) {
     this.runtime = runtime
   },
   '/report': {
     input: {on: ['target']},
     async call({on}) {
-      this.runtime.print(this.runtime.inspect(on), {color: 'cyan'})
+      await this.runtime.log(format(on), {color: 'cyan'})
       return on
     }
   },
@@ -194,7 +199,7 @@ const reporter = serviceFromTable({
 
 ## Error handling
 
-Services throw errors for exceptional conditions. MicroQL labels each error with the `address` and `key` of the call that raised it, and the inputs it was given.
+Services throw errors for exceptional conditions. MicroQL labels each error with the `address` and `key` of the call that raised it, the Query's form hash, and the inputs it was given.
 
 ```javascript
 const users = serviceFromTable({
@@ -206,21 +211,22 @@ const users = serviceFromTable({
 })
 ```
 
-A Query decides what a failure means:
+A Query decides what a failure means, with a `catch` on a call that holds the failing one:
 
 ```javascript
 const phases = {
-  user: ['[users]/getUser', {
-    id: '$given.userId',
-    onError: ['[users]/getDefaultUser', {failed: '@.message'}],  // receives the error as @, or @err
-    ignoreErrors: true,                    // return the handler's result instead of failing
-    retry: 3,                              // Retry 3 times
-    timeout: 5000                          // 5 second timeout
+  user: ['[util]/try', {
+    service: ['[users]/getUser', {
+      id: '$given.userId',
+      retry: 3,                            // Retry 3 times
+      timeout: 5000                        // 5 second timeout
+    }],
+    catch: ['[users]/getDefaultUser', {failed: '@err.message'}]  // its result is the user
   }]
 }
 ```
 
-A handler that is a chain reaches the error as `@err`, since a chain's first call receives nothing. Inside a handler's own handler, `@err` is the inner error and `@@err` the outer one.
+The handler receives the failure as [error data](runtime-integration.md#errors-as-data), as `@` (a lone call) and as `@err`; a chain reaches it as `@err`, since a chain's first call receives nothing. The holding call's `as:` name, if it has one, is the item whose call failed. Inside a handler's own `catch`, `@err` is the inner failure and `@@err` the outer one. A handler that throws fails the holding call; `[util]/throw` rethrows the failure it is given. A service's own flow control (an `each`, a branch) never sees a failure a `catch` handled: it receives the handler's result as the nested call's.
 
 ## Testing services
 
@@ -259,8 +265,8 @@ To test against a runtime of your own, capturing output or keeping the cache in 
 ```javascript
 import query, {memoryStore} from 'microql'
 
-const printed = []
-const runtime = {print: (text) => printed.push(text), inspect: JSON.stringify, recordFailure: async () => {}, cache: memoryStore()}
+const logged = []
+const runtime = {log: (text, {to} = {}) => logged.push({text, to}), cache: memoryStore()}
 await query({runtime, phases: {...}})
 ```
 
@@ -289,9 +295,11 @@ const phases = {
 }
 ```
 
-- `/each({on, service, as, skipInputErrors, skipOutputErrors})` - Run a call for every item, returning their results in order
-- `/flattenEach({on, service, as, skipInputErrors, skipOutputErrors})` - Run a call that returns a list for every item, returning one list of all their items
+- `/each({on, service, as, skip})` - Run a call for every item, returning their results in order, less those that fit `skip` (a [zodly](validation.md) schema, such as `['error']`)
+- `/flattenEach({on, service, as, skip})` - Run a call that returns a list for every item, returning one list of all their items, less those that fit `skip`
 - `/filter({on, service, mode})` - Keep the items the call is truthy for; `mode: 'remove'` removes them instead
+- `/try({on, service})` - Run one call on `on`, returning its result, so a `catch` can handle its failure
+- `/throw({on, cause})` - Fail: with the error `on` describes, when it is error data, else with an error saying what it is; `cause` (error data, or anything else as text) is attached as the error behind it
 - `/when({test, then, otherwise})` - `then` when `test` is truthy, otherwise `otherwise`
 - `/concat({args})` - Concatenate lists
 - `/pick({on, fields})` - The listed fields an object has
@@ -299,9 +307,10 @@ const phases = {
 - `/length({value})` - The length of a list or string
 - `/exists({value})` - Whether a value is neither null nor undefined
 - `/eq`, `/gt`, `/lt` `({l, r})` - Comparisons
-- `/removeErrors`, `/removeNulls`, `/removeSuccesses`, `/partitionErrors` `({on})` - Clean up the results of `ignoreErrors`
-- `/print({on, color, settings})` - Print through the runtime, returning `on`
-- `/recordFailure({on, location})` - Record an error through the runtime, returning it
+- `/partitionErrors({on})` - Split a list into `{successes, failures}`, the failures being error data
+- `/format({on})` - `on` as text, with the Query's `inspect` settings (`depth`, `maxArrayLength`, `maxStringLength`)
+- `/inspect({on, color, to})` - Write `on`, formatted with the Query's `inspect` settings, through the runtime's `log`, returning `on`
+- `/log({on, to})` - Write `on` as text through the runtime's `log`, returning `on`; `to` names a destination, such as a file
 - `/template({...})` - Its own fields, with every reference resolved
 
 `util.operations()` lists them with their declarations.

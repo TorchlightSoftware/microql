@@ -24,6 +24,8 @@
  *   {fromObject: path}    one value of an object field
  *   {toList: source}      a list of the source's type
  *   {toObject: source}    an object whose values are the source's type
+ *   {without: [source, path]}  the source's type less the members that fit
+ *                         the zodly schema the field at path holds
  *
  * Only fromZod types are checked at run time; the rest are resolved by plan().
  * Field paths are dotted, with `..` for a dot inside a field name.
@@ -35,7 +37,7 @@ import {isPlainObject, mapValues, parseFieldPath} from './common.js'
 const FLAGS = ['target', 'reserve', 'settings']
 const READ_SOURCES = ['fromField', 'fromList', 'fromObject']
 const BUILD_SOURCES = ['toList', 'toObject']
-const SOURCES = ['fromZod', ...READ_SOURCES, ...BUILD_SOURCES]
+const SOURCES = ['fromZod', ...READ_SOURCES, ...BUILD_SOURCES, 'without']
 
 // A source is checked whole, so a malformed one is refused where it's declared.
 function checkSource(source) {
@@ -48,6 +50,10 @@ function checkSource(source) {
   if (kind === 'fromZod' && !(value instanceof z.ZodType)) throw new Error('fromZod takes a zod schema')
   if (READ_SOURCES.includes(kind) && typeof value !== 'string') throw new Error(`${kind} takes a field path`)
   if (BUILD_SOURCES.includes(kind)) checkSource(value)
+  if (kind === 'without') {
+    if (!Array.isArray(value) || value.length !== 2 || typeof value[1] !== 'string') throw new Error('without takes [source, field path]')
+    checkSource(value[0])
+  }
   return source
 }
 

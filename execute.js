@@ -9,17 +9,21 @@
  *
  * Scope: a call sees `{flow, bindings, errors}` — the value flowing in (`@`),
  * the values its enclosing iterations named with `as:` (`@name`), and the
- * errors of its enclosing onError handlers (`@err`, `@@err`).
+ * errors of its enclosing catch handlers (`@err`, `@@err`).
+ *
+ * A phase that fails fails the Run, unless the Query has a catch: then the
+ * handler's result is the phase's, and the Run carries on.
  */
 
 import {columnsOf, upstreamOf} from './graph.js'
 import {formsOf, hashOf} from './forms.js'
-import {wrap} from './wrappers.js'
+import {wrap, catchWith} from './wrappers.js'
 import {rootScope, enterPosition} from './reference.js'
 import RateLimitedQueue from './ratelimit.js'
 import {concurrencyLimit} from './concurrency.js'
 import {mapValues, pick} from './common.js'
-import {validate} from './validation.js'
+import {validate} from './zodly.js'
+import {format} from './format.js'
 
 // The runtime each service last received at init. A service is initialized
 // at most once per runtime; a service shared between runtimes is initialized
@@ -58,9 +62,9 @@ async function runSteps(steps, scope, run) {
   return flow
 }
 
-// Runs a position's steps for one input.
-function runPosition(position, scope, input, run) {
-  return runSteps(position.steps, enterPosition(position, scope, input), run)
+// Runs a position's steps for one input (and, in a catch, the failed item).
+function runPosition(position, scope, input, item, run) {
+  return runSteps(position.steps, enterPosition(position, scope, input, item), run)
 }
 
 // Starts a call, unless the Run has been aborted, and tracks it by address
@@ -115,6 +119,10 @@ function resultHashes(name, result, run) {
   return {resultHash: run.resultHashes[name], upstream: Object.fromEntries(upstream)}
 }
 
+// A phase's result: its steps', or the Query's catch's when they fail.
+const phaseResult = (name, run) =>
+  runSteps(run.compiled.phases[name].steps, rootScope, run).catch(catchWith(run.compiled.settings.catch, rootScope, run))
+
 // Runs one phase, reporting it running, then done, failed or cancelled. A
 // running phase reports when it started, never partial output; an abort ends
 // it at once, reporting the calls it leaves in flight.
@@ -125,7 +133,7 @@ function runPhase(name, run) {
   const duration = () => Date.now() - startedAt
 
   reportPhase('running')
-  return Promise.race([runSteps(run.compiled.phases[name].steps, rootScope, run), run.aborted]).then(
+  return Promise.race([phaseResult(name, run), run.aborted]).then(
     result => {
       reportPhase('done', {duration: duration(), ...resultHashes(name, result, run)})
       return result
@@ -159,17 +167,15 @@ function scopeOfRun(compiled, target) {
   }
 }
 
-// The global onError handler sees the error that ended the Run.
-async function handleGlobalError(error, settings, run) {
-  if (settings.onError) {
-    try {
-      await runPosition(settings.onError, rootScope, error, run)
-    } catch (handlerError) {
-      handlerError.message = `Global onError handler failed: ${handlerError.message}`
-      if (!settings.ignoreErrors) throw handlerError
+// The first call whose service requires a runtime key the runtime lacks.
+function checkCapabilities({calls, runtime}) {
+  for (const call of calls) {
+    const missing = (call.service.requires ?? []).find(key => !(key in runtime))
+    if (missing) {
+      const message = `[${call.address}] Service '${call.parts.service}' requires runtime.${missing}, which this runtime doesn't provide`
+      throw Object.assign(new Error(message), {address: call.address, code: 'missing-capability'})
     }
   }
-  if (!settings.ignoreErrors) throw error
 }
 
 // What a Run needs from its caller, which core never supplies itself, and a
@@ -177,8 +183,9 @@ async function handleGlobalError(error, settings, run) {
 function checkRunInputs(compiled, {runState, trigger}) {
   if (!compiled.runtime) throw new Error('execute needs a runtime: pass config.runtime (microql/core has none of its own)')
   if (!runState) throw new Error('execute needs a runState: the entry store for this Run, such as memoryStore()')
+  checkCapabilities(compiled)
   try {
-    validate(compiled.triggerSchema, trigger, compiled.runtime.inspect, false)
+    validate(compiled.triggerSchema, trigger, format, false)
   } catch (error) {
     error.message = `$trigger validation failed:\n${error.message}`
     throw error
@@ -215,7 +222,7 @@ export async function execute(compiled, {runState, trigger, target, signal, onUp
     limit: settings.concurrency ? concurrencyLimit(settings.concurrency) : undefined,
     rerun,
     onUpdate,
-    runPosition: (position, scope, input) => runPosition(position, scope, input, run)
+    runPosition: (position, scope, input, item) => runPosition(position, scope, input, item, run)
   }
   // each call's wrappers depend only on the call and the Run, so they're built once
   run.pipelines = new Map(compiled.calls.map(call => [call, wrap(call, run)]))
@@ -228,12 +235,8 @@ export async function execute(compiled, {runState, trigger, target, signal, onUp
         run.nodes[name] = await runPhase(name, run)
       }))
     }
-  } catch (error) {
-    // an abort discards work in progress: nothing waits for it or handles it
-    if (isAbort(error, run)) throw error
-    await settle(run)
-    await handleGlobalError(error, settings, run)
   } finally {
+    // an abort discards work in progress: nothing waits for it
     if (!signal?.aborted) await settle(run)
     await callTearDown(run.usedServices)
   }

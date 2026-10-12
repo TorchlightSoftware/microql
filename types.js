@@ -19,6 +19,7 @@
 
 import {z} from 'zod'
 import {isPlainObject, mapValues} from './common.js'
+import {errorSchema} from './zodly.js'
 
 export const any = z.any()
 
@@ -41,9 +42,11 @@ const isAbsent = (schema) => ['undefined', 'null'].includes(typeOf(schema))
 
 /**
  * A schema as text, for messages: `string`, `array of number`,
- * `{url: string, tags?: array of string}`, `enum (a | b)`, `record of number`.
+ * `{url: string, tags?: array of string}`, `enum (a | b)`, `record of number`,
+ * `error` (error data).
  */
 export function describeSchema(schema) {
+  if (schema === errorSchema) return 'error'
   const {type} = schema.def
   if (type === 'optional') return `${describeSchema(schema.def.innerType)} (optional)`
   if (type === 'nullable') return `${describeSchema(schema.def.innerType)} (nullable)`
@@ -185,4 +188,32 @@ export function compare(expected, actual, path = []) {
   const fits = FITS[want.def.type]
   if (fits) return [...absent, ...fits(want, have, path)]
   return [...absent, ...(baseTypeOf(have) === want.def.type ? [] : issue('type-mismatch', path, want, have))]
+}
+
+// The members of a schema: a union's options, else the schema itself.
+const membersOf = (schema) => unwrap(schema).def.type === 'union' ? unwrap(schema).def.options : [schema]
+
+const unionOf = (members) => members.length === 1 ? members[0] : z.union(members)
+
+/**
+ * A value of one schema or the other, as one union. A never (what a call that
+ * always throws returns) adds nothing. Provisional: the plan's union of what a
+ * call returns and what its catch does.
+ */
+export const eitherOf = (one, other) => {
+  const members = [...membersOf(one), ...membersOf(other)].filter(member => typeOf(member) !== 'never')
+  return members.length ? unionOf(members) : z.never()
+}
+
+/**
+ * The schema less the members that fit the removed one: what's left of a
+ * list's items once those matching a skip schema are left out. Unchanged when
+ * there is nothing to remove; never when nothing is left.
+ */
+export function without(schema, removed) {
+  if (!removed) return schema
+  const members = membersOf(schema)
+  const kept = members.filter(member => compare(removed, member).length > 0)
+  if (kept.length === members.length) return schema
+  return kept.length ? unionOf(kept) : z.never()
 }

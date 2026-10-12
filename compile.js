@@ -12,17 +12,19 @@
  *   Call      one service call: a service key, its data arguments, its
  *             settings, and its positions.
  *   Position  a field that holds a call or a chain of calls: one the
- *             operation's declaration tags `call`, or `onError`.
+ *             operation's declaration tags `call`, or `catch`, which handles
+ *             a failure of any of them.
  *   Address   a call's Service Call Address (`$listings.@1a2`): calls are
- *             numbered, positions lettered in sorted key order, alternating.
+ *             numbered, positions lettered in sorted key order, alternating;
+ *             `e` is kept for catch, so adding one moves no other address.
  */
 
 import {parseServiceKey} from '@tlsft/service-key'
 
 import {RESERVE_ARGS, VALIDATION_NAMES, isPlainObject, mapValues, pick, omit, omitIn, getIn, setIn, defaults} from './common.js'
 import {declarationOf} from './declaration.js'
-import {isReference, parseReference} from './reference.js'
-import {parseSchema} from './validation.js'
+import {isReference, parseReference, readOf, readsOutside} from './reference.js'
+import {parseSchema} from './zodly.js'
 import {fieldPathOf} from './addresses.js'
 import util from './services/util.js'
 
@@ -32,7 +34,29 @@ const ROOT_NODES = ['given', 'trigger']
 // The retired `service:action` form, recognised only to explain its replacement.
 const RETIRED_KEY = /^(\w+):(\w+)$/
 
-const LETTERS = 'abcdefghijklmnopqrstuvwxyz'
+// Call fields' letters, in sorted key order; catch is always `e`, for error.
+const CATCH_LETTER = 'e'
+const FIELD_LETTERS = [...'abcdefghijklmnopqrstuvwxyz'].filter(letter => letter !== CATCH_LETTER)
+
+// Each position's letter, by field path.
+const lettersOf = (fields) => {
+  const held = fields.filter(({path}) => path !== 'catch')
+  return Object.fromEntries([...held.map(({path}, i) => [path, FIELD_LETTERS[i]]), ['catch', CATCH_LETTER]])
+}
+
+// Arguments and settings that are gone, with what replaced them.
+const RETIRED_ARGS = {
+  onError: 'Use catch: on the call holding the calls whose failures it handles',
+  ignoreErrors: 'A catch handles a failure in place; without one, a failure fails the call that holds it',
+  skipInputErrors: 'Failures stay thrown until a catch handles them, so no input holds one',
+  skipOutputErrors: 'Use catch: to handle each failure, then skip: [\'error\'] to leave them out'
+}
+
+// Fails on the first retired argument among the keys.
+function checkRetired(site, keys) {
+  const retired = keys.find(key => Object.hasOwn(RETIRED_ARGS, key))
+  if (retired) fail(site, 'retired-key', `'${retired}' is retired. ${RETIRED_ARGS[retired]}`)
+}
 
 // A compile-time error: its message names the address, and the error carries
 // the address and a code (see docs/runtime-integration.md § Errors).
@@ -131,21 +155,23 @@ const compileValidators = (site, args, declaration) => {
 // A call's settings: its own reserve args, then any settings-tagged fields,
 // then the Query's global settings (except those that only apply globally).
 const compileSettings = (serviceName, args, settingsArgs, querySettings) => {
-  const ownSettings = omit(pick(args, RESERVE_ARGS), ['onError', 'precheck', 'postcheck'])
-  const globalSettings = omit(querySettings, ['onError', 'ignoreErrors', 'cache', 'rateLimit', 'concurrency'])
+  const ownSettings = omit(pick(args, RESERVE_ARGS), ['catch', 'precheck', 'postcheck'])
+  const globalSettings = omit(querySettings, ['catch', 'cache', 'rateLimit', 'concurrency'])
   const settings = defaults(ownSettings, ...Object.values(settingsArgs), globalSettings)
   settings.rateLimit = querySettings.rateLimit?.[serviceName]
   return settings
 }
 
 // Checks every reference in a call's data arguments against its scope, and
-// returns the phases they depend on.
+// returns the phases they depend on and what they read.
 function checkReferences(site, args, scope, query) {
   const dependencies = new Set()
+  const reads = []
   const check = (value) => {
     if (isReference(value)) {
       const ref = parseWithSite(site, value)
       checkReference(site, ref, value, scope, query)
+      reads.push(readOf(ref, scope))
       if (ref.sigil === '$' && !ROOT_NODES.includes(ref.name)) dependencies.add(ref.name)
     } else if (Array.isArray(value)) {
       value.forEach(check)
@@ -154,8 +180,11 @@ function checkReferences(site, args, scope, query) {
     }
   }
   check(args)
-  return dependencies
+  return {dependencies, reads}
 }
+
+// One read per key.
+const uniqueReads = (reads) => [...new Map(reads.map(read => [read.key, read])).values()]
 
 function parseWithSite(site, text) {
   try {
@@ -168,7 +197,7 @@ function parseWithSite(site, text) {
 function checkReference(site, {sigil, name, depth}, text, scope, query) {
   if (sigil === '$' && !query.nodeNames.has(name)) fail(site, 'unknown-reference', `Unknown reference '${text}': no phase or node named '${name}'`)
   if (depth > scope.errors) {
-    fail(site, 'unknown-reference', scope.errors ? `Unknown reference '${text}': it is inside only ${scope.errors} onError` : `Unknown reference '${text}': no enclosing onError`)
+    fail(site, 'unknown-reference', scope.errors ? `Unknown reference '${text}': it is inside only ${scope.errors} catch` : `Unknown reference '${text}': no enclosing catch`)
   }
   if (sigil === '@' && name && !depth && !scope.bindings.includes(name)) fail(site, 'unknown-reference', `Unknown reference '${text}': no enclosing iteration is named '${name}' by as:`)
   if (sigil === '@' && !name && !scope.flow) fail(site, 'invalid-reference', `Invalid reference '${text}': nothing flows into this call. The first call of a phase or chain receives nothing; name an iteration with as: to reach its item`)
@@ -176,7 +205,7 @@ function checkReference(site, {sigil, name, depth}, text, scope, query) {
 
 // Declares an iteration name; names are Query-scoped, so each is used once.
 function declareBinding(site, name, query) {
-  if (name === 'err') fail(site, 'reserved-name', '\'err\' is reserved for the error in onError (@err); name the iteration something else')
+  if (name === 'err') fail(site, 'reserved-name', '\'err\' is reserved for the error in catch (@err); name the iteration something else')
   if (query.bindingNames.has(name)) fail(site, 'duplicate-binding', `Binding name '${name}' is used more than once. Binding names are Query-scoped.`)
   query.bindingNames.add(name)
   if (query.nodeNames.has(name)) {
@@ -204,35 +233,33 @@ function compileSteps(value, siteOf, scope, hasInput, query) {
 // A position: the field's call or chain, compiled in the owner's scope plus
 // its iteration name. A single call receives its input as `@`; a chain's
 // first step receives nothing, so a chain reaches its input by name only.
-// onError's input is the error, not an iteration: `as:` never names it, and
-// it is reached as @err (with one more @ for each onError it is inside).
+// catch's input is the error, reached as @err (with one more @ for each catch
+// it is inside); `as:` names the item whose call failed, as in the others.
 function compilePosition(owner, field, letter, value, scope, as, query) {
-  const iteration = field === 'onError' ? undefined : as
-
   // an object in a service position is a template of its input
   const descriptor = isPlainObject(value) ? ['[util]/template', value] : value
   const chain = isChain(descriptor)
-  if (chain && field !== 'onError' && !iteration) {
+  if (chain && field !== 'catch' && !as) {
     fail(owner, 'unreachable-input', `The chain in '${field}' can't reach its input. Name it with as: and reference it as @name`)
   }
 
   const inner = {
-    bindings: iteration ? [...scope.bindings, iteration] : scope.bindings,
-    errors: field === 'onError' ? scope.errors + 1 : scope.errors
+    bindings: as ? [...scope.bindings, as] : scope.bindings,
+    errors: field === 'catch' ? scope.errors + 1 : scope.errors
   }
   const siteOf = sitesAt(`${owner.address}${letter}`, fieldPathOf(owner, field))
   return {
     field,
     chain,
-    as: iteration,
+    as,
     steps: compileSteps(descriptor, siteOf, inner, true, query)
   }
 }
 
 // The fields of a call that hold calls, by path: those its declaration tags
-// call, and onError.
+// call, and catch.
 function positionFields(site, args, declaration, key) {
-  const fields = [...declaration.calls, {path: 'onError', segments: ['onError']}]
+  const fields = [...declaration.calls, {path: 'catch', segments: ['catch']}]
     .filter(({segments}) => getIn(args, segments) !== undefined)
   for (const {path, segments} of fields) {
     if (typeof getIn(args, segments) === 'function') {
@@ -241,7 +268,7 @@ function positionFields(site, args, declaration, key) {
   }
   // a reference or literal in a call field stays data
   return fields
-    .filter(({path, segments}) => path === 'onError' || Array.isArray(getIn(args, segments)) || isPlainObject(getIn(args, segments)))
+    .filter(({path, segments}) => path === 'catch' || Array.isArray(getIn(args, segments)) || isPlainObject(getIn(args, segments)))
     .sort((a, b) => a.path.localeCompare(b.path))
 }
 
@@ -267,11 +294,16 @@ function compileCall(descriptor, site, scope, query) {
   }
 
   const args = parsed.hasTarget ? setIn(parsed.args, declaration.target.segments, parsed.target) : parsed.args
+  checkRetired(site, Object.keys(args))
   const {as} = args
   const fields = positionFields(site, args, declaration, parsed.key)
+  const holdsCalls = fields.some(f => f.path !== 'catch')
   if (as !== undefined) {
-    if (!fields.some(f => f.path !== 'onError')) fail(site, 'misplaced-as', `as: names an iteration, but ${parsed.key} takes no call`)
+    if (!holdsCalls) fail(site, 'misplaced-as', `as: names an iteration, but ${parsed.key} takes no call`)
     declareBinding(site, as, query)
+  }
+  if (args.catch !== undefined && !holdsCalls) {
+    fail(site, 'misplaced-catch', `catch: handles failures of the calls a call holds, but ${parsed.key} holds none. To catch a single call, hold it in [util]/try`)
   }
 
   const held = [...fields, ...declaration.settings]
@@ -280,13 +312,17 @@ function compileCall(descriptor, site, scope, query) {
   call.settings = compileSettings(parsed.parts.service, args, call.settingsArgs, query.settings)
   call.checks = pick(args, ['precheck', 'postcheck'])
   call.validators = compileValidators(site, args, declaration)
-  call.dependencies = checkReferences(site, {...call.args, ...call.settingsArgs}, scope, query)
-  call.positions = Object.fromEntries(fields.map(({path, segments}, i) =>
-    [path, compilePosition(call, path, LETTERS[i], getIn(args, segments), scope, as, query)]))
+  const own = checkReferences(site, {...call.args, ...call.settingsArgs}, scope, query)
+  const letters = lettersOf(fields)
+  call.positions = Object.fromEntries(fields.map(({path, segments}) =>
+    [path, compilePosition(call, path, letters[path], getIn(args, segments), scope, as, query)]))
 
-  for (const position of Object.values(call.positions)) {
-    for (const step of position.steps) call.dependencies = call.dependencies.union(step.dependencies)
-  }
+  // what the calls it holds read from outside it is part of its input, as
+  // much as its own fields are: their results differ with it
+  const steps = Object.values(call.positions).flatMap(position => position.steps)
+  call.closure = uniqueReads(steps.flatMap(step => step.reads).filter(read => readsOutside(read, scope)))
+  call.reads = uniqueReads([...own.reads, ...call.closure])
+  call.dependencies = steps.reduce((deps, step) => deps.union(step.dependencies), own.dependencies)
   query.calls.push(call)
   return call
 }
@@ -301,10 +337,10 @@ function compilePhase(name, descriptor, query) {
   }
 }
 
-// The global onError handler receives the error that ended the Run.
-function compileGlobalOnError(value, query) {
-  const siteOf = sitesAt('settings.onError.@', ['settings', 'onError'])
-  return {field: 'onError', chain: isChain(value), steps: compileSteps(value, siteOf, {bindings: [], errors: 1}, true, query)}
+// The Query's catch handles each phase that fails: its result is the phase's.
+function compileGlobalCatch(value, query) {
+  const siteOf = sitesAt('settings.catch.@', ['settings', 'catch'])
+  return {field: 'catch', chain: isChain(value), steps: compileSteps(value, siteOf, {bindings: [], errors: 1}, true, query)}
 }
 
 // `select` names what the Query returns: one reference, or a list of phases.
@@ -326,6 +362,7 @@ function compileSelect(select, query) {
 export function compile(config) {
   const {phases = {}, given, trigger, settings = {}} = config
   const services = defaults(config.services, {util})
+  checkRetired({address: 'settings'}, Object.keys(settings))
 
   const query = {
     services,
@@ -348,7 +385,7 @@ export function compile(config) {
     select: compileSelect(config.select, query),
     settings: {
       ...settings,
-      onError: settings.onError ? compileGlobalOnError(settings.onError, query) : undefined
+      catch: settings.catch ? compileGlobalCatch(settings.catch, query) : undefined
     },
     services,
     runtime: config.runtime,

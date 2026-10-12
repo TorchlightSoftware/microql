@@ -182,3 +182,64 @@ describe('Cache', () => {
     assert.deepEqual(service.calls, {1: 2})
   })
 })
+
+// A call that holds calls is keyed by its own fields and by what the calls it
+// holds read from outside it: the item of an enclosing iteration, an enclosing
+// catch's error, a phase.
+describe('the input of a call that holds calls', () => {
+  const pair = serviceFromTable({async '/of'({x, y}) { return `${x}${y}` }})
+  const failing = serviceFromTable({async '/on'({item}) { throw new Error(`no ${item}`) }})
+  const services = {pair, failing}
+
+  // [description, phases, the selected result]
+  const cases = [
+    ['a nested each reading the outer item',
+      {grid: ['$given.xs', '[util]/each', {as: 'x', service: ['[util]/each', {on: '$given.ys', service: ['[pair]/of', {x: '@x', y: '@'}]}]}]},
+      [['a1', 'a2'], ['b1', 'b2']]],
+    ['a try inside an iteration reading the item',
+      {grid: ['$given.xs', '[util]/each', {as: 'x', service: ['[util]/try', {service: ['[pair]/of', {x: '@x', y: 0}]}]}]},
+      ['a0', 'b0']],
+    ['an each in a catch reading that catch\'s error',
+      {
+        grid: ['$given.xs', '[util]/each', {
+          service: ['[failing]/on', {item: '@'}],
+          catch: ['[util]/each', {on: '$given.ys', service: ['[pair]/of', {x: '@err.args.item', y: '@'}]}]
+        }]
+      },
+      [['a1', 'a2'], ['b1', 'b2']]]
+  ]
+
+  for (const [description, phases, expected] of cases) {
+    it(`tells items apart: ${description}`, async () => {
+      const result = await query({given: {xs: ['a', 'b'], ys: [1, 2]}, services, phases, select: '$grid'})
+      assert.deepEqual(result, expected)
+    })
+  }
+
+  it('misses its Cache entry when a phase the calls it holds read has changed', async () => {
+    const cache = memoryStore()
+    const config = (label) => ({
+      given: {label},
+      services,
+      runtime: {...nodeRuntime, cache},
+      phases: {
+        label: ['[util]/template', {text: '$given.label'}],
+        grid: ['[util]/each', {on: [1], cache: true, service: ['[pair]/of', {x: '$label.text', y: '@'}]}]
+      },
+      select: '$grid'
+    })
+    assert.deepEqual(await query(config('a')), ['a1'])
+    assert.deepEqual(await query(config('b')), ['b1'])
+  })
+
+  it('records what it read in its Run State entry; a call reading nothing outside keeps its fields\' hash', async () => {
+    const runState = memoryStore()
+    const config = {given: {xs: ['a']}, services, phases: {grid: ['$given.xs', '[util]/each', {as: 'x', service: ['[util]/try', {service: ['[pair]/of', {x: '@x', y: 0}]}]}]}}
+    await query(config, {runState})
+    const {calls} = plan(config)
+    const entryAt = async (address) => (await runState.list(calls.find(c => c.address === address).formHash))[0]
+
+    assert.deepEqual((await entryAt('$grid.@1a1')).reads, {'@x': 'a'})
+    assert.equal((await entryAt('$grid.@1')).reads, undefined)
+  })
+})

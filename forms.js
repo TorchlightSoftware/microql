@@ -87,8 +87,9 @@ function callForm(call, scope, env) {
 
   const positions = {}
   for (const [field, position] of Object.entries(call.positions)) {
-    const item = field === 'onError' ? {errorOf: input} : {itemOf: input}
-    positions[field] = stepsForm(position.steps, enterPosition(position, scope, item), env)
+    const item = {itemOf: input}
+    const entered = field === 'catch' ? enterPosition(position, scope, {errorOf: input}, item) : enterPosition(position, scope, item)
+    positions[field] = stepsForm(position.steps, entered, env)
   }
 
   const form = {...data, positions}
@@ -99,7 +100,7 @@ function callForm(call, scope, env) {
 
 /**
  * The forms of every call in a compiled Query, against one trigger payload.
- * @returns {Object} {calls: Map(address → {form, hash}), phases: {name → hash}, query: hash}
+ * @returns {Object} {calls: Map(address → {form, hash}), phases: {name → hash}, queryHash: hash}
  */
 export function formsOf(compiled, {trigger} = {}) {
   const env = {nodes: {given: compiled.given, trigger}, phases: {}, calls: new Map()}
@@ -109,10 +110,10 @@ export function formsOf(compiled, {trigger} = {}) {
     env.phases[name] = stepsForm(compiled.phases[name].steps, rootScope, env).at(-1)
   }
 
-  const onError = compiled.settings.onError
-  if (onError) {
-    stepsForm(onError.steps, enterPosition(onError, rootScope, {errorOf: 'run'}), env)
+  const handler = compiled.settings.catch
+  if (handler) {
+    stepsForm(handler.steps, enterPosition(handler, rootScope, {errorOf: 'phase'}), env)
   }
 
-  return {calls: env.calls, phases: env.phases, query: hashOf(env.phases)}
+  return {calls: env.calls, phases: env.phases, queryHash: hashOf(env.phases)}
 }

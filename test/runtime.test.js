@@ -6,16 +6,12 @@ import query from '../index.js'
 // Core, as a platform calls it: its own runtime, a fresh Run State.
 const runCore = (config, options) => coreQuery(config, {runState: memoryStore(), ...options})
 
-// A runtime that keeps what it prints and records.
+// A runtime that keeps what it logs.
 const recordingRuntime = () => {
-  const printed = []
-  const failures = []
+  const logged = []
   return {
-    printed,
-    failures,
-    print: (text, {color} = {}) => printed.push({text, color}),
-    inspect: (value) => JSON.stringify(value),
-    recordFailure: async (location, record) => failures.push({location, ...record}),
+    logged,
+    log: (text, options) => logged.push({text, ...options}),
     cache: memoryStore()
   }
 }
@@ -54,27 +50,24 @@ describe('init', () => {
     assert.deepEqual(order, ['init', 'run'])
   })
 
-  it('hands util the runtime for print and recordFailure', async () => {
+  it('hands util the runtime\'s log, for inspect and log', async () => {
     const runtime = recordingRuntime()
     await runCore({
       runtime,
       phases: {
-        printed: ['[util]/print', {on: 'hello', color: 'blue'}],
-        failed: ['[util]/eq', {
-          l: 'x',
-          r: 1,
-          onError: ['@', '[util]/recordFailure', {location: 'failures/eq'}],
-          ignoreErrors: true,
-          precheck: {r: ['string']}
+        shown: ['[util]/inspect', {on: 'hello', color: 'blue'}],
+        failed: ['[util]/try', {
+          service: ['[util]/eq', {l: 'x', r: 1, precheck: {r: ['string']}}],
+          catch: ['@err', '[util]/log', {to: 'failures/eq'}]
         }]
       }
     })
 
-    assert.deepEqual(runtime.printed, [{text: 'hello', color: 'blue'}])
-    assert.equal(runtime.failures.length, 1)
-    assert.equal(runtime.failures[0].location, 'failures/eq')
-    assert.equal(runtime.failures[0].address, '$failed.@1')
-    assert.equal(runtime.failures[0].key, '[util]/eq')
+    const shown = runtime.logged.find(entry => !entry.to)
+    const failed = runtime.logged.find(entry => entry.to)
+    assert.deepEqual(shown, {text: 'hello', color: 'blue', to: undefined})
+    assert.equal(failed.to, 'failures/eq')
+    assert.match(failed.text, /^Error: \[\$failed\.@1a1 - \[util\]\/eq\] Service Call Validation precheck failed/)
   })
 
 })
@@ -97,6 +90,15 @@ describe('what core requires of its caller', () => {
       await assert.rejects(coreQuery({...config, ...extra}, options), error)
     })
   }
+
+  it('refuses to run a service that requires a key the runtime lacks', async () => {
+    const mailer = serviceFromTable({requires: ['send'], async '/mail'() { return 'sent' }})
+    await assert.rejects(runCore({runtime: recordingRuntime(), services: {mailer}, phases: {a: ['[mailer]/mail', {}]}}), {
+      code: 'missing-capability',
+      address: '$a.@1',
+      message: '[$a.@1] Service \'mailer\' requires runtime.send, which this runtime doesn\'t provide'
+    })
+  })
 })
 
 describe('$trigger', () => {

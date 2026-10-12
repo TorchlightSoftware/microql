@@ -322,7 +322,7 @@ describe('Validation Integration Tests', () => {
       ['undefined schema descriptors', {value: undefined}, /Invalid option: expected one of/],
       ['null schema descriptors', {value: null}, /Invalid option: expected one of/],
       ['invalid array format - non-string first element', {value: [123, 'modifier']}, /Invalid option: expected one of/],
-      ['invalid array format - empty array', {value: []}, /Invalid option: expected one of/],
+      ['invalid array format - empty array', {value: []}, /Array descriptors must start with a valid type name/],
       ['malformed enum - no values', {value: ['enum']}, /Enum must have an array of values/],
       ['malformed enum - empty values array', {value: ['enum', []]}, /Enum must have an array of values/]
     ]

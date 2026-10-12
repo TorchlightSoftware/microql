@@ -337,7 +337,7 @@ describe('Rate Limit Tests', () => {
         },
         phases: {
           first: ['[sometimes]/process', {input: 'ok'}],
-          second: ['[sometimes]/process', {input: 'fail', ignoreErrors: true}],
+          second: ['[util]/try', {service: ['[sometimes]/process', {input: 'fail'}], catch: ['[util]/when', {test: false, otherwise: null}]}],
           // a distinct input: identical calls share one result and run once
           third: ['[sometimes]/process', {input: 'ok again'}]
         },
@@ -346,7 +346,7 @@ describe('Rate Limit Tests', () => {
 
       // First and third should succeed, second should fail but be ignored
       assert.strictEqual(result.first.processed, 'ok')
-      assert.strictEqual(result.second, null) // Failed but ignored
+      assert.strictEqual(result.second, null) // failed, and caught
       assert.strictEqual(result.third.processed, 'ok again')
 
       // Rate limiting should still apply

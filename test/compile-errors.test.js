@@ -71,18 +71,42 @@ describe('Compile-time errors', () => {
       {given: {x: 1}, phases: {a: ['[echo]/echo', {on: '$given.x', as: 'x'}]}},
       {code: 'misplaced-as', address: '$a.@1'},
       /as: names an iteration, but \[echo\]\/echo takes no call/],
-    ['@err outside any onError',
+    ['@err outside any catch',
       {phases: {a: ['[echo]/echo', {on: '@err'}]}},
       {code: 'unknown-reference', address: '$a.@1'},
-      /\[\$a\.@1\] Unknown reference '@err': no enclosing onError/],
-    ['@@err with only one enclosing onError',
-      {phases: {a: ['[echo]/echo', {on: 1, onError: ['[echo]/echo', {on: '@@err'}]}]}},
-      {code: 'unknown-reference', address: '$a.@1a1'},
-      /\[\$a\.@1a1\] Unknown reference '@@err': it is inside only 1 onError/],
+      /\[\$a\.@1\] Unknown reference '@err': no enclosing catch/],
+    ['@@err with only one enclosing catch',
+      {phases: {a: ['[util]/try', {service: ['[echo]/echo', {on: 1}], catch: ['[echo]/echo', {on: '@@err'}]}]}},
+      {code: 'unknown-reference', address: '$a.@1e1'},
+      /\[\$a\.@1e1\] Unknown reference '@@err': it is inside only 1 catch/],
+    ['catch on a call that holds no calls',
+      {phases: {a: ['[echo]/echo', {on: 1, catch: ['[echo]/echo', {on: '@err'}]}]}},
+      {code: 'misplaced-catch', address: '$a.@1'},
+      /\[\$a\.@1\] catch: handles failures of the calls a call holds, but \[echo\]\/echo holds none. To catch a single call, hold it in \[util\]\/try/],
+    ['the retired onError',
+      {phases: {a: ['[echo]/echo', {on: 1, onError: ['[echo]/echo', {on: '@err'}]}]}},
+      {code: 'retired-key', address: '$a.@1'},
+      /'onError' is retired. Use catch: on the call holding the calls whose failures it handles/],
+    ['the retired ignoreErrors',
+      {phases: {a: ['[echo]/echo', {on: 1, ignoreErrors: true}]}},
+      {code: 'retired-key', address: '$a.@1'},
+      /'ignoreErrors' is retired/],
+    ['the retired skipOutputErrors',
+      {given: {xs: [1]}, phases: {a: ['$given.xs', '[util]/each', {service: ['[echo]/echo', {on: '@'}], skipOutputErrors: true}]}},
+      {code: 'retired-key', address: '$a.@1'},
+      /'skipOutputErrors' is retired. Use catch: to handle each failure, then skip: \['error'\] to leave them out/],
+    ['the retired Query-level onError',
+      {settings: {onError: ['[echo]/echo', {on: '@err'}]}, phases: {a: ['[echo]/echo', {on: 1}]}},
+      {code: 'retired-key', address: 'settings'},
+      /'onError' is retired/],
+    ['a retired util resource',
+      {phases: {a: ['[util]/print', {on: 1}]}},
+      {code: 'refused-key', address: '$a.@1'},
+      /\[util\]\/print is retired. Use \[util\]\/inspect/],
     ['err as a binding name',
       {given: {xs: [1]}, phases: {a: ['$given.xs', '[util]/each', {as: 'err', service: ['[echo]/echo', {on: '@err'}]}]}},
       {code: 'reserved-name', address: '$a.@1'},
-      /'err' is reserved for the error in onError/],
+      /'err' is reserved for the error in catch/],
     ['a phase named given',
       {phases: {given: ['[echo]/echo', {on: 1}]}},
       {code: 'reserved-name', address: '$given'},
@@ -189,7 +213,7 @@ describe('Compile-time errors', () => {
 describe('error codes', () => {
   const read = (file) => readFile(new URL(`../${file}`, import.meta.url), 'utf8')
   const raised = async () => {
-    const sources = await Promise.all(['compile.js', 'graph.js', 'types.js'].map(read))
+    const sources = await Promise.all(['compile.js', 'graph.js', 'types.js', 'execute.js'].map(read))
     const codes = sources.flatMap(source => [...source.matchAll(/(?:fail\([^,]+, |code: |issue\()'([a-z-]+)'/g)].map(([, code]) => code))
     return [...new Set(codes)].sort()
   }
@@ -201,7 +225,7 @@ describe('error codes', () => {
 
   it('documents exactly the codes core raises', async () => {
     const codes = await raised()
-    assert.equal(codes.length, 21)
+    assert.equal(codes.length, 23)
     assert.deepEqual(await documented(), codes)
   })
 })

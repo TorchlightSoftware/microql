@@ -6,7 +6,8 @@
  * plainest way to answer both: resources ('/each') map to an operation, or to
  * one operation per verb ({GET, POST}). An operation is {description, input,
  * output, call} (see declaration.js), or just its call when it declares
- * nothing. `init` and `tearDown` in the table are the service's lifecycle.
+ * nothing. `init` and `tearDown` in the table are the service's lifecycle,
+ * and `requires` lists the runtime keys it uses.
  *
  * Operations and hooks run with the table as `this`, so a table can keep the
  * runtime it was given at init.
@@ -35,7 +36,7 @@ const verbsOf = (byVerb) => [...byVerb.keys()].join(', ')
 
 /**
  * A service answering from a table: lookup and operations, plus the table's
- * init and tearDown when it has them.
+ * requires, init and tearDown when it has them.
  */
 export function serviceFromTable(table) {
   const resources = operationsByResource(table)
@@ -56,6 +57,7 @@ export function serviceFromTable(table) {
   return {
     lookup,
     operations: () => [...resources.values()].flatMap(byVerb => [...byVerb.values()]),
+    ...(table.requires && {requires: table.requires}),
     ...(table.init && {init: (runtime) => table.init(runtime)}),
     ...(table.tearDown && {tearDown: () => table.tearDown()})
   }

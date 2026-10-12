@@ -7,19 +7,27 @@
  * Run, so what depends only on the call is worked out then, not per execution.
  * They are applied in canonical order, outermost first:
  *
- *   arguments → debug → error handling → run state → cache → precheck
+ *   arguments → debug → error label → run state → cache → precheck
  *   → rate limit → concurrency → retry → postcheck → timeout → the operation
  *
- * The Run State and the Cache sit inside error handling, so only successes
- * are reused, and outside validation, so a reused result was already checked.
+ * A failure is thrown, labelled with the innermost call that raised it, until
+ * a catch handles it. A call's catch wraps each invocation of the calls it
+ * holds, not the call itself: the handler's result takes the failed
+ * invocation's place, and the holding call carries on. Retry sits inside, so
+ * a catch sees only failures that outlasted their retries.
+ *
+ * The Run State and the Cache record only successes, and sit outside
+ * validation, so a reused result was already checked.
  * A postcheck failure is retried like any other — a model's next answer may
  * fit — while a precheck failure isn't, since no attempt changes the arguments.
  */
 
-import {mapReferences, parseReference, resolveReference} from './reference.js'
+import {mapReferences, parseReference, resolveReference, resolveRead} from './reference.js'
 import {VALIDATION_NAMES, getServiceColorName, mapValues, defaults, setPaths} from './common.js'
 import {hashOf} from './forms.js'
-import {validate} from './validation.js'
+import {validate} from './zodly.js'
+import {format} from './format.js'
+import {toErrorData} from './errors.js'
 
 
 // A call's label in errors and logs: its address and service key.
@@ -30,8 +38,21 @@ const labelOf = (call) => `[${call.address} - ${call.key}]`
 export const resolveArgs = (value, scope, nodes) =>
   mapReferences(value, text => resolveReference(parseReference(text), scope, nodes))
 
-// Resolves the call's data, injects settings-tagged fields, and hands each
-// call field over as a function of its input, each at its field path.
+// What a catch makes of a failure: the handler's result, given the failure as
+// error data, and the item whose call failed, if any. Without a handler, or
+// once the Run is aborted, the failure stands.
+export const catchWith = (handler, scope, run, item) => (error) => {
+  if (!handler || run.signal?.aborted) throw error
+  return run.runPosition(handler, scope, toErrorData(error), item)
+}
+
+// The input hash: of the call's fields, and of what the calls it holds read
+// from outside it, when they read anything.
+const inputHash = (inputs, reads) => Object.keys(reads).length ? hashOf({inputs, reads}) : hashOf(inputs)
+
+// Resolves the call's data and its closure, injects settings-tagged fields,
+// and hands each call field over as a function of its input, each at its field
+// path. Each invocation's failure goes to the call's catch.
 const withArgs = (next, call) => {
   const positions = servicePositions(call)
   return async (_args, inv) => {
@@ -40,10 +61,11 @@ const withArgs = (next, call) => {
     const settingsArgs = mapValues(resolveArgs(call.settingsArgs, scope, run.nodes),
       value => defaults(value, call.settings))
     const services = Object.fromEntries(positions.map(([field, position]) =>
-      [field, (input) => run.runPosition(position, scope, input)]))
+      [field, (input) => run.runPosition(position, scope, input).catch(catchWith(call.positions.catch, scope, run, input))]))
 
     inv.inputs = setPaths(data, settingsArgs)
-    inv.input = hashOf(inv.inputs)
+    inv.reads = Object.fromEntries(call.closure.map(read => [read.key, resolveRead(read, scope, run.nodes)]))
+    inv.input = inputHash(inv.inputs, inv.reads)
     return next(setPaths(inv.inputs, services), inv)
   }
 }
@@ -52,59 +74,34 @@ const withDebug = (next) => async (args, inv) => {
   const {call, run} = inv
   const {settings} = call
   const color = getServiceColorName(call.parts.service)
-  const show = (value) => run.runtime.inspect(value, settings.inspect)
+  const show = (value) => format(value, settings.inspect)
   const startTime = Date.now()
 
-  run.runtime.print(`${labelOf(call)} Called with args:\n${show(inv.inputs)}`, {color})
+  run.runtime.log(`${labelOf(call)} Called with args:\n${show(inv.inputs)}`, {color})
   const result = await next(args, inv)
-  run.runtime.print(`${labelOf(call)} Completed in ${Date.now() - startTime}ms returning:\n${show(result)}`, {color})
+  run.runtime.log(`${labelOf(call)} Completed in ${Date.now() - startTime}ms returning:\n${show(result)}`, {color})
   return result
 }
 
 // Labels an error with the call that raised it, once: the innermost call wins.
+// The address means something only in its Query version (queryHash); the
+// call's form hash finds its entries in the Run State and the Cache.
 function labelError(error, inv) {
   if (error.address) return
-  error.message = `${labelOf(inv.call)} ${error.message}`
-  error.address = inv.call.address
-  error.key = inv.call.key
-  error.query = inv.run.forms.query
+  const {call, run} = inv
+  error.message = `${labelOf(call)} ${error.message}`
+  error.address = call.address
+  error.key = call.key
+  error.queryHash = run.forms.queryHash
+  error.formHash = run.forms.calls.get(call.address).hash
   error.args = inv.inputs
 }
 
-// What a failed call returns instead: onError's result with ignoreErrors,
-// null with ignoreErrors alone; otherwise the error stands.
-async function recover(error, {call, scope, run}) {
-  const {onError} = call.positions
-  const {ignoreErrors} = call.settings
-  if (!onError) {
-    if (ignoreErrors) return null
-    throw error
-  }
-
-  const handled = await run.runPosition(onError, scope, error).then(
-    result => ({result}),
-    handlerError => ({handlerError})
-  )
-  if (handled.handlerError) {
-    const message = `${labelOf(call)} onError handler failed: ${handled.handlerError.message}`
-    console.warn(message)
-    if (!ignoreErrors) throw new Error(message)
-    return null
-  }
-  if (ignoreErrors) return handled.result
+// an aborted Run labels nothing: the abort passes through untouched
+const withErrorLabel = (next) => (args, inv) => next(args, inv).catch(error => {
+  if (!inv.run.signal?.aborted) labelError(error, inv)
   throw error
-}
-
-const withErrorHandling = (next) => async (args, inv) => {
-  try {
-    return await next(args, inv)
-  } catch (error) {
-    // an aborted Run handles nothing: the abort passes through untouched
-    if (inv.run.signal?.aborted) throw error
-    labelError(error, inv)
-    return recover(error, inv)
-  }
-}
+})
 
 // Reuses a result the Run State already holds for this form and input —
 // unless the Run reruns this call — and runs identical calls in flight once.
@@ -126,7 +123,7 @@ const withRunState = (next, call, run) => {
 async function recordResult(next, args, inv, form) {
   const {call, run} = inv
   const startedAt = new Date()
-  const entry = {address: call.address, input: inv.input, inputs: inv.inputs, startedAt: startedAt.toISOString()}
+  const entry = {address: call.address, input: inv.input, inputs: inv.inputs, ...(call.closure.length && {reads: inv.reads}), startedAt: startedAt.toISOString()}
   try {
     const output = await next(args, inv)
     await run.runState.set(form, inv.input, {...entry, status: 'done', output, duration: Date.now() - startedAt})
@@ -169,8 +166,8 @@ const withCache = (next, call, run) => {
 
 // Validates a value against the call's schemas for one order (precheck or
 // postcheck), in the given designations' order.
-function check(value, order, designations, {call, run}) {
-  const show = (shown) => run.runtime.inspect(shown, call.settings.inspect)
+function check(value, order, designations, {call}) {
+  const show = (shown) => format(shown, call.settings.inspect)
   for (const designation of designations) {
     const schema = call.validators[order][designation]
     if (!schema) continue
@@ -229,9 +226,9 @@ const withTimeout = (next) => async (args, inv) => {
   }
 }
 
-// The positions a call hands its service as functions: all but onError, which
-// MicroQL runs itself when the call fails.
-const servicePositions = (call) => Object.entries(call.positions).filter(([field]) => field !== 'onError')
+// The positions a call hands its service as functions: all but catch, which
+// MicroQL runs itself when one of them fails.
+const servicePositions = (call) => Object.entries(call.positions).filter(([field]) => field !== 'catch')
 
 // A call that holds other calls (an `each`) doesn't take a concurrency slot,
 // or it would starve the calls it is waiting on, and has no timeout of its
@@ -244,7 +241,7 @@ function wrappersFor(call, run) {
   return [
     withArgs,
     settings.debug && withDebug,
-    withErrorHandling,
+    withErrorLabel,
     withRunState,
     settings.cache && withCache,
     hasChecks(validators, 'precheck') && withPrecheck,

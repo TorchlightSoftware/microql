@@ -21,7 +21,7 @@ const query = {
   given: {baseUrl: 'https://a.example', ids: [1, 2]},
   trigger: {kind: 'schedule', schema: {at: ['string']}},
   services: {branch},
-  settings: {onError: ['[util]/template', {failed: true}]},
+  settings: {catch: ['[util]/template', {failed: true}]},
   phases: {
     categories: ['[branch]/extract', {url: '$given.baseUrl'}],
     listings: [
@@ -32,7 +32,7 @@ const query = {
           ['@', '[branch]/choose', {
             pass: ['[util]/template', {id: '@id'}],
             fail: ['[util]/template', {missing: '@id'}],
-            onError: ['[util]/template', {error: '@.message'}]
+            catch: ['[util]/template', {error: '@.message'}]
           }]
         ]
       }],
@@ -48,7 +48,7 @@ describe('plan()', () => {
     assert.deepEqual(planned.phases.map(p => [p.name, p.dependencies]), [['categories', []], ['listings', ['categories']]])
     assert.deepEqual(planned.roots.map(r => r.name), ['given', 'trigger'])
     assert.equal(describeSchema(planned.roots[0].type), '{baseUrl: string, ids: array of number}')
-    assert.match(planned.query, /^[0-9a-f]{64}$/)
+    assert.match(planned.queryHash, /^[0-9a-f]{64}$/)
   })
 
   // [description, Query trigger block, payload, trigger type]
@@ -74,12 +74,19 @@ describe('plan()', () => {
       '$listings.@1a1',
       '$listings.@1a2',
       '$listings.@1a2a1', // fail: letters follow sorted key order
-      '$listings.@1a2b1', // onError
-      '$listings.@1a2c1', // pass
+      '$listings.@1a2b1', // pass
+      '$listings.@1a2e1', // catch: always e
       '$listings.@2',
-      'settings.onError.@1'
+      'settings.catch.@1'
     ])
     for (const call of calls) assert.match(call.formHash, /^[0-9a-f]{64}$/)
+  })
+
+  it('letters catch e, so adding one moves no other address', () => {
+    const addresses = (fields) => plan({services: {branch}, phases: {a: ['[branch]/choose', {on: true, ...fields}]}}).calls.map(c => c.address).sort()
+    const withoutCatch = {pass: ['[util]/template', {}], fail: ['[util]/template', {}]}
+    assert.deepEqual(addresses(withoutCatch), ['$a.@1', '$a.@1a1', '$a.@1b1'])
+    assert.deepEqual(addresses({...withoutCatch, catch: ['[util]/template', {}]}), ['$a.@1', '$a.@1a1', '$a.@1b1', '$a.@1e1'])
   })
 
   it('shows identical calls as two addresses with one form hash', () => {
@@ -104,10 +111,10 @@ describe('Service Call Addresses ↔ JSON paths', () => {
     ['$listings.@1a1.@type', ['phases', 'listings', 0, 2, 'service', 0, 1, '@type']],
     ['$listings.@1a2', ['phases', 'listings', 0, 2, 'service', 1]],
     ['$listings.@1a2a1', ['phases', 'listings', 0, 2, 'service', 1, 2, 'fail']],
-    ['$listings.@1a2b1.error', ['phases', 'listings', 0, 2, 'service', 1, 2, 'onError', 1, 'error']],
-    ['$listings.@1a2c1.id', ['phases', 'listings', 0, 2, 'service', 1, 2, 'pass', 1, 'id']],
+    ['$listings.@1a2b1.id', ['phases', 'listings', 0, 2, 'service', 1, 2, 'pass', 1, 'id']],
+    ['$listings.@1a2e1.error', ['phases', 'listings', 0, 2, 'service', 1, 2, 'catch', 1, 'error']],
     ['$listings.@2.value', ['phases', 'listings', 1, 1, 'value']],
-    ['settings.onError.@1.failed', ['settings', 'onError', 1, 'failed']]
+    ['settings.catch.@1.failed', ['settings', 'catch', 1, 'failed']]
   ]
 
   for (const [address, path] of cases) {
@@ -136,7 +143,7 @@ describe('type inference', () => {
   })
 
   it('types @ inside each as one item of the list it iterates (fromList)', () => {
-    const types = typesOf(query, '$listings.@1a2c1')
+    const types = typesOf(query, '$listings.@1a2b1')
     assert.equal(describeSchema(types.args.id.actual), 'number')
   })
 
@@ -169,8 +176,8 @@ describe('type inference', () => {
     assert.equal(describeSchema(types.args.on.actual), '{url: string, images?: array of {src: string}}')
   })
 
-  it('types onError\'s @ as an error', () => {
-    const types = typesOf(query, '$listings.@1a2b1')
+  it('types catch\'s @ as error data', () => {
+    const types = typesOf(query, '$listings.@1a2e1')
     assert.equal(describeSchema(types.args.error.actual), 'string')
   })
 
@@ -205,7 +212,7 @@ describe('type inference', () => {
       ['$given.urls', '[util]/each', {service: ['[branch]/extract', {url: '@'}]}],
       'array of {url: string, images?: array of {src: string}}'],
     ['flattenEach returns what its call returns, flattened into one list',
-      ['$given.groups', '[util]/flattenEach', {service: ['@', '[util]/removeNulls']}],
+      ['$given.groups', '[util]/flattenEach', {service: ['@', '[util]/filter', {service: ['[util]/exists', {value: '@'}]}]}],
       'array of string'],
     ['filter returns the list it was given (fromField)',
       ['$given.urls', '[util]/filter', {service: ['[util]/exists', {value: '@'}]}],
@@ -213,6 +220,15 @@ describe('type inference', () => {
     ['a call\'s own postcheck over its declared output',
       ['[branch]/extract', {url: '$given.u', postcheck: {url: ['string']}}],
       '{url: string}'],
+    ['each returns what its catch does in place of a failed item',
+      ['$given.urls', '[util]/each', {service: ['[branch]/extract', {url: '@'}], catch: ['@err', '[util]/log']}],
+      'array of {url: string, images?: array of {src: string}} | error'],
+    ['each leaves out the members of its items\' type that fit skip',
+      ['$given.urls', '[util]/each', {service: ['[branch]/extract', {url: '@'}], catch: ['@err', '[util]/log'], skip: ['error']}],
+      'array of {url: string, images?: array of {src: string}}'],
+    ['try returns what its call returns',
+      ['$given.u', '[util]/try', {service: ['[branch]/extract', {url: '@'}], catch: ['@err', '[util]/log']}],
+      '{url: string, images?: array of {src: string}} | error'],
     ['any where nothing is declared',
       ['[util]/when', {test: true, then: 1, otherwise: 2}],
       'any']
@@ -225,6 +241,20 @@ describe('type inference', () => {
       assert.equal(describeSchema(phases[0].returns), returns)
     })
   }
+
+  it('types the as: name inside a catch as the item whose call failed', () => {
+    const {calls} = plan({
+      given: {urls: ['a']},
+      services: {branch},
+      phases: {a: ['$given.urls', '[util]/each', {as: 'url', service: ['[branch]/extract', {url: '@url'}], catch: ['[util]/template', {failed: '@url'}]}]}
+    })
+    assert.equal(describeSchema(calls.find(c => c.address === '$a.@1e1').types.args.failed.actual), 'string')
+  })
+
+  it('types each phase as its steps\' return or the Query catch\'s', () => {
+    const {phases} = plan({given: {u: 'x'}, services: {branch}, settings: {catch: ['@err', '[util]/log']}, phases: {a: ['[branch]/extract', {url: '$given.u'}]}})
+    assert.equal(describeSchema(phases[0].returns), '{url: string, images?: array of {src: string}} | error')
+  })
 
   it('requires the calls flattenEach holds to return lists', () => {
     const {errors} = plan({given: {urls: ['a']}, services: {branch}, phases: {a: ['$given.urls', '[util]/flattenEach', {service: ['[branch]/extract', {url: '@'}]}]}})

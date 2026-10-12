@@ -201,18 +201,25 @@ query {
 
 ```javascript
 phases: {
-  user: ['[users]/getUser', {
-    id: '$given.userId',
-    onError: ['[fallback]/getDefaultUser'],      // Service-level fallback
-    retry: 3,                                   // Built-in retry
-    timeout: 5000,                             // Built-in timeout
-    ignoreErrors: false                        // Continue on error
+  user: ['[util]/try', {
+    service: ['[users]/getUser', {
+      id: '$given.userId',
+      retry: 3,                                 // Built-in retry
+      timeout: 5000                             // Built-in timeout
+    }],
+    catch: ['[fallback]/getDefaultUser']        // its result stands in for the user
+  }],
+  // each order that fails is logged and left out; the rest carry on
+  orders: ['$given.orderIds', '[util]/each', {
+    service: ['[orders]/get', {id: '@'}],
+    catch: ['@err', '[util]/log', {to: 'failed/orders.log'}],
+    skip: ['error']
   }]
 }
 
-// Global error handling
+// A phase that fails anyway is handled here, and the Run carries on
 settings: {
-  onError: ['[logger]/logError']                 // Global error handler
+  catch: ['@err', '[logger]/logError']
 }
 ```
 

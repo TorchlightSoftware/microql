@@ -173,9 +173,9 @@ describe('abort', () => {
     return service
   }
 
-  const gatedQuery = (gate, onError) => ({
+  const gatedQuery = (gate, handler) => ({
     services: {gate: serviceFromTable(gate)},
-    settings: onError ? {onError} : {},
+    settings: handler ? {catch: handler} : {},
     phases: {
       quick: ['[gate]/quick', {}],
       waiting: [['[gate]/wait', {after: '$quick'}], ['[gate]/after', {}]]
@@ -207,12 +207,28 @@ describe('abort', () => {
     assert.deepEqual(gate.calls, [])
   })
 
-  it('does not run the global onError handler', {timeout: 2000}, async () => {
+  it('does not run the Query\'s catch', {timeout: 2000}, async () => {
     const gate = gated()
     const handled = []
     gate['/handle'] = async () => { handled.push('handled') }
     const controller = new AbortController()
     const run = query(gatedQuery(gate, ['[gate]/handle', {}]), {signal: controller.signal})
+
+    await gate.started
+    controller.abort()
+    await assert.rejects(run, {name: 'AbortError'})
+    assert.deepEqual(handled, [])
+  })
+
+  it('does not run a call\'s catch', {timeout: 2000}, async () => {
+    const gate = gated()
+    const handled = []
+    gate['/handle'] = async () => { handled.push('handled') }
+    const controller = new AbortController()
+    const run = query({
+      services: {gate: serviceFromTable(gate)},
+      phases: {waiting: ['[util]/each', {on: [1], service: ['[gate]/wait', {}], catch: ['[gate]/handle', {}]}]}
+    }, {signal: controller.signal})
 
     await gate.started
     controller.abort()

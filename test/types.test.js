@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
 import {z} from 'zod'
-import {any, isAny, schemaOfValue, schemaAtPath, elementOf, valueOf, compare, describeSchema} from '../types.js'
+import {any, isAny, schemaOfValue, schemaAtPath, elementOf, valueOf, compare, describeSchema, eitherOf, without} from '../types.js'
+import {errorSchema} from '../errors.js'
 
 describe('describeSchema', () => {
   // [schema, description]
@@ -158,4 +159,38 @@ describe('compare', () => {
     assert.equal(describeSchema(issue.expected), 'string')
     assert.equal(describeSchema(issue.actual), 'number')
   })
+})
+
+describe('eitherOf', () => {
+  // [description, one, other, the union described]
+  const cases = [
+    ['joins two schemas', z.string(), z.number(), 'string | number'],
+    ['flattens unions into one', z.union([z.string(), z.number()]), errorSchema, 'string | number | error'],
+    ['adds nothing for never, what a call that always throws returns', z.string(), z.never(), 'string'],
+    ['is never when both are', z.never(), z.never(), 'never']
+  ]
+
+  for (const [description, one, other, union] of cases) {
+    it(description, () => {
+      assert.equal(describeSchema(eitherOf(one, other)), union)
+    })
+  }
+})
+
+describe('without', () => {
+  // [description, schema, removed, what's left]
+  const cases = [
+    ['removes the members that fit', z.union([z.string(), errorSchema]), errorSchema, 'string'],
+    ['removes members fitting any member of a union', z.union([z.string(), z.null(), errorSchema]), z.union([z.null(), errorSchema]), 'string'],
+    ['keeps a schema with nothing that fits', z.string(), errorSchema, 'string'],
+    ['keeps any, which might be anything', z.union([any, errorSchema]), errorSchema, 'any'],
+    ['is never when everything fits', errorSchema, errorSchema, 'never'],
+    ['keeps the schema when nothing is removed', z.string(), undefined, 'string']
+  ]
+
+  for (const [description, schema, removed, left] of cases) {
+    it(description, () => {
+      assert.equal(describeSchema(without(schema, removed)), left)
+    })
+  }
 })

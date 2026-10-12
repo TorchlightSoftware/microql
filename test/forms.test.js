@@ -134,7 +134,7 @@ describe('form hashes', () => {
     const one = formsOf(compile(query), {trigger: {url: 'one'}})
     const two = formsOf(compile(query), {trigger: {url: 'two'}})
     assert.notEqual(one.calls.get('$a.@1').hash, two.calls.get('$a.@1').hash)
-    assert.notEqual(one.query, two.query)
+    assert.notEqual(one.queryHash, two.queryHash)
   })
 
   it('returns a readable form that holds upstream hashes, not upstream forms', () => {

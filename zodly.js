@@ -1,17 +1,39 @@
 /**
- * @fileoverview Simplified Validation System for MicroQL
+ * @fileoverview zodly — MicroQL's schema shorthand, parsed into zod.
  *
- * Clean, dynamic approach that follows MicroQL patterns:
- * - Try direct Zod access first
- * - Strict error messages for unknown types
- * - Let Zod handle complexity
- * - Functional composition over loops
+ * A descriptor is a type name ('string'), an array of a type name and its
+ * modifiers (['string', 'email', 'optional']), an object of descriptors (a
+ * shape), or a zod schema, anywhere. Types are zod's primitives and wrappers,
+ * plus `error`: an error as data.
  */
 
 import {z} from 'zod'
 import {getIn, mapValues} from './common.js'
+const PRIMITIVE_TYPES = ['string', 'number', 'boolean', 'date', 'any', 'unknown', 'void', 'undefined', 'null', 'error']
 
-const PRIMITIVE_TYPES = ['string', 'number', 'boolean', 'date', 'any', 'unknown', 'void', 'undefined', 'null']
+/**
+ * An error as data: a JSON-LD node of type Error, with an Error's name and
+ * message, and any other fields — `cause`, by convention, is the error
+ * behind it, in the same form:
+ *
+ *   {'@type': 'Error', name: 'TypeError', message: 'not a number', cause: {...}}
+ *
+ * Only `@type`, `name` and `message` are checked, so a host may add fields of
+ * its own. `@type` is the string 'Error'; JSON-LD's list form isn't
+ * recognised, since its check can't be serialized.
+ */
+export const errorSchema = z.looseObject({
+  '@type': z.literal('Error'),
+  name: z.string(),
+  message: z.string()
+})
+
+// The types zod doesn't name itself.
+const OWN_TYPES = {error: () => errorSchema}
+
+// A primitive type's schema.
+const primitive = (type) => OWN_TYPES[type]?.() ?? z[type]()
+
 const WRAPPER_TYPES = ['array', 'object', 'union', 'enum', 'nullable', 'optional', 'tuple', 'function']
 
 // Zod enums for validation
@@ -43,17 +65,15 @@ const DescriptorSchema = z.lazy(() => z.union([
   z.record(z.string(), DescriptorSchema)
 ]))
 
-// How a value is shown in a validation message when no runtime inspect is given.
+// How a value is shown in a validation message when the caller gives no `show`.
 const showAsJson = (value) => JSON.stringify(value)
 
-/**
- * Format Zod error messages into MicroQL error format; `show` renders a value
- * (the runtime's inspect, at execution).
- */
 // A zod issue's path as text: `.` for the value itself, else like `items[0].name`.
 const pathText = (path) => path.length === 0 ? '.' : path.map((segment, index) =>
   typeof segment === 'number' ? `[${segment}]` : index === 0 ? segment : `.${segment}`).join('')
 
+// A zod error as MicroQL's message: one line per issue, with its path and the
+// value found there, rendered by `show` (format, at execution).
 function formatError(zodError, value, show = showAsJson) {
   const issues = zodError?.issues || []
   const errorMessages = issues.map(err => {
@@ -119,7 +139,7 @@ function parseSchemaRecursive(descriptor) {
 
   // String: direct type lookup
   if (typeof descriptor === 'string') {
-    return z[descriptor]()
+    return primitive(descriptor)
   }
 
   // Array: [type, ...args]
@@ -207,15 +227,15 @@ function parseSchemaRecursive(descriptor) {
 
     if (type === 'tuple') {
       const schemas = args.filter(arg => Array.isArray(arg) || typeof arg === 'string')
-      const modifiers = args.filter(arg => typeof arg === 'string' && !['string', 'number', 'boolean', 'date', 'any', 'unknown', 'void', 'undefined', 'null'].includes(arg))
+      const modifiers = args.filter(arg => typeof arg === 'string' && !PRIMITIVE_TYPES.includes(arg))
       const tupleSchema = z.tuple(schemas.map(parseSchemaRecursive))
       return applyModifiers(tupleSchema, modifiers)
     }
 
     // Handle primitive types with modifiers (e.g., ['string', 'email', 'optional'])
-    if (PRIMITIVE_TYPES.includes(type) && z[type] && typeof z[type] === 'function') {
+    if (PRIMITIVE_TYPES.includes(type)) {
       const modifiers = args.filter(arg => typeof arg === 'string' || typeof arg === 'object' || arg instanceof RegExp)
-      return applyModifiers(z[type](), modifiers)
+      return applyModifiers(primitive(type), modifiers)
     }
 
     // If we get here, it's an unknown type

@@ -18,9 +18,11 @@ const leads = await query({
       service: ['POST [claude]/qualify', {
         company: '@',
         criteria: 'manufacturing, shipping, or industrial repair',
-        cache: true,
-        ignoreErrors: true
-      }]
+        cache: true
+      }],
+      // a member Claude can't qualify is logged and left out; the rest carry on
+      catch: ['@err', '[util]/log', {to: 'failed/qualify.log'}],
+      skip: ['error']
     }],
 
     contacts: ['$qualified', '[util]/filter', {service: ['[util]/exists', {value: '@.fit'}]}],
@@ -76,7 +78,7 @@ A call is named by its **service key**, `[VERB] [service]/resource`: `POST [clau
 | `$name.path` | A phase's result, or `$given` — the inputs you supply |
 | `@` / `@.path` | The value flowing in: the previous call in a chain, the current item of an `each` |
 | `@name.path` | The current item of the enclosing iteration named `name` by `as:` |
-| `@err.path` | The error, inside an `onError` handler (`@@err` for the one outside it) |
+| `@err.path` | The failure, inside a `catch` (`@@err` for the one outside it) |
 
 Paths are `.field` and `[index]` segments: `$listings[0].images[1].src`. A path that names nothing gives `undefined`.
 
@@ -154,25 +156,29 @@ Real pipelines fail: a page won't load, a model returns junk, an API rate-limits
 | `retry: 3` | Try again, up to 3 more times — including when the result fails its `postcheck` |
 | `timeout: 30000` | Fail after 30s |
 | `postcheck: {...}` | Treat a wrong-shaped success as a failure: a [Service Call Validation](docs/validation.md) |
-| `onError: [...]` | Run a handler with the error as `@` (in a chain, `@err`) |
-| `ignoreErrors: true` | Carry on: the call returns the handler's result, or `null` |
+
+A failure is thrown, and fails the call holding it, and the one holding that, up to the Run, until a **`catch`** handles it. A `catch` sits on a call that holds other calls (`each`, `filter`, `try`, ...) and handles a failure of any of them, from anywhere below: it receives the failure as `@err`, sees the failed item by the call's `as:` name, and what it returns takes the failed call's place. The holding call carries on with the rest. A `catch` that throws fails the holding call in turn.
 
 ```javascript
 listings: ['$categories', '[util]/each', {as: 'category',
   service: ['[scraper]/extract', {
     url: '@category.href',
-    postcheck: {images: ['array', ['object'], {min: 1}]},
-    onError: ['@', '[util]/recordFailure', {location: 'failed/listings'}],
-    ignoreErrors: true
-  }]
+    postcheck: {images: ['array', ['object'], {min: 1}]}
+  }],
+  // log each page that failed, and leave it out; keep going with the rest
+  catch: ['@err', '[util]/log', {to: 'failed/listings.log'}],
+  skip: ['error']
 }],
-// drop the pages that failed, keep going with the rest
-found: ['$listings', '[util]/removeErrors'],
 ```
 
-An error names the call that raised it by its address: `[$listings.@1a1 - [scraper]/extract] Timed out after 30000ms`.
+- **The failure is data**: `{'@type': 'Error', name, message, cause, address, key, queryHash, formHash, args}`, a JSON-LD node of type Error with the address and arguments of the call that raised it. It's plain JSON, so it is stored and resumed like any result, and the `error` [validation type](docs/validation.md) matches it.
+- **`skip`** on `each` and `flattenEach` leaves out the results that fit a schema: `['error']`, `['null']`, or `['union', ['error'], ['null']]`.
+- **To fail anyway**, rethrow: `catch: [['@err', '[util]/log', {to: 'failed.log'}], ['@', '[util]/throw']]`. Or fail with an error of your own, keeping the failure as its cause: `catch: ['[util]/throw', {on: 'Listings stopped', cause: '@err'}]`.
+- **To catch a single call**, hold it in `[util]/try`: `['[util]/try', {service: ['[scraper]/extract', {...}], catch: [...]}]`.
+- **Retries come first**: a `catch` sees only a failure that outlasted its retries. An aborted Run catches nothing.
+- **`settings.catch`** handles each phase that fails: its result is the phase's, and the Run carries on.
 
-`settings.onError` is a handler for the Run as a whole.
+An error names the call that raised it by its address: `[$listings.@1a1 - [scraper]/extract] Timed out after 30000ms`. A `catch` is always lettered `e` (`$listings.@1e1`), so adding one moves no other address.
 
 ## Built-in Utilities
 
@@ -180,14 +186,17 @@ The `util` service is always available:
 
 | Resource | Does |
 |---|---|
-| `/each` | Run a call for every item; `skipInputErrors`, `skipOutputErrors` |
-| `/flattenEach` | Run a call that returns a list for every item, and concatenate the lists |
+| `/each` | Run a call for every item; `skip` leaves out the results that fit a schema |
+| `/flattenEach` | Run a call that returns a list for every item, and concatenate the lists; `skip` too |
 | `/filter` | Keep the items a service is truthy for; `mode: 'remove'` removes them |
+| `/try` | Run one call, so a `catch` can handle its failure |
+| `/throw` | Fail with the error given (as data), or with an error saying what was given; `cause` attaches the error behind it |
 | `/when` | `then` when `test` is truthy, otherwise `otherwise` |
-| `/removeErrors`, `/removeNulls`, `/removeSuccesses`, `/partitionErrors` | Sort out the results of `ignoreErrors` |
+| `/partitionErrors` | Split a list into `{successes, failures}` |
 | `/concat`, `/pick`, `/merge`, `/template` | Shape data |
 | `/eq`, `/gt`, `/lt`, `/exists`, `/length` | Tests |
-| `/print`, `/recordFailure` | Output and failure logs |
+| `/format` | A value as text |
+| `/inspect`, `/log` | Write a value out, formatted with the Query's `inspect` settings or as plain text, to the console or to a destination (`to:`); both return it |
 
 ## Settings
 
@@ -216,7 +225,7 @@ What the node runtime (`import query from 'microql'`) does with results:
 |---|---|---|---|
 | Run State | in memory, fresh for each `query()` call, unless you pass `{runState: fileStore(dir)}` | the call, or as long as `dir` exists | start a new store, or `await fileStore(dir).clear()` |
 | Cache, for calls with `cache` set | the `.cache` directory under the current working directory | until its ttl passes; expired entries are swept when the store is first used | `rm -rf .cache`, or `await nodeRuntime.cache.clear()` |
-| Failures from `util/recordFailure` | one JSON file per failure under the `location` you give | until you delete them | delete the files |
+| What `util/log` and `util/inspect` write `to:` a destination | appended to that file | until you delete it | delete the file |
 
 `fileStore(dir)` keeps one directory per call form and one JSON file per input, so a Run State on disk can be inspected by hand. How core keys and reuses results is in [Runtime Integration § Storage](docs/runtime-integration.md#storage).
 
@@ -249,7 +258,7 @@ chmod +x queries/lead-gen.js
 ./queries/lead-gen.js https://www.example-chamber.org/directory
 ```
 
-Run it again the same day and every finished call is read back from `runs/`; start a new run by using a new directory. Failures recorded with `util/recordFailure` land in JSON files you can inspect and replay.
+Run it again the same day and every finished call is read back from `runs/`; start a new run by using a new directory. Failures a `catch` logs `to:` a file are there to inspect.
 
 ## Examples
 

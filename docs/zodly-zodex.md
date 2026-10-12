@@ -1,25 +1,10 @@
 # Zodly syntax vs zodex
 
-Every example in `docs/validation.md`, translated to the JSON that zodex 4 produces for the same zod schema. The translations follow zodex's serializer (`zodex/dist/zerialize.js`) and type definitions (`types.d.ts`). They're written by hand, not generated, so treat anything marked **verify** as unconfirmed.
+Zodly is a serialization format for zod.  It was designed to be ergonomic for authorship and readibility.  Here is a comparison with zodex, another serialization format for zod.
 
-How zodex spells the things our syntax has modifiers for:
+## Simple Type Declarations
 
-| zodly | zodex |
-|---|---|
-| `'optional'` | `"isOptional": true` on the type |
-| `'nullable'` | `"isNullable": true` on the type |
-| `{min: 5}` on a number | `"min": 5, "minInclusive": true` |
-| `'positive'` | `"min": 0` (exclusive, so no `minInclusive`) |
-| `{min, max}` on a string | `"min"`, `"max"` |
-| `{min, max}` on an array | `"minLength"`, `"maxLength"` |
-| `'email'`, `'url'`, `'uuid'` | `"kind": "email"` / `"url"` / `"uuid"` |
-| `{regex: /…/}` | `"regex": "…"` (a string), plus `"flags"` if any |
-| `'int'` | `"format": "safeint"` (**verify**: zodex reads the number format from the schema's own definition, so an `.int()` check may be dropped) |
-| `'finite'` | nothing: zod 4 numbers are always finite |
-| shorthand object `{a: …}` | `{"type": "object", "properties": {"a": …}}` |
-| `['enum', ['a', 'b']]` | `{"type": "enum", "values": {"a": "a", "b": "b"}}` |
-
-## Array syntax
+The default (shorthand) notation for a type in `zodly` is to simply use its name inside an array.  Any additional array members are interpreted as modifiers.  An object can be passed as the last array member which allows any modifiers that themselves take parameters.
 
 | zodly | zodex |
 |---|---|
@@ -34,8 +19,12 @@ How zodex spells the things our syntax has modifiers for:
 | `['number', 'nullable']` | `{"type": "number", "isNullable": true}` |
 | `['string', 'optional', 'nullable']` | `{"type": "string", "isOptional": true, "isNullable": true}` |
 | `['number', 'positive', 'int', 'optional']` | `{"type": "number", "min": 0, "format": "safeint", "isOptional": true}` |
+| `['error']` | an error in canonical object representation (below) |
+| `['error', 'optional']` | the same, with `"isOptional": true` |
 
-## Object syntax
+## Object Declarations
+
+Anywhere a type is expected, object syntax is also permissible, and represents an object in the target document.  Since type refinements always occur as the second argument of an array, zodly can represent objects in direct form without a nested "properties".
 
 ```javascript
 // zodly
@@ -57,7 +46,9 @@ How zodex spells the things our syntax has modifiers for:
 }
 ```
 
-## Wrapper types
+## Complex Declarations
+
+For annotating more complex data types, every type is expressible in array notation, and can be nested in this way.
 
 | zodly | zodex |
 |---|---|
@@ -81,15 +72,35 @@ How zodex spells the things our syntax has modifiers for:
 | `['nullable', ['string']]` | `{"type": "string", "isNullable": true}` |
 | `['optional', ['number']]` | `{"type": "number", "isOptional": true}` |
 
-## Direct zod schema
+## Error Declaration
 
-`z.string().min(8).regex(/^[A-Z]/)`:
+zod and zodex do not have any canonical way of expressing an error.
 
-```json
-{"type": "string", "min": 8, "regex": "^[A-Z]"}
+zodly's `error` is an error as data: a JSON-LD node of type `Error`, with an Error's `name` and `message`. Only those three are checked; any other field is allowed, so whoever produces errors can add fields of its own. By convention `cause` is the error behind it, in the same form.
+
+```javascript
+{'@type': 'Error', name: 'TypeError', message: 'not a number', cause: {'@type': 'Error', name: 'Error', message: 'bad input'}}
 ```
 
-## Service Call and Service Schema Validations (the opening example)
+Using this form, you can make any Error recognizeable by zodly simply by adding `@type: 'Error` to it.
+
+Since zod/zodex have no error type of their own, they would represent this as the underlying object schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "@type": {"type": "literal", "values": ["Error"]},
+    "name": {"type": "string"},
+    "message": {"type": "string"}
+  },
+  "catchall": {"type": "unknown"}
+}
+```
+
+Unlike JSON-LD, zodly does not support a list of types (`['Error', 'Thing']`). That's because this is not a serializable form in zodex, and we thought it safer to maintain compatibility than to chase after an edge case.  If you want this: tell us.
+
+## Service Call and Service Schema Validations (from MicroQL)
 
 ```javascript
 // zodly: the Query author's check on one call
@@ -456,4 +467,4 @@ precheck: {
 ## What the comparison shows
 
 - **zodex is 2–4× longer**, mostly because of `"type"`, `"properties"` and `"element"` wrappers. The shorthand object and the positional `['array', ['string']]` are where our syntax saves the most.
-- **Neither is lossless the other way.** Our syntax has no counterpart for zodex's `discriminatedUnion`, `record`, `literal`, defaults or descriptions. zodex has no clean `int` (**verify**) and turns regexes into strings.
+- **Neither is lossless the other way.** Our syntax has no counterpart for zodex's `discriminatedUnion`, `record`, `literal`, defaults or descriptions. zodex has no clean `int` (**verify**), turns regexes into strings, and has no name for `error`.

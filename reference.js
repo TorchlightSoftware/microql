@@ -7,10 +7,10 @@
  *
  *   $name.path   a node — a phase, $given or $trigger — global, resolved by name
  *   @ / @.path   the value flowing in: the previous call in a chain, the current
- *                item of an iteration, or the error in onError
+ *                item of an iteration, or the error in catch
  *   @name.path   the value of the enclosing iteration named `name` by `as:`
- *   @err.path    the error of the enclosing onError; @@err the one outside
- *                it, @@@err the next, counting onError nesting only
+ *   @err.path    the error of the enclosing catch; @@err the one outside
+ *                it, @@@err the next, counting catch nesting only
  *
  * Every string beginning with $ or @ is a reference; one that doesn't parse is
  * an error, so a literal like "$5.00" is supplied through `given`. One pattern
@@ -22,7 +22,7 @@ import {isPlainObject, mapValues, getIn} from './common.js'
 const PATH = '((?:\\.[^.[\\]]+|\\[\\d+\\])*)'
 const REFERENCE = new RegExp(`^([$@])([A-Za-z_]\\w*)?${PATH}$`)
 
-// The error ladder: `@err`, `@@err`, `@@@err` — one @ per onError outward.
+// The error ladder: `@err`, `@@err`, `@@@err` — one @ per catch outward.
 const ERROR_REFERENCE = new RegExp(`^(@+)err${PATH}$`)
 
 // One path segment: `.field` or an index `[0]`.
@@ -82,11 +82,13 @@ export function parseReference(text) {
 export const rootScope = {flow: null, bindings: {}, errors: []}
 
 // The scope inside a position, for one input: a lone call receives the input
-// as `@`, the position's `as:` names it, and onError adds it to the errors.
-export const enterPosition = (position, scope, input) => ({
+// as `@`, and the position's `as:` names the item, which is the input itself
+// except in a catch, whose input is the error and whose item is the one whose
+// call failed; catch adds its input to the errors.
+export const enterPosition = (position, scope, input, item = input) => ({
   flow: position.chain ? null : input,
-  bindings: position.as ? {...scope.bindings, [position.as]: input} : scope.bindings,
-  errors: position.field === 'onError' ? [...scope.errors, input] : scope.errors
+  bindings: position.as ? {...scope.bindings, [position.as]: item} : scope.bindings,
+  errors: position.field === 'catch' ? [...scope.errors, input] : scope.errors
 })
 
 // What an `@` reference names in a scope, before its path.
@@ -94,6 +96,28 @@ export const scopedRoot = ({name, depth}, scope) =>
   depth ? scope.errors[scope.errors.length - depth]
     : name ? scope.bindings[name]
       : scope.flow
+
+// A reference as a read: what it names in terms that hold anywhere in the
+// Query — a node or a binding by name, an error by the level of the catch that
+// holds it (1 the outermost) — plus its path, and a key naming the read. A
+// call's reads from outside itself are part of its input (see compile.js).
+export function readOf({sigil, name, depth, path}, scope) {
+  const level = depth ? scope.errors - depth + 1 : undefined
+  const root = level ? `err${level}` : `${sigil}${name ?? ''}`
+  return {sigil, name, level, path, key: [root, ...path].join('.')}
+}
+
+// Whether a read, made inside a call compiled in this scope, names something
+// bound outside it: any node, a binding the scope already has, or the error of
+// a catch around it. The flow `@` is always bound inside.
+export const readsOutside = (read, scope) =>
+  read.sigil === '$' || (read.level ? read.level <= scope.errors : Boolean(read.name) && scope.bindings.includes(read.name))
+
+// The value a read names in a runtime scope.
+export function resolveRead({sigil, name, level, path}, scope, nodes) {
+  const root = sigil === '$' ? nodes[name] : level ? scope.errors[level - 1] : scope.bindings[name]
+  return getIn(root, path)
+}
 
 // The value a reference names, given the current scope and the resolved nodes.
 export function resolveReference(ref, scope, nodes) {

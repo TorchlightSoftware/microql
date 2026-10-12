@@ -88,6 +88,19 @@ A Query's validators use a JSON-based syntax that gets transformed into Zod sche
 // Combining multiple modifiers (flat syntax)
 ['string', 'optional', 'nullable']
 ['number', 'positive', 'int', 'optional']
+
+// A failure as data, as a catch receives it (see below)
+['error']
+```
+
+**`error`** is a failure as data, a JSON-LD node of type Error: `{'@type': 'Error', name, message, ...}`, recognised by those three fields whatever else it has. It is what a `catch` receives as `@err`, and what stands in a list where a `catch` put a failure ([Runtime Integration § Errors as data](runtime-integration.md#errors-as-data)). It is the schema core exports as `errorSchema`, and it composes like any type: `['error', 'optional']`, `['union', ['error'], ['null']]`, `['array', ['error']]`. `util/each`'s `skip` takes these schemas to leave failures out of its results:
+
+```javascript
+['$given.urls', '[util]/each', {
+  service: ['[scraper]/extract', {url: '@'}],
+  catch: ['@err', '[util]/log', {to: 'failed/extract.log'}],
+  skip: ['error']
+}]
 ```
 
 ### 2. Object Syntax

@@ -40,12 +40,14 @@ Both export:
 | `memoryStore()` | an [entry store](#entry-stores) in memory |
 | `util` | the built-in service |
 | `serviceFromTable(table)` | a service written as a table of operations; see the [Service Development Guide](service_guide.md#writing-a-service-as-a-table) |
+| `errorSchema`, `isErrorData`, `toErrorData`, `fromErrorData` | [errors as data](#errors-as-data) |
+| `format(value, options)` | a value as text, the same on every runtime |
 
 ## Storage
 
 ### Entry stores
 
-**An entry store is a dumb key-value store.** Core decides the keys and the entries; the store decides only where they live. Keys are pairs of strings, a [form hash](#forms) and an input hash (the hash of a call's resolved input fields on one execution). So a form holds one entry per distinct input, and several inside an iteration.
+**An entry store is a dumb key-value store.** Core decides the keys and the entries; the store decides only where they live. Keys are pairs of strings, a [form hash](#forms) and an input hash: the hash of every value a call reads on one execution — its own resolved fields, and, for a call that holds other calls, what those read from outside it (an enclosing iteration's item, an enclosing `catch`'s error, a phase). The form says where each value comes from; the input hash says what it was. So a form holds one entry per distinct input, and several inside an iteration.
 
 Core calls three async methods, so a store may live anywhere: in memory, on disk, in a database, in KV.
 
@@ -66,7 +68,7 @@ To build one, implement those three methods over anything that stores JSON. Core
 | **Run State** | one [Run](#runs) | the platform | `execute(compiled, {runState})` |
 | **Cache** | every Run, for calls with `cache` set | the runtime | `runtime.cache` |
 
-**A Run State entry** holds `address`, `input`, `inputs` (the resolved input fields), `status` (`done` or `failed`), `output` or `error` (`{message, attempts, at}`), `startedAt` and `duration`. Core reuses only `done` entries, so a failed call runs again on resume.
+**A Run State entry** holds `address`, `input`, `inputs` (the resolved input fields), `reads` (for a call that holds others, what they read from outside it, by reference), `status` (`done` or `failed`), `output` or `error` (`{message, attempts, at}`), `startedAt` and `duration`. Core reuses only `done` entries, so a failed call runs again on resume. A failure a `catch` handled is the holding call's output, as [error data](#errors-as-data), so it is stored and reused like any other result.
 
 ### The Cache
 
@@ -116,7 +118,7 @@ Aborting the `signal` stops the Run at once:
 - Each running phase reports `cancelled`, along with the addresses of its calls still in flight.
 - `execute` rejects with the signal's reason, an `AbortError` unless you gave another.
 - Results already finished stay in the Run State.
-- The global `onError` handler does not run.
+- No `catch` runs, the Query's included.
 - Calls already sent to a service may still complete on the far side; services are never told about the abort.
 
 ### Progress updates
@@ -173,7 +175,7 @@ Pass `trigger` only to look up results from a Run that had that payload. Form ha
 
 | Field | Is |
 |---|---|
-| `query` | the Query's form hash |
+| `queryHash` | the Query's form hash |
 | `roots` | `$given` (when the Query has one) and `$trigger`, as root nodes ahead of the first column, with their [types](#types) |
 | `columns` | the phases that run together, in order |
 | `phases` | each phase's `name`, `dependencies`, `formHash` and return type |
@@ -201,10 +203,10 @@ A moved subtree whose inputs didn't change has a new address and the same form, 
 An address names one call within one Query version, for editors, logs and errors. It is calculated, never stored in the Query, and never valid as a reference.
 
 - **Numbering.** Calls are numbered and call fields are lettered, alternating. `$listings.@1` is the phase's first call, `@1a` is that call's first call field, and `@1a2` is the second call in that field's chain. An address that names a call always ends in a digit.
-- **Letters.** Field letters follow sorted field-path order (the ordering RFC 8785 uses), so letters never depend on how a document was written. `onError` is lettered along with the other fields.
+- **Letters.** Field letters follow sorted field-path order (the ordering RFC 8785 uses), so letters never depend on how a document was written. `catch` is always `e`, for error, and call fields skip it (`a`, `b`, `c`, `d`, `f`, …), so adding or removing a `catch` moves no other address: `$listings.@1e1` is the first call of `$listings.@1`'s catch.
 - **Fields.** A call's fields follow its address by name: `$listings.@1.url`. Field names that begin with `@` (JSON-LD's `@type`) stay ordinary path segments.
-- **The global handler** is addressed `settings.onError.@1`.
-- **Versions.** An address is only meaningful against the Query version it came from, so errors carry `address`, `key` and `query` (the Query's form hash).
+- **The Query's catch** is addressed `settings.catch.@1`.
+- **Versions.** An address is only meaningful against the Query version it came from, so errors carry `address`, `key` and `queryHash` (the Query's form hash), and `formHash`, the call's own, which finds its entries in the Run State and the Cache.
 
 `addressToPath(plan, address)` and `pathToAddress(plan, path)` convert between an address and a JSON path into the Query document, so an editor can map a selection to a call and back.
 
@@ -233,6 +235,16 @@ Declarations are described in the [Service Development Guide](service_guide.md#d
 
 Every error core reports carries a `code`, so a platform can decide what each means to its users without reading messages. Messages are for people, and may change; codes and addresses are the API.
 
+### Errors as data
+
+A failed call throws, and its failure fails each call holding it in turn, until a `catch` handles it. There the failure becomes data, which `@err` holds inside the handler:
+
+```javascript
+{'@type': 'Error', name, message, cause, address, key, queryHash, formHash, args}
+```
+
+It is zodly's `error` type: a JSON-LD node of type Error, recognised by `@type`, `name` and `message` whatever other fields it has ([Validation](validation.md)). Its fields are the thrown Error's own: `name`, `message`, `cause` (the error behind it, in the same form), any fields the service gave it, and those MicroQL labelled it with. `address` and `key` name the call that raised it, `queryHash` is the Query's form hash, `formHash` the call's own (its key in the Run State and the Cache), and `args` the call's resolved input fields. It is plain JSON, so it survives the Run State and the Cache. Incoming JSON-LD data of `@type` Error is an error too, as far as `skip: ['error']` is concerned. Core exports `errorSchema` to recognise it (it is zodly's `error` type), and `toErrorData` and `fromErrorData` to convert between it and an `Error`. A failure no `catch` handles ends the Run, and `execute` rejects with it as an `Error` carrying the same fields.
+
 ### Compile errors
 
 `compile()`, `plan()` and `query()` throw on a Query that can't run. The error has `message`, `code` and `address`, the [Service Call Address](#service-call-addresses) of the call or node at fault (`$a.@1`, `$trigger`, `select`). A cycle between phases has no single address, so it carries `phases`, the phases in the cycle, instead.
@@ -240,7 +252,7 @@ Every error core reports carries a `code`, so a platform can decide what each me
 | Code | Means |
 |---|---|
 | `invalid-descriptor` | a call isn't `['[VERB] [service]/resource', {...}]`, or its arguments aren't an object |
-| `retired-key` | a key uses the retired `service:action` form; the message names its replacement |
+| `retired-key` | a key uses the retired `service:action` form, or a call or the Query's settings use a retired argument (`onError`, `ignoreErrors`, `skipInputErrors`, `skipOutputErrors`); the message names its replacement |
 | `unknown-service` | no service is registered under the key's name |
 | `not-a-service` | the service has no `lookup(parts)` and `operations()` |
 | `unknown-resource` | the service's `lookup` answered nothing for the key |
@@ -248,12 +260,13 @@ Every error core reports carries a `code`, so a platform can decide what each me
 | `malformed-declaration` | the operation's declaration has an unknown tag or a malformed source |
 | `no-target` | method syntax was used for an operation that declares no target field |
 | `malformed-schema` | a Service Call Validation or the trigger schema can't be parsed |
-| `unknown-reference` | a reference names no phase, node, iteration or enclosing onError |
+| `unknown-reference` | a reference names no phase, node, iteration or enclosing `catch` |
 | `invalid-reference` | a reference is malformed: bare `$`, `@@`, a Service Call Address, `@` where nothing flows in |
 | `reserved-name` | a phase named `given` or `trigger`, or an iteration named `err` |
 | `duplicate-binding` | an iteration name used twice in a Query |
 | `unreachable-input` | a chain in a call field, without `as:` to reach its input |
 | `misplaced-as` | `as:` on a call that holds no nested call |
+| `misplaced-catch` | `catch:` on a call that holds no nested call; hold a single call in `[util]/try` to catch it |
 | `raw-function` | a JavaScript function where a call was expected |
 | `invalid-select` | `select` names something other than a reference |
 | `circular-dependency` | phases that depend on each other; see `phases` |
@@ -270,18 +283,35 @@ Each of `plan().errors` is `{address, code, message, expected, actual}`. `addres
 
 A `postcheck` on the call that produces a value gives it a type, which turns `type-narrowing` into either nothing or a definite answer.
 
+A call field with a `catch` returns its nested call's type or the `catch`'s, as a union; `[util]/throw` returns `never`, which adds nothing, and `skip` removes the members its schema fits. This union is provisional.
+
+### Run errors
+
+`execute` checks what a Run needs before any call starts. Besides the plain errors for a missing runtime or Run State, and a trigger payload that doesn't fit `trigger.schema`:
+
+| Code | Means |
+|---|---|
+| `missing-capability` | a service the Query uses `requires` a runtime key this runtime doesn't provide; `address` is the first call to it |
+
 ## The runtime API
 
 A runtime is a plain object passed as `config.runtime`:
 
 | Capability | Must | Node runtime |
 |---|---|---|
-| `print(text, {color})` | show a line of output | colourised stdout |
-| `inspect(value, options)` | render a value as text, for output and validation messages | `util.inspect` |
-| `recordFailure(location, record)` | keep a failure for later; may be async | a JSON file per failure under `location` |
+| `log(text, {color, to})` | write a line of text: shown, in the named colour if any; or kept at the destination `to`, which the runtime interprets; may be async | stdout in colour; with `to`, appended to that file |
 | `cache` | an [entry store](#entry-stores) whose entries outlive a Run | `fileStore('.cache')` |
 
-The Run State is per Run, so it is an option of `execute`, not a capability of the runtime.
+The Run State is per Run, so it is an option of `execute`, not a capability of the runtime. Text is rendered by core, the same on every runtime: `format` (exported) is what `[util]/format`, `[util]/inspect`, debug output and validation messages all use.
+
+### Capabilities beyond the standard
+
+A Query should run on any runtime that has the services it names, without changes. So services, not Queries, deal with the runtime: a Query calls `[util]/log`, and `util` calls `runtime.log`.
+
+- **A runtime may offer more keys than the standard ones.** That is how new capabilities are tried out.
+- **A service that uses a key lists it in `requires`** (`serviceFromTable` takes it from the table). A Run on a runtime without it fails before any call starts, with `missing-capability`, rather than halfway through.
+- **Name a platform-specific service for what it does, not for the platform**: `[store]`, not `[otto]`. Another platform can then implement the same service, and Queries using it move with it.
+- **To make a key standard, bring it back to the MicroQL maintainers**, with the services that use it. A key every runtime provides is one Queries can rely on everywhere. Avoid vendor prefixes (`x-fs`): renaming one when it becomes standard breaks everything that used it.
 
 ### Services
 
@@ -289,7 +319,7 @@ The Run State is per Run, so it is an option of `execute`, not a capability of t
 
 ### Service init and tearDown
 
-Before a Run begins, core calls an optional `init(runtime)` on each service the plan uses, at most once per runtime; `util` uses it to reach `print` and `recordFailure`. `init` receives instance-wide capabilities only — per-Run state never passes through a service — so a platform may keep its initialized services in a long-lived registry. After a Run, core calls an optional `tearDown()` on each service the Run used.
+Before a Run begins, core calls an optional `init(runtime)` on each service the plan uses, at most once per runtime; `util` uses it to reach `log`. `init` receives instance-wide capabilities only — per-Run state never passes through a service — so a platform may keep its initialized services in a long-lived registry. After a Run, core calls an optional `tearDown()` on each service the Run used.
 
 ## A suggested architecture
 

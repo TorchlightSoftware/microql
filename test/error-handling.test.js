@@ -1,10 +1,12 @@
 import assert from 'node:assert'
-import {describe, it} from 'node:test'
+import {describe, it, after} from 'node:test'
+import os from 'node:os'
+import path from 'node:path'
+import {mkdtemp, rm} from 'node:fs/promises'
 import {z} from 'zod'
-import query, {serviceFromTable} from '../index.js'
+import query, {plan, serviceFromTable, fileStore} from '../index.js'
 
 describe('Error Handling Tests', () => {
-  // Test services
   const errorService = serviceFromTable({
     '/fail': async () => {
       throw new Error('Service failed')
@@ -14,303 +16,146 @@ describe('Error Handling Tests', () => {
     }
   })
 
-  const logService = serviceFromTable({
-    '/logError': async ({on}) => {
-      const errorContext = on
-      //console.log('logError received context:', errorContext)
-      return {
-        logged: true,
-        error: errorContext.message,
-        key: errorContext.key
-      }
-    },
-    '/logQueryError': async ({on}) => {
-      const errorContext = on
-      return {
-        queryLogged: true,
-        error: errorContext.message,
-        address: errorContext.address
-      }
+  // Hands back what it's given, and remembers it.
+  const seen = []
+  const keep = serviceFromTable({
+    '/same': {
+      input: {on: ['target']},
+      call: async ({on}) => { seen.push(on); return on }
     }
   })
 
-  describe('Service-Level Error Handling', () => {
-    it('should call onError handler when service fails', async () => {
-      const config = {
-        services: {error: errorService, log: logService},
-        settings: {debug: false},
-        phases: {
-          result: ['[error]/fail', {onError: ['[log]/logError', {on: '@'}]}]
-        }
-      }
+  const services = {error: errorService, keep}
 
+  describe('a failure without a catch', () => {
+    it('fails the Run, labelled with the call that raised it', async () => {
       await assert.rejects(
-        query(config),
+        query({services, phases: {result: ['[error]/fail', {someArg: 'value'}]}}),
         (error) => {
-          // Verify the error has all expected properties
-          assert.match(error.message, /\[\$result\.@1 - \[error\]\/fail\] Service failed/)
+          assert.match(error.message, /^\[\$result\.@1 - \[error\]\/fail\] Service failed$/)
           assert.strictEqual(error.address, '$result.@1')
           assert.strictEqual(error.key, '[error]/fail')
+          assert.deepStrictEqual(error.args, {someArg: 'value'})
           return true
         }
       )
     })
-
-    it('should ignore errors when ignoreErrors is true', async () => {
-      const config = {
-        services: {error: errorService},
-        phases: {
-          failedQuery: ['[error]/fail', {ignoreErrors: true}],
-          successQuery: ['[error]/succeed', {}]
-        },
-        select: ['$failedQuery', '$successQuery']
-      }
-
-      const result = await query(config)
-      assert.strictEqual(result.failedQuery, null)
-      assert.deepStrictEqual(result.successQuery, {success: true})
-    })
-
-    it('should work with both onError and ignoreErrors', async () => {
-      let errorLogged = false
-
-      const customLog = serviceFromTable({
-        '/track': async ({_on}) => {
-          errorLogged = true
-          return {tracked: true}
-        }
-      })
-
-      const config = {
-        services: {error: errorService, customLog},
-        phases: {
-          result: ['[error]/fail', {
-            onError: ['[customLog]/track', {on: '@'}],
-            ignoreErrors: true
-          }]
-        }
-      }
-
-      const result = await query(config)
-      assert.deepStrictEqual(result.result, {tracked: true})
-      assert.strictEqual(errorLogged, true)
-    })
   })
 
-  describe('Query-Level Error Handling', () => {
-    it('should call query-level onError for unhandled errors', async () => {
-      const config = {
-        services: {error: errorService, log: logService},
+  describe('the Query\'s catch', () => {
+    it('handles each failed phase: its result is the phase\'s, and the Run carries on', async () => {
+      const result = await query({
+        services,
+        settings: {catch: ['[util]/template', {failed: '@err.address'}]},
         phases: {
-          willFail: ['[error]/fail', {}]
-        },
-        onError: ['[log]/logQueryError', {on: '@'}]
-      }
-
-      await assert.rejects(() => query(config), /Service failed/)
-    })
-
-    it('should handle errors in nested service chains', async () => {
-      const chainService = serviceFromTable({
-        '/step1': async () => ({value: 1}),
-        '/step2': async () => {
-          throw new Error('Chain step failed')
+          failed: ['[error]/fail', {}],
+          succeeded: ['[error]/succeed', {}],
+          downstream: ['[util]/template', {saw: '$failed'}]
         }
       })
-
-      const config = {
-        services: {chain: chainService},
-        phases: {
-          chained: [
-            ['[chain]/step1', {}],
-            ['[chain]/step2', {ignoreErrors: true}]
-          ]
-        }
-      }
-
-      const result = await query(config)
-      assert.strictEqual(result.chained, null)
+      assert.deepStrictEqual(result, {
+        failed: {failed: '$failed.@1'},
+        succeeded: {success: true},
+        downstream: {saw: {failed: '$failed.@1'}}
+      })
     })
 
-    it('should call onError chain when service fails', async () => {
-      // on is the target of both, for method syntax
-      const logService = serviceFromTable({
-        '/addContext': {
-          input: {on: ['target']},
-          call: async ({on, severity}) => {
-            // `on` should be the error object
-            on.severity = severity
-            on.timestamp = new Date().toISOString()
-            return on
-          }
-        },
-        '/logError': {
-          input: {on: ['target']},
-          call: async ({on}) => {
-            // `on` should be the enriched error from addContext
-            return {status: 'error', logged: true, severity: on.severity}
-          }
-        }
-      })
-
-      const config = {
-        services: {error: errorService, log: logService},
-        settings: {debug: false},
-        phases: {
-          result: ['[error]/fail', {
-            onError: [
-              // a chain's first step receives nothing; the error is @err
-              ['@err', '[log]/addContext', {severity: 'bad'}],
-              ['@', '[log]/logError']
-            ]
-          }]
-        }
-      }
-
+    it('fails the Run when it throws', async () => {
       await assert.rejects(
-        query(config),
-        (error) => {
-          // Verify the error has all expected properties
-          assert.strictEqual(error.severity, 'bad')
-          assert.match(error.message, /\[\$result\.@1 - \[error\]\/fail\] Service failed/)
-          assert.strictEqual(error.address, '$result.@1')
-          assert.strictEqual(error.key, '[error]/fail')
-          assert.ok(error.timestamp)
-          return true
-        }
+        query({services, settings: {catch: ['@err', '[util]/throw']}, phases: {result: ['[error]/fail', {}]}}),
+        (error) => error.address === '$result.@1' && /Service failed/.test(error.message)
       )
-
     })
   })
 
-  describe('Global Error Handling', () => {
-    it('should ignore errors globally when ignoreErrors is true', async () => {
-      const config = {
-        services: {error: errorService},
-        settings: {ignoreErrors: true},
-        phases: {
-          failedQuery: ['[error]/fail', {}]
-        }
-      }
-
-      const result = await query(config)
-      assert.strictEqual(result.failedQuery, undefined)
+  describe('handlers', () => {
+    it('receive the failure as error data: name, message, address, key, Query version, form hash and args', async () => {
+      seen.length = 0
+      const config = {services, phases: {result: ['[util]/try', {service: ['[error]/fail', {someArg: 'value'}], catch: ['@err', '[keep]/same']}]}}
+      await query(config)
+      const planned = plan(config)
+      assert.deepStrictEqual(seen, [{
+        '@type': 'Error',
+        name: 'Error',
+        message: '[$result.@1a1 - [error]/fail] Service failed',
+        address: '$result.@1a1',
+        key: '[error]/fail',
+        queryHash: planned.queryHash,
+        formHash: planned.calls.find(call => call.address === '$result.@1a1').formHash,
+        args: {someArg: 'value'}
+      }])
     })
 
-    it('should call global onError handler', async () => {
-      let errorLogged = false
-
-      const logService = serviceFromTable({
-        '/logError': async ({on}) => {
-          errorLogged = true
-          return {globallyLogged: true, error: on.message}
-        }
-      })
-
-      const config = {
-        services: {error: errorService, log: logService},
-        settings: {onError: ['[log]/logError', {on: '@'}]},
-        phases: {
-          failedQuery: ['[error]/fail', {}]
-        }
-      }
-
-      await assert.rejects(query(config), /Service failed/)
-      assert.strictEqual(errorLogged, true)
-    })
-
-    it('should call global onError and ignore errors when both are set', async () => {
-      let errorLogged = false
-
-      const logService = serviceFromTable({
-        '/logError': async ({on}) => {
-          errorLogged = true
-          return {globallyLogged: true, error: on.message}
-        }
-      })
-
-      const config = {
-        services: {error: errorService, log: logService},
-        settings: {
-          ignoreErrors: true,
-          onError: ['[log]/logError', {on: '@'}]
-        },
-        phases: {
-          failedQuery: ['[error]/fail', {}]
-        }
-      }
-
-      const result = await query(config)
-      assert.strictEqual(result.failedQuery, undefined)
-      assert.strictEqual(errorLogged, true)
-    })
-  })
-
-  describe('Nested error handlers', () => {
-    it('reaches the outer error as @@err from inside an inner handler', async () => {
-      const seen = []
-      const services = {
-        error: errorService,
-        log: serviceFromTable({
-          async '/record'({inner, outer}) {
-            seen.push({inner, outer})
-            return 'recorded'
-          },
-          async '/flaky'() {
-            throw new Error('handler failed too')
-          }
-        })
-      }
-
+    it('can be a chain, whose first step reaches the error as @err', async () => {
       const result = await query({
         services,
         phases: {
-          result: ['[error]/fail', {
-            onError: ['[log]/flaky', {
-              onError: ['[log]/record', {inner: '@err.message', outer: '@@err.address'}],
-              ignoreErrors: true
-            }],
-            ignoreErrors: true
+          result: ['[util]/try', {
+            service: ['[error]/fail', {}],
+            catch: [['@err', '[keep]/same'], ['[util]/template', {key: '@.key', severity: 'bad'}]]
           }]
         },
         select: '$result'
       })
+      assert.deepStrictEqual(result, {key: '[error]/fail', severity: 'bad'})
+    })
 
-      assert.strictEqual(result, 'recorded')
-      assert.deepStrictEqual(seen, [{inner: '[$result.@1a1 - [log]/flaky] handler failed too', outer: '$result.@1'}])
+    it('reach the outer error as @@err from inside an inner catch', async () => {
+      const result = await query({
+        services,
+        phases: {
+          result: ['[util]/try', {
+            service: ['[error]/fail', {}],
+            catch: ['[util]/try', {
+              service: ['[error]/fail', {inner: true}],
+              catch: ['[util]/template', {inner: '@err.args', outer: '@@err.address'}]
+            }]
+          }]
+        },
+        select: '$result'
+      })
+      assert.deepStrictEqual(result, {inner: {inner: true}, outer: '$result.@1a1'})
     })
   })
 
-  describe('Error Context', () => {
-    it('should provide complete error context to handlers', async () => {
-      let capturedContext = null
-
-      const captureService = serviceFromTable({
-        '/capture': async ({on}) => {
-          capturedContext = on
-          return {captured: true}
+  describe('retry', () => {
+    it('runs before catch: a catch sees only a failure that outlasted its retries', async () => {
+      let attempts = 0
+      const flaky = serviceFromTable({
+        '/once': async () => {
+          attempts++
+          if (attempts === 1) throw new Error('first attempt fails')
+          return 'recovered'
         }
       })
+      const result = await query({
+        services: {flaky},
+        phases: {result: ['[util]/try', {service: ['[flaky]/once', {retry: 1}], catch: ['[util]/template', {caught: true}]}]},
+        select: '$result'
+      })
+      assert.strictEqual(result, 'recovered')
+      assert.strictEqual(attempts, 2)
+    })
+  })
 
+  describe('the Run State', () => {
+    const dirs = []
+    after(() => Promise.all(dirs.map(dir => rm(dir, {recursive: true, force: true}))))
+
+    it('keeps a caught failure as data, message and all, on disk', async () => {
+      const dir = await mkdtemp(path.join(os.tmpdir(), 'microql-errors-'))
+      dirs.push(dir)
       const config = {
-        services: {error: errorService, capture: captureService},
-        settings: {debug: false},
-        phases: {
-          testQuery: ['[error]/fail', {
-            someArg: 'value',
-            onError: ['[capture]/capture', {on: '@'}],
-            ignoreErrors: true
-          }]
-        }
+        given: {items: [1, 2]},
+        services,
+        phases: {result: ['$given.items', '[util]/each', {service: ['[error]/fail', {item: '@'}], catch: ['@err', '[keep]/same']}]},
+        select: '$result'
       }
+      const first = await query(config, {runState: fileStore(dir)})
+      const resumed = await query(config, {runState: fileStore(dir)})
 
-      await query(config)
-
-      assert.ok(capturedContext)
-      assert.match(capturedContext.message, /\[\$testQuery\.@1 - \[error\]\/fail\] Service failed/)
-      assert.strictEqual(capturedContext.address, '$testQuery.@1')
-      assert.strictEqual(capturedContext.key, '[error]/fail')
-      assert.strictEqual(capturedContext.args.someArg, 'value')
+      assert.deepStrictEqual(resumed, first)
+      assert.strictEqual(resumed[0].message, '[$result.@1a1 - [error]/fail] Service failed')
     })
   })
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import {describe, it, beforeEach, afterEach} from 'node:test'
-import query, {serviceFromTable} from '../index.js'
+import query, {plan, serviceFromTable} from '../index.js'
 import util from '../services/util.js'
 import {ANSI_COLORS} from '../index.js'
 
@@ -220,7 +220,7 @@ describe('Util Service Tests', () => {
   describe('Declarations', () => {
     it('lists every operation, verbless and described', () => {
       const operations = util.operations()
-      const resources = ['/concat', '/each', '/eq', '/exists', '/filter', '/flattenEach', '/gt', '/length', '/lt', '/merge', '/partitionErrors', '/pick', '/print', '/recordFailure', '/removeErrors', '/removeNulls', '/removeSuccesses', '/template', '/when']
+      const resources = ['/concat', '/each', '/eq', '/exists', '/filter', '/flattenEach', '/format', '/gt', '/inspect', '/length', '/log', '/lt', '/merge', '/partitionErrors', '/pick', '/template', '/throw', '/try', '/when']
       assert.deepStrictEqual(operations.map(op => op.resource).sort(), resources)
       for (const op of operations) {
         assert.strictEqual(op.method, null, `${op.resource} takes no verb`)
@@ -232,7 +232,7 @@ describe('Util Service Tests', () => {
       const {input, output} = util.lookup({service: 'util', resource: '/each', method: null})
       assert.ok(input.on.includes('target'))
       assert.deepStrictEqual(input.service, [['call', {fromList: 'on'}]])
-      assert.deepStrictEqual(output, [['type', {toList: {fromField: 'service'}}]])
+      assert.deepStrictEqual(output, [['type', {toList: {without: [{fromField: 'service'}, 'skip']}}]])
     })
 
     it('refuses a verb', () => {
@@ -477,197 +477,170 @@ describe('Util Service Tests', () => {
     })
   })
 
-  describe('Map and FlatMap Skip Errors Tests', () => {
-    // Shared test data
-    const item1 = {id: 1, value: 'a'}
-    const item2 = {id: 2, value: 'b'}
-    const item3 = {id: 3, value: 'c'}
-    const err1 = new Error('error1')
-
-    // Service that doubles the id
-    const doubleService = serviceFromTable({
-      async '/double'({item}) {
-        return {id: item.id * 2, value: item.value}
-      },
-      async '/mayFail'({item}) {
-        if (item.shouldFail) {
-          throw new Error(`Failed ${item.id}`)
-        }
+  describe('catch and skip', () => {
+    // Fails the items marked to fail; `same` hands back what it's given.
+    const items = serviceFromTable({
+      async '/process'({item}) {
+        if (item.fail) throw new Error(`Failed ${item.id}`)
         return {id: item.id, processed: true}
+      },
+      async '/listOf'({item}) {
+        if (item.fail) throw new Error(`Failed ${item.id}`)
+        return [item.id, item.id + 10]
+      },
+      async '/isEven'({item}) {
+        if (item.fail) throw new Error(`Failed ${item.id}`)
+        return item.id % 2 === 0
+      },
+      async '/same'({on}) {
+        return on
       }
     })
+    const given = {items: [{id: 1}, {id: 2, fail: true}, {id: 4}]}
+    const run = (phase) => query({given, services: {items}, phases: {result: phase}, select: '$result'})
+    const keepError = ['[items]/same', {on: '@'}]
 
-    // Data-driven tests for skipInputErrors
-    const skipInputTests = [
-      {
-        name: 'skipInputErrors removes errors before mapping',
-        input: [item1, err1, item2, null, item3],
-        skipInputErrors: true,
-        skipOutputErrors: false,
-        expected: [
-          {id: 2, value: 'a'},
-          {id: 4, value: 'b'},
-          {id: 6, value: 'c'}
-        ]
-      },
-      {
-        name: 'without skipInputErrors, processes all items',
-        input: [item1, item2],
-        skipInputErrors: false,
-        skipOutputErrors: false,
-        expected: [
-          {id: 2, value: 'a'},
-          {id: 4, value: 'b'}
-        ]
-      }
+    // [description, phase, result]
+    const cases = [
+      ['each puts what catch returns in place of a failed item',
+        ['$given.items', '[util]/each', {service: ['[items]/process', {item: '@'}], catch: ['[util]/template', {failed: '@err.message'}]}],
+        [{id: 1, processed: true}, {failed: '[$result.@1a1 - [items]/process] Failed 2'}, {id: 4, processed: true}]],
+      ['catch sees the failed item by the as: name',
+        ['$given.items', '[util]/each', {as: 'item', service: ['[items]/process', {item: '@item'}], catch: ['[util]/template', {failed: '@item.id'}]}],
+        [{id: 1, processed: true}, {failed: 2}, {id: 4, processed: true}]],
+      ['skip leaves out the items that fit its schema',
+        ['$given.items', '[util]/each', {service: ['[items]/process', {item: '@'}], catch: keepError, skip: ['error']}],
+        [{id: 1, processed: true}, {id: 4, processed: true}]],
+      ['skip takes any zodly schema',
+        ['$given.items', '[util]/each', {service: ['[items]/process', {item: '@'}], catch: ['[util]/when', {test: false, otherwise: null}], skip: ['union', ['error'], ['null']]}],
+        [{id: 1, processed: true}, {id: 4, processed: true}]],
+      ['a failure ends its chain: the steps after it never see it',
+        ['$given.items', '[util]/each', {
+          as: 'item',
+          service: [['[items]/process', {item: '@item'}], ['@', '[util]/merge', {with: {merged: true}}]],
+          catch: keepError,
+          skip: ['error']
+        }],
+        [{id: 1, processed: true, merged: true}, {id: 4, processed: true, merged: true}]],
+      ['catch handles a failure from anywhere below it',
+        ['$given.items', '[util]/each', {
+          service: ['[util]/each', {on: ['@'], service: ['[items]/process', {item: '@'}]}],
+          catch: ['[util]/template', {failed: true}]
+        }],
+        [[{id: 1, processed: true}], {failed: true}, [{id: 4, processed: true}]]],
+      ['flattenEach flattens what catch returns',
+        ['$given.items', '[util]/flattenEach', {service: ['[items]/listOf', {item: '@'}], catch: ['[util]/concat', {args: [[]]}]}],
+        [1, 11, 4, 14]],
+      ['filter takes what catch returns as the test',
+        ['$given.items', '[util]/filter', {service: ['[items]/isEven', {item: '@'}], catch: ['[util]/exists', {value: null}]}],
+        [{id: 4}]],
+      ['try holds a single call, so a catch can handle its failure',
+        ['[util]/try', {on: {id: 2, fail: true}, service: ['[items]/process', {item: '@'}], catch: ['[util]/template', {failed: true}]}],
+        {failed: true}],
+      ['try returns its call\'s result when it succeeds',
+        ['[util]/try', {on: {id: 1}, service: ['[items]/process', {item: '@'}]}],
+        {id: 1, processed: true}]
     ]
 
-    skipInputTests.forEach(({name, input, skipInputErrors, skipOutputErrors, expected}) => {
-      it(`map: ${name}`, async () => {
-        const result = await query({
-          given: {items: input},
-          services: {doubleService, util},
-          settings: {debug: false},
-          phases: {
-            result: ['$given.items', '[util]/each', {
-              service: ['[doubleService]/double', {item: '@'}],
-              skipInputErrors,
-              skipOutputErrors
-            }]
-          },
-          select: '$result'
+    for (const [description, phase, expected] of cases) {
+      it(description, async () => {
+        assert.deepStrictEqual(await run(phase), expected)
+      })
+    }
+
+    it('catch receives the failure as error data, with the Query version and the call\'s form hash', async () => {
+      const phase = ['$given.items', '[util]/each', {service: ['[items]/process', {item: '@'}], catch: keepError}]
+      const planned = plan({given, services: {items}, phases: {result: phase}})
+      const formHash = planned.calls.find(call => call.address === '$result.@1a1').formHash
+      assert.deepStrictEqual(await run(phase), [
+        {id: 1, processed: true},
+        {'@type': 'Error', name: 'Error', message: '[$result.@1a1 - [items]/process] Failed 2', address: '$result.@1a1', key: '[items]/process', queryHash: planned.queryHash, formHash, args: {item: {id: 2, fail: true}}},
+        {id: 4, processed: true}
+      ])
+    })
+
+    // [description, phase, the Run's error]
+    const failures = [
+      ['without a catch, a failed item fails the call holding it',
+        ['$given.items', '[util]/each', {service: ['[items]/process', {item: '@'}]}],
+        /\[\$result\.@1a1 - \[items\]\/process\] Failed 2/],
+      ['a catch doesn\'t handle the failure of the call it sits on',
+        ['[util]/each', {on: 'not a list', service: ['[items]/process', {item: '@'}], catch: keepError}],
+        /\[\$result\.@1 - \[util\]\/each\] Service Schema Validation precheck failed/],
+      ['throw fails with the error it is given, as it was raised',
+        ['$given.items', '[util]/each', {service: ['[items]/process', {item: '@'}], catch: ['@err', '[util]/throw']}],
+        /^Error: \[\$result\.@1a1 - \[items\]\/process\] Failed 2$/],
+      ['a catch that fails fails the call holding it',
+        ['$given.items', '[util]/each', {service: ['[items]/process', {item: '@'}], catch: ['[util]/gt', {l: 'not a number', r: 1}]}],
+        /\[\$result\.@1e1 - \[util\]\/gt\] Service Schema Validation precheck failed/]
+    ]
+
+    for (const [description, phase, error] of failures) {
+      it(description, async () => {
+        await assert.rejects(run(phase), (thrown) => {
+          assert.match(String(thrown), error)
+          return true
         })
-
-        assert.deepStrictEqual(result, expected)
       })
+    }
+
+    it('throw keeps the address and key of the call that first failed', async () => {
+      await assert.rejects(run(['$given.items', '[util]/each', {service: ['[items]/process', {item: '@'}], catch: ['@err', '[util]/throw']}]),
+        (error) => error.address === '$result.@1a1' && error.key === '[items]/process')
     })
 
-    // Tests for skipOutputErrors
-    it('map: skipOutputErrors removes errors from output', async () => {
-      const input = [
-        {id: 1, shouldFail: false},
-        {id: 2, shouldFail: true},
-        {id: 3, shouldFail: false}
-      ]
-
-      const result = await query({
-        given: {items: input},
-        services: {doubleService, util},
-        settings: {debug: false},
-        phases: {
-          result: ['$given.items', '[util]/each', {
-            service: ['[doubleService]/mayFail', {
-              item: '@',
-              ignoreErrors: true
-            }],
-            skipOutputErrors: true
-          }]
-        },
-        select: '$result'
-      })
-
-      assert.deepStrictEqual(result, [
-        {id: 1, processed: true},
-        {id: 3, processed: true}
-      ])
-    })
-
-    // Tests combining both skip parameters
-    it('map: both skipInputErrors and skipOutputErrors work together', async () => {
-      const input = [
-        {id: 1, shouldFail: false},
-        err1,
-        {id: 2, shouldFail: true},
-        null,
-        {id: 3, shouldFail: false}
-      ]
-
-      const result = await query({
-        given: {items: input},
-        services: {doubleService, util},
-        settings: {debug: false},
-        phases: {
-          result: ['$given.items', '[util]/each', {
-            service: ['[doubleService]/mayFail', {
-              item: '@',
-              ignoreErrors: true
-            }],
-            skipInputErrors: true,
-            skipOutputErrors: true
-          }]
-        },
-        select: '$result'
-      })
-
-      assert.deepStrictEqual(result, [
-        {id: 1, processed: true},
-        {id: 3, processed: true}
-      ])
-    })
-
-    // FlatMap tests
-    it('flattenEach: skipInputErrors works with flattenEach', async () => {
-      const arrayService = serviceFromTable({
-        async '/makeArray'({item}) {
-          return [item.id, item.id + 10]
+    it('throw attaches a cause: here, the failure its catch received', async () => {
+      await assert.rejects(
+        run(['$given.items', '[util]/each', {service: ['[items]/process', {item: '@'}], catch: ['[util]/throw', {on: 'Processing stopped', cause: '@err'}]}]),
+        (error) => {
+          assert.strictEqual(error.message, '[$result.@1e1 - [util]/throw] Processing stopped')
+          assert.strictEqual(error.cause.message, '[$result.@1a1 - [items]/process] Failed 2')
+          assert.strictEqual(error.cause.address, '$result.@1a1')
+          return true
         }
-      })
-
-      const input = [item1, err1, item2, null, item3]
-
-      const result = await query({
-        given: {items: input},
-        services: {arrayService, util},
-        settings: {debug: false},
-        phases: {
-          result: ['$given.items', '[util]/flattenEach', {
-            service: ['[arrayService]/makeArray', {item: '@'}],
-            skipInputErrors: true
-          }]
-        },
-        select: '$result'
-      })
-
-      assert.deepStrictEqual(result, [1, 11, 2, 12, 3, 13])
+      )
     })
 
-    it('flattenEach: skipOutputErrors works with flattenEach', async () => {
-      const arrayService = serviceFromTable({
-        async '/makeArrayOrFail'({item}) {
-          if (item.shouldFail) {
-            throw new Error(`Failed ${item.id}`)
-          }
-          return [item.id, item.id + 10]
-        }
-      })
-
-      const input = [
-        {id: 1, shouldFail: false},
-        {id: 2, shouldFail: true},
-        {id: 3, shouldFail: false}
-      ]
-
-      const result = await query({
-        given: {items: input},
-        services: {arrayService, util},
-        settings: {debug: false},
-        phases: {
-          result: ['$given.items', '[util]/flattenEach', {
-            service: ['[arrayService]/makeArrayOrFail', {
-              item: '@',
-              ignoreErrors: true
-            }],
-            skipOutputErrors: true
-          }]
-        },
-        select: '$result'
-      })
-
-      assert.deepStrictEqual(result, [1, 11, 3, 13])
+    it('throw fails with anything else as an error saying it', async () => {
+      await assert.rejects(run(['[util]/throw', {on: {reason: 'nope'}}]), /\{reason: "nope"\}/)
     })
   })
 
-  describe('Print Function Tests', () => {
+  describe('partitionErrors', () => {
+    const failure = {'@type': 'Error', name: 'Error', message: 'failed'}
+
+    // [description, list, successes, failures]
+    const cases = [
+      ['splits a list into successes and error data', [{id: 1}, failure, null, {id: 3}], [{id: 1}, null, {id: 3}], [failure]],
+      ['keeps every item a success when none failed', [{id: 1}], [{id: 1}], []],
+      ['keeps every item a failure when all failed', [failure, failure], [], [failure, failure]]
+    ]
+
+    for (const [description, list, successes, failures] of cases) {
+      it(description, async () => {
+        assert.deepStrictEqual(await callUtil('/partitionErrors', {on: list}), {successes, failures})
+      })
+    }
+  })
+
+  describe('retired resources', () => {
+    // [resource, what replaced it]
+    const retired = [
+      ['/print', /\[util\]\/inspect/],
+      ['/recordFailure', /\[util\]\/log with to:/],
+      ['/removeErrors', /skip: \['error'\]/],
+      ['/removeNulls', /skip: \['null'\]/],
+      ['/removeSuccesses', /partitionErrors/]
+    ]
+
+    for (const [resource, replacement] of retired) {
+      it(`refuses ${resource}, naming its replacement`, () => {
+        assert.throws(() => util.lookup({service: 'util', resource, method: null}), replacement)
+      })
+    }
+  })
+
+  describe('inspect and log', () => {
     let originalWrite
     let capturedOutput
 
@@ -683,454 +656,71 @@ describe('Util Service Tests', () => {
     })
 
     afterEach(() => {
-      // Restore original stdout.write
       process.stdout.write = originalWrite
     })
 
-    it('should print basic values', async () => {
-      const result = await query({
-        phases: {
-          printed: [
-            '[util]/print',
-            {
-              on: 'Hello World',
-              color: 'blue',
-              ts: false
-            }
-          ]
-        },
-        select: '$printed'
-      })
-
-      // Should return the printed value for chaining
+    it('inspect shows a value in colour and returns it', async () => {
+      const result = await query({phases: {shown: ['[util]/inspect', {on: 'Hello World', color: 'blue'}]}, select: '$shown'})
       assert.strictEqual(result, 'Hello World')
-
-      // Should have captured some output
-      assert(capturedOutput.length > 0, 'Should have captured some output')
-
-      // Find the output that contains the blue color
-      const blueOutput = capturedOutput.find((output) =>
-        output.includes(ANSI_COLORS.blue))
-      assert(blueOutput, 'Should find output with blue color')
-
-      // Should contain the message
-      assert(blueOutput.includes('Hello World'), 'Should contain the message')
+      assert.deepStrictEqual(capturedOutput, [`${ANSI_COLORS.blue}Hello World${ANSI_COLORS.reset}\n`])
     })
 
-    it('should print with query-level inspect settings', async () => {
-      const testData = {
-        users: [
-          {
-            id: 1,
-            name: 'Alice',
-            profile: {
-              email: 'alice@example.com',
-              preferences: {theme: 'dark', notifications: true}
-            }
-          },
-          {
-            id: 2,
-            name: 'Bob',
-            profile: {
-              email: 'bob@example.com',
-              preferences: {theme: 'light', notifications: false}
-            }
-          }
-        ]
-      }
-
+    it('inspect formats with the Query\'s inspect settings', async () => {
+      const users = [{id: 1, profile: {email: 'alice@example.com'}}, {id: 2}]
       const result = await query({
-        given: testData,
-        settings: {
-          inspect: {
-            depth: 1,
-            maxArrayLength: 1,
-            maxStringLength: 20
-          }
-        },
-        phases: {
-          printed: ['[util]/print', {on: '$given.users', color: 'blue', ts: false}]
-        },
-        select: '$printed'
+        given: {users},
+        settings: {inspect: {depth: 1, maxArrayLength: 1}},
+        phases: {shown: ['$given.users', '[util]/inspect']},
+        select: '$shown'
       })
-
-      // Should return the printed value for chaining
-      assert.deepStrictEqual(result, testData.users)
-
-      // Should have captured some output
-      assert(capturedOutput.length > 0, 'Should have captured some output')
-
-      // Find the output that contains the blue color (from our print call)
-      const blueOutput = capturedOutput.find((output) =>
-        output.includes(ANSI_COLORS.blue))
-      assert(blueOutput, 'Should find output with blue color')
-
-      // Should contain ANSI blue color codes
-      assert(blueOutput.includes(ANSI_COLORS.reset), 'Should contain reset color code')
-
-      // Should show truncation due to maxArrayLength: 1
-      assert(
-        blueOutput.includes('... 1 more item') || blueOutput.includes('...'),
-        'Should truncate array due to maxArrayLength setting'
-      )
+      assert.deepStrictEqual(result, users)
+      assert.deepStrictEqual(capturedOutput, ['[{id: 1, profile: [Object]}, ... 1 more items]\n'])
     })
 
-    it('should work with method syntax and custom inspect settings', async () => {
+    it('a call\'s own settings override the Query\'s', async () => {
       await query({
-        given: {
-          message: 'This is a very long string that should be truncated based on settings'
-        },
-        phases: {
-          result: ['$given.message', '[util]/print', {
-            settings: {inspect: {maxStringLength: 30}},
-            color: 'green',
-            ts: false
-          }]
-        }
+        given: {message: 'This is a very long string that should be truncated'},
+        phases: {shown: ['$given.message', '[util]/inspect', {settings: {inspect: {maxStringLength: 9}}}]}
       })
+      assert.deepStrictEqual(capturedOutput, ['This is a... 42 more characters\n'])
+    })
 
-      // Check output
-      assert.strictEqual(capturedOutput.length, 1)
-      const output = capturedOutput[0]
-
-      // Should be a string (not inspected as object)
-      assert(
-        output.includes('This is a very long string'), 'Should contain "very long string"'
-      )
-      assert(
-        !output.includes('should be truncated'), 'Should not contain "truncated"'
-      )
-      assert(output.includes(ANSI_COLORS.green), 'Should contain green color code')
+    it('log writes a value as text and returns it, so a chain carries on with it', async () => {
+      const result = await query({phases: {logged: [['[util]/template', {n: 1}], ['@', '[util]/log'], ['@', '[util]/pick', {fields: ['n']}]]}, select: '$logged'})
+      assert.deepStrictEqual(result, {n: 1})
+      assert.deepStrictEqual(capturedOutput, ['{n: 1}\n'])
     })
   })
 
-  describe('RecordFailure Function Tests', () => {
-    const testFailurePath = './test-failures/util-record-failure'
-
+  describe('log to a destination', () => {
+    const logFile = './test-failures/util-log/failures.log'
     afterEach(async () => {
-      // Clean up test failures directory
       const fs = await import('fs-extra')
-      try {
-        await fs.default.remove(testFailurePath)
-      } catch (_error) {
-        // Ignore cleanup errors
-      }
+      await fs.default.remove('./test-failures/util-log')
     })
 
-    it('should record error with message correctly', async () => {
-      const testService = serviceFromTable({
-        async '/failing'() {
-          throw new Error('Test error message')
+    it('appends each failure a catch logs to the file it names, and keeps the failure as data', async () => {
+      const failing = serviceFromTable({
+        async '/process'({item}) {
+          if (item.fail) throw new Error(`Failed ${item.id}`)
+          return item.id
         }
       })
-
       const result = await query({
-        services: {testService, util},
-        settings: {debug: false},
-        phases: {
-          result: ['[testService]/failing', {
-            onError: ['[util]/recordFailure', {
-              on: '@',
-              location: testFailurePath
-            }],
-            ignoreErrors: true
-          }]
-        },
+        given: {items: [{id: 1, fail: true}, {id: 2}, {id: 3, fail: true}]},
+        services: {failing},
+        phases: {result: ['$given.items', '[util]/each', {service: ['[failing]/process', {item: '@'}], catch: ['@err', '[util]/log', {to: logFile}]}]},
         select: '$result'
       })
+      assert.strictEqual(result[1], 2)
+      assert.match(result[0].message, /Failed 1/)
 
-      // Verify that recordFailure returned the error context
-      assert(result, 'Should return error context from recordFailure')
-
-      // Verify failure file was created
       const fs = await import('fs-extra')
-      const files = await fs.default.readdir(testFailurePath)
-      assert.strictEqual(files.length, 1, 'Should create one failure file')
-
-      // Read the failure record
-      const failureContent = await fs.default.readFile(
-        `${testFailurePath}/${files[0]}`,
-        'utf8'
-      )
-      const failureRecord = JSON.parse(failureContent)
-
-      // Verify the error message is captured correctly
-      assert(failureRecord.error, 'Should have error field')
-      assert.match(
-        failureRecord.error,
-        /Test error message/,
-        'Should contain the original error message'
-      )
-      assert.strictEqual(failureRecord.key, '[testService]/failing')
-      assert.strictEqual(failureRecord.address, '$result.@1')
-    })
-
-    it('should handle recordFailure in a map operation', async () => {
-      const testService = serviceFromTable({
-        async '/processItem'({item}) {
-          if (item.shouldFail) {
-            throw new Error(`Failed to process item ${item.id}`)
-          }
-          return {id: item.id, processed: true}
-        }
-      })
-
-      const items = [
-        {id: 1, shouldFail: false},
-        {id: 2, shouldFail: true},
-        {id: 3, shouldFail: false}
-      ]
-
-      const result = await query({
-        given: {items},
-        services: {testService, util},
-        settings: {debug: false},
-        phases: {
-          results: ['$given.items', '[util]/each', {
-            service: ['[testService]/processItem', {
-              item: '@',
-              onError: ['[util]/recordFailure', {
-                on: '@',
-                location: testFailurePath
-              }],
-              ignoreErrors: true
-            }]
-          }]
-        },
-        select: '$results'
-      })
-
-      // Should have 3 results: 2 successful, 1 error context
-      assert.strictEqual(result.length, 3)
-      assert.deepStrictEqual(result[0], {id: 1, processed: true})
-      assert(result[1].message, 'Second item should be error context')
-      assert.deepStrictEqual(result[2], {id: 3, processed: true})
-
-      // Verify failure file was created for the failing item
-      const fs = await import('fs-extra')
-      const files = await fs.default.readdir(testFailurePath)
-      assert.strictEqual(files.length, 1, 'Should create one failure file')
-
-      const failureContent = await fs.default.readFile(
-        `${testFailurePath}/${files[0]}`,
-        'utf8'
-      )
-      const failureRecord = JSON.parse(failureContent)
-
-      // Verify the error message is captured
-      assert(failureRecord.error, 'Should have error field')
-      assert.match(
-        failureRecord.error,
-        /Failed to process item 2/,
-        'Should contain the original error message'
-      )
-    })
-  })
-
-  describe('Error Removal Function Tests', () => {
-    // Shared test data
-    const item1 = {id: 1}
-    const item2 = {id: 2}
-    const item3 = {id: 3}
-    const err1 = new Error('err1')
-    const err2 = new Error('err2')
-
-    // Shared service for integration tests
-    const testService = serviceFromTable({
-      async '/processItem'({item}) {
-        if (item.shouldFail) {
-          throw new Error(`Failed ${item.id}`)
-        }
-        return {id: item.id, processed: true}
-      },
-      async '/passthrough'({on}) {
-        return on
-      }
-    })
-
-    // Helper to run util functions on test data
-    const runUtil = async (utilFunc, items) => {
-      return await query({
-        given: {items},
-        services: {util},
-        settings: {debug: false},
-        phases: {result: ['$given.items', `[util]/${utilFunc}`]},
-        select: '$result'
-      })
-    }
-
-    // Data-driven tests for all utilities
-    const testCases = [
-      // removeErrors tests
-      {
-        util: 'removeErrors',
-        name: 'mixed errors and nulls',
-        input: [item1, err1, item2, null, item3],
-        expected: [item1, item2, item3]
-      },
-      {
-        util: 'removeErrors',
-        name: 'all errors and nulls',
-        input: [err1, null, err2],
-        expected: []
-      },
-      {
-        util: 'removeErrors',
-        name: 'no errors or nulls',
-        input: [item1, item2, item3],
-        expected: [item1, item2, item3]
-      },
-
-      // removeNulls tests
-      {
-        util: 'removeNulls',
-        name: 'keeps errors, removes nulls',
-        input: [item1, null, err1, item2, null, err2],
-        expected: [item1, err1, item2, err2]
-      },
-      {
-        util: 'removeNulls',
-        name: 'all nulls',
-        input: [null, null, null],
-        expected: []
-      },
-
-      // removeSuccesses tests
-      {
-        util: 'removeSuccesses',
-        name: 'keeps failures, removes successes',
-        input: [item1, null, err1, item2, err2],
-        expected: [null, err1, err2]
-      },
-      {
-        util: 'removeSuccesses',
-        name: 'no failures',
-        input: [item1, item2],
-        expected: []
-      }
-    ]
-
-    testCases.forEach(({util: utilFunc, name, input, expected}) => {
-      it(`${utilFunc}: ${name}`, async () => {
-        const result = await runUtil(utilFunc, input)
-        assert.deepStrictEqual(result, expected)
-      })
-    })
-
-    // partitionErrors data-driven tests
-    const partitionTests = [
-      {
-        name: 'mixed array',
-        input: [item1, null, err1, item2, err2, item3],
-        expectedSuccesses: [item1, item2, item3],
-        expectedFailures: [null, err1, err2]
-      },
-      {
-        name: 'all successes',
-        input: [item1, item2],
-        expectedSuccesses: [item1, item2],
-        expectedFailures: []
-      },
-      {
-        name: 'all failures',
-        input: [null, err1, err2],
-        expectedSuccesses: [],
-        expectedFailures: [null, err1, err2]
-      }
-    ]
-
-    partitionTests.forEach(({name, input, expectedSuccesses, expectedFailures}) => {
-      it(`partitionErrors: ${name}`, async () => {
-        const result = await runUtil('partitionErrors', input)
-        assert.deepStrictEqual(result.successes, expectedSuccesses)
-        assert.deepStrictEqual(result.failures, expectedFailures)
-      })
-    })
-
-    // Integration tests with real service failures
-    const integrationTests = [
-      {
-        util: 'removeErrors',
-        name: 'with service failures (no onError)',
-        items: [
-          {id: 1, shouldFail: false},
-          {id: 2, shouldFail: true},
-          {id: 3, shouldFail: false}
-        ],
-        expected: [{id: 1, processed: true}, {id: 3, processed: true}]
-      },
-      {
-        util: 'removeErrors',
-        name: 'with service failures (with onError)',
-        items: [
-          {id: 1, shouldFail: false},
-          {id: 2, shouldFail: true},
-          {id: 3, shouldFail: false}
-        ],
-        useErrorHandler: true,
-        expected: [{id: 1, processed: true}, {id: 3, processed: true}]
-      },
-      {
-        util: 'removeSuccesses',
-        name: 'isolates failures',
-        items: [
-          {id: 1, shouldFail: false},
-          {id: 2, shouldFail: true},
-          {id: 3, shouldFail: false}
-        ],
-        expected: [null]
-      }
-    ]
-
-    integrationTests.forEach(({util: utilFunc, name, items, useErrorHandler, expected}) => {
-      it(`${utilFunc}: ${name}`, async () => {
-        const errorHandler = useErrorHandler
-          ? {onError: ['[testService]/passthrough', {on: '@'}], ignoreErrors: true}
-          : {ignoreErrors: true}
-
-        const result = await query({
-          given: {items},
-          services: {testService, util},
-          settings: {debug: false},
-          phases: {
-            processed: ['$given.items', '[util]/each', {
-              service: ['[testService]/processItem', {item: '@', ...errorHandler}]
-            }],
-            filtered: ['$processed', `[util]/${utilFunc}`]
-          },
-          select: '$filtered'
-        })
-
-        assert.deepStrictEqual(result, expected)
-      })
-    })
-
-    it('partitionErrors: batch processing integration', async () => {
-      const items = [
-        {id: 1, shouldFail: false},
-        {id: 2, shouldFail: true},
-        {id: 3, shouldFail: false},
-        {id: 4, shouldFail: true}
-      ]
-
-      const result = await query({
-        given: {items},
-        services: {testService, util},
-        settings: {debug: false},
-        phases: {
-          processed: ['$given.items', '[util]/each', {
-            service: ['[testService]/processItem', {item: '@', ignoreErrors: true}]
-          }],
-          partitioned: ['$processed', '[util]/partitionErrors']
-        },
-        select: '$partitioned'
-      })
-
-      assert.deepStrictEqual(result.successes, [
-        {id: 1, processed: true},
-        {id: 3, processed: true}
+      const lines = (await fs.default.readFile(logFile, 'utf8')).trim().split('\n').filter(line => line.startsWith('Error'))
+      assert.deepStrictEqual(lines.sort(), [
+        'Error: [$result.@1a1 - [failing]/process] Failed 1',
+        'Error: [$result.@1a1 - [failing]/process] Failed 3'
       ])
-      assert.deepStrictEqual(result.failures, [null, null])
     })
   })
 })

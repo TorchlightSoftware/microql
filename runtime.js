@@ -2,11 +2,13 @@
  * @fileoverview Entry stores, and the runtime spec core is written against.
  *
  * Core has no runtime of its own. Its caller injects one as `config.runtime`:
- *   print(text, {color})          show a line of output
- *   inspect(value, options)       render a value for output
- *   recordFailure(location, record)  keep a failure for later
- *   cache                         an entry store whose results outlive a Run
- * The node runtime (index.js) is the reference implementation.
+ *   log(text, {color, to})   write a line of text: shown, in a colour name
+ *                            when given; or kept at a destination, `to`,
+ *                            which the runtime interprets (a file, a store)
+ *   cache                    an entry store whose results outlive a Run
+ * The node runtime (index.js) is the reference implementation. A runtime may
+ * offer more keys; a service that uses one says so in its `requires`, and a
+ * Run on a runtime without it fails before it starts (missing-capability).
  *
  * Entry stores hold call results by (form hash, input hash): a form holds one
  * entry per distinct input. The Run State and the Cache share this shape and

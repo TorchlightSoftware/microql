@@ -1,5 +1,5 @@
 // Arguments that configure a call rather than feed it data.
-const RESERVE_ARGS = ['timeout', 'retry', 'onError', 'ignoreErrors', 'precheck', 'postcheck', 'debug', 'cache']
+const RESERVE_ARGS = ['timeout', 'retry', 'catch', 'precheck', 'postcheck', 'debug', 'cache']
 
 // The two kinds of validation a call runs, by the key they are filed under,
 // with the names the docs and error messages use: the Query author's checks

@@ -1,12 +1,12 @@
 /**
  * Unit Tests for Validation System
- * Tests the validation.js functions directly without the query system
+ * Tests the zodly.js functions directly without the query system
  */
 
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
 import {z} from 'zod'
-import {parseSchema, validate} from '../validation.js'
+import {parseSchema, validate} from '../zodly.js'
 
 describe('Validation Unit Tests', () => {
   describe('Schema Parsing', () => {
@@ -215,7 +215,7 @@ describe('Validation Unit Tests', () => {
     it('should reject unknown type when validateDescriptor=true', () => {
       assert.throws(
         () => parseSchema(['unknowntype']),
-        /Invalid option: expected one of/
+        /Array descriptors must start with a valid type name/
       )
     })
 

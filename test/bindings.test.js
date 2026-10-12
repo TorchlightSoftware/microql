@@ -105,7 +105,7 @@ describe('Scope: @ and named bindings', () => {
     ])
   })
 
-  it('lets onError see the error as @ and the enclosing bindings by name', async () => {
+  it('lets catch see the error as @err and the enclosing bindings by name', async () => {
     const flaky = serviceFromTable({
       async '/fetch'({id}) {
         if (id === 2) throw new Error(`no ${id}`)
@@ -119,19 +119,16 @@ describe('Scope: @ and named bindings', () => {
       phases: {
         fetched: ['$given.ids', '[util]/each', {
           as: 'id',
-          service: [
-            ['[flaky]/fetch', {
-              id: '@id',
-              ignoreErrors: true,
-              onError: ['[util]/template', {failedId: '@id', address: '@.address'}]
-            }]
-          ]
+          service: ['[util]/try', {
+            service: ['[flaky]/fetch', {id: '@id'}],
+            catch: ['[util]/template', {failedId: '@id', address: '@err.address'}]
+          }]
         }]
       },
       select: '$fetched'
     })
 
-    assert.deepEqual(result, [1, {failedId: 2, address: '$fetched.@1a1'}, 3])
+    assert.deepEqual(result, [1, {failedId: 2, address: '$fetched.@1a1a1'}, 3])
   })
 
   it('passes undefined for a reference that names nothing at run time', async () => {

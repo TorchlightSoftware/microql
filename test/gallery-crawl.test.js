@@ -2,7 +2,8 @@
  * An acceptance test: a Query that crawls a museum's galleries and builds
  * catalogue entries, run offline against stub services. It exercises chains,
  * two levels of nested iteration with named bindings, call-level postcheck,
- * onError / ignoreErrors, per-call cache, rateLimit, select, and resume.
+ * catch with log, throw and skip, per-call cache, rateLimit, select, and
+ * resume.
  */
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
@@ -61,13 +62,15 @@ const stubServices = () => {
   return {calls, services: {crawler, assistant, catalogue}}
 }
 
+// What the Query logs to a destination: its failures.
 const failureLog = []
 const runtime = {
-  print: () => {},
-  inspect: (value) => JSON.stringify(value),
-  recordFailure: async (location, record) => failureLog.push({location, ...record}),
+  log: (text, {to} = {}) => { if (to) failureLog.push({to, text}) },
   cache: memoryStore()
 }
+
+// Logs a failure to a destination, keeping it as data in the failed item's place.
+const logTo = (to) => ['@err', '[util]/log', {to}]
 
 const galleryCrawl = (services) => ({
   given: {
@@ -84,16 +87,17 @@ const galleryCrawl = (services) => ({
   },
   phases: {
     galleries: [
-      // 1. Read the gallery index
-      ['[crawler]/extract', {
-        url: '$given.baseUrl',
-        queries: {galleries: 'nav a'},
-        postcheck: {galleries: ['array', ['object'], {min: 1}]},
-        cache: true,
-        onError: ['@', '[util]/recordFailure', {location: 'failed/galleries'}]
+      // 1. Read the gallery index; a failure is logged, and fails the Run
+      ['[util]/try', {
+        service: ['[crawler]/extract', {
+          url: '$given.baseUrl',
+          queries: {galleries: 'nav a'},
+          postcheck: {galleries: ['array', ['object'], {min: 1}]},
+          cache: true
+        }],
+        catch: [logTo('failed/galleries'), ['@', '[util]/throw']]
       }],
-      ['@.galleries', '[util]/removeErrors'],
-      ['@', '[util]/each', {service: ['@', '[util]/pick', {fields: ['text', 'href']}]}],
+      ['@.galleries', '[util]/each', {service: ['@', '[util]/pick', {fields: ['text', 'href']}]}],
       // 2. Keep the galleries worth cataloguing, 3. classify them by period
       ['@', '[assistant]/filter', {criteria: 'collections of artworks'}],
       ['@', '[assistant]/classify', {periods: ['early', 'modern']}]
@@ -109,12 +113,12 @@ const galleryCrawl = (services) => ({
           queries: {images: 'main img', websites: 'main a'},
           // at least 1 image or website should be present
           postcheck: ['union', {images: ['array', ['object'], {min: 1}]}, {websites: ['array', ['object'], {min: 1}]}],
-          cache: true,
-          onError: ['@', '[util]/recordFailure', {location: 'failed/pages'}],
-          ignoreErrors: true
+          cache: true
         }],
         ['@', '[util]/merge', {with: {period: '@gallery.period', medium: '@gallery.medium'}}]
-      ]
+      ],
+      catch: logTo('failed/pages'),
+      skip: ['error']
     }],
 
     // read the captions of every image
@@ -122,19 +126,17 @@ const galleryCrawl = (services) => ({
       as: 'page',
       service: ['@page.images', '[util]/each', {
         as: 'image',
-        skipInputErrors: true,
-        skipOutputErrors: true,
         service: [
           ['[assistant]/readCaption', {
             imageUrl: '@image.src',
             lookFor: ['name', 'artist', 'year'],
             cache: true,
-            postcheck: {name: ['string']},
-            onError: ['@', '[util]/recordFailure', {location: 'failed/captions'}],
-            ignoreErrors: true
+            postcheck: {name: ['string']}
           }],
           ['@', '[util]/merge', {with: {period: '@page.period', medium: '@page.medium'}}]
-        ]
+        ],
+        catch: logTo('failed/captions'),
+        skip: ['error']
       }]
     }],
 
@@ -143,20 +145,17 @@ const galleryCrawl = (services) => ({
       as: 'site',
       service: ['@site.websites', '[util]/each', {
         as: 'website',
-        skipInputErrors: true,
-        skipOutputErrors: true,
         service: [
           ['@website.href', '[assistant]/readWebsite', {
             lookFor: ['name', 'artist', 'year'],
             cache: true,
-            required: 'name',
-            postcheck: {name: ['string']},
-            onError: ['@', '[util]/recordFailure', {location: 'failed/sites'}],
-            ignoreErrors: true
+            postcheck: {name: ['string']}
           }],
           // add the gallery's classification back in
           ['@', '[util]/merge', {with: {period: '@site.period', medium: '@site.medium'}}]
-        ]
+        ],
+        catch: logTo('failed/sites'),
+        skip: ['error']
       }]
     }],
 
@@ -174,10 +173,10 @@ const galleryCrawl = (services) => ({
             status: 'draft',
             'added-date': '$given.today',
             collection: 'permanent'
-          },
-          onError: ['@', '[util]/recordFailure', {location: 'failed/entries'}],
-          ignoreErrors: true
-        }]
+          }
+        }],
+        catch: logTo('failed/entries'),
+        skip: ['error']
       }]
     ]
   }
