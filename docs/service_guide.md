@@ -105,7 +105,7 @@ input: {
   service: [['call', {fromList: 'on'}]],
   skip: [['type', {fromZod: z.any().optional()}]]
 },
-output: [['type', {toList: {without: [{fromField: 'service'}, 'skip']}}]]
+output: [['type', {toList: {difference: [{fromField: 'service'}, {fromZodly: {fromValue: 'skip'}}]}}]]
 ```
 
 | Tag | Config | Means |
@@ -118,7 +118,7 @@ output: [['type', {toList: {without: [{fromField: 'service'}, 'skip']}}]]
 
 **Field paths** are dotted, `'params.messages'`, with `..` for a dot inside a field name (`'a..b'` is the field `a.b`).
 
-**A source** names a type, by reading one or building one:
+**A source** names a type: it reads one, builds one, or operates on two:
 
 | Source | Names |
 |---|---|
@@ -126,11 +126,16 @@ output: [['type', {toList: {without: [{fromField: 'service'}, 'skip']}}]]
 | `{fromField: path}` | the type of another field; for a call field, what its nested call returns |
 | `{fromList: path}` | one item of a list field |
 | `{fromObject: path}` | one value of an object field |
+| `{fromValue: path}` | the literal written in a field, as a type: `fields: ['name', 'url']` is the tuple of literals `'name'` and `'url'`. A reference, whose value isn't known until the Run, is `any`. |
+| `{fromZodly: source}` | the schema a [zodly](validation.md) descriptor describes, given the descriptor's literal type: `{fromZodly: {fromValue: 'skip'}}` |
 | `{toList: source}` | a list of the source's type |
 | `{toObject: source}` | an object whose values are the source's type |
-| `{without: [source, path]}` | the source's type less the members that fit the [zodly](validation.md) schema written in the field at `path`; `util/each` uses it for `skip` |
+| `{union: [a, b]}` | a value of either; `util/when` returns `{union: [{fromField: 'then'}, {fromField: 'otherwise'}]}` |
+| `{difference: [a, b]}` | a's members less those that fit b; `util/each` uses it for `skip`. Taking away what isn't known (`any`) leaves a as it is. |
+| `{pick: [a, keys]}` | a with only the fields keys names, as TypeScript's `Pick`: keys is a tuple or union of string literals. A name a loose object doesn't list may be there, of its other fields' type, or not. `util/pick` returns `{pick: [{fromField: 'on'}, {fromValue: 'fields'}]}` |
+| `{merge: [a, b]}` | b laid over a, as `util/merge` does: objects field by field, lists as a list of either item, any other value of b wins |
 
-Sources compose: `{toObject: {fromList: 'on'}}` is an object whose values are the items of `on`.
+Sources compose: `{toObject: {fromList: 'on'}}` is an object whose values are the items of `on`. When an operator's input isn't known before the Run, it gives what it can: `pick` with unknown keys is a as it is, `merge` onto `any` is `any`.
 
 **Only `fromZod` is checked at run time.** Core builds one schema from an operation's `fromZod` input fields and checks every call's fields against it (its Service Schema Validation precheck); a `fromZod` output is checked against what the call returns (its postcheck). The other sources are relationships between fields, which `plan()` resolves ([Types and plan()](#types-and-plan)). A path and its parent can't both have a schema.
 
@@ -163,7 +168,13 @@ Sources compose: `{toObject: {fromList: 'on'}}` is an object whose values are th
 // the each call: array of scraper's declared output
 ```
 
-A service that declares nothing about what its call fields receive gets `any` for `@` inside them. **A validation takes `any` back to a type**: a nested call's own declared output types everything after it, and a `postcheck` on a call ([Validation](validation.md)) gives that call its type in the plan.
+A service that declares nothing about what its call fields receive gets `any` for `@` inside them. **A validation takes `any` back to a type**: a nested call's own declared output types everything after it. A `postcheck` on a call ([Validation](validation.md)) gives that call its type in the plan, and a `precheck` gives the fields it names theirs, so whatever is declared from them follows. Both hold because the call checks them when it runs:
+
+```javascript
+['[http]/getJson', {url: '$given.u'}],                          // any
+['@', '[util]/pick', {fields: ['name'], precheck: {on: {name: ['string']}}}]
+// on: {name: string}, by its precheck; the pick: {name: string}
+```
 
 ## init and tearDown
 

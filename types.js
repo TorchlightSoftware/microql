@@ -19,7 +19,7 @@
 
 import {z} from 'zod'
 import {isPlainObject, mapValues} from './common.js'
-import {errorSchema} from './zodly.js'
+import {errorSchema, parseSchema} from './zodly.js'
 
 export const any = z.any()
 
@@ -34,6 +34,21 @@ export const isAny = (schema) => ['any', 'unknown'].includes(typeOf(schema))
 
 // A value of this schema may be absent: undefined or null.
 const mayBeMissing = (schema) => schema.safeParse(undefined).success || schema.safeParse(null).success
+
+// The type of the fields an object has beyond those it lists: a record's
+// value type, a loose object's catchall; none for an object closed to them.
+const openTo = (object) => {
+  if (object.def.type === 'record') return object.def.valueType
+  return object.def.catchall && typeOf(object.def.catchall) !== 'never' ? object.def.catchall : undefined
+}
+
+// The type of an object's field: the one it lists, else maybe its other
+// fields' type, if it's open to them, else undefined.
+const fieldOf = (object, name) =>
+  object.def.shape && Object.hasOwn(object.def.shape, name) ? object.def.shape[name] : openTo(object)?.optional() ?? z.undefined()
+
+// An object of these fields, as open to others as the object it's made from.
+const objectLike = (object, shape) => openTo(object) ? z.object(shape).catchall(openTo(object)) : z.object(shape)
 
 const enumValues = (schema) => Object.values(schema.def.entries)
 
@@ -51,7 +66,8 @@ export function describeSchema(schema) {
   if (type === 'optional') return `${describeSchema(schema.def.innerType)} (optional)`
   if (type === 'nullable') return `${describeSchema(schema.def.innerType)} (nullable)`
   if (WRAPPERS.includes(type)) return describeSchema(schema.def.innerType)
-  if (type === 'array') return `array of ${describeSchema(schema.def.element)}`
+  if (type === 'array') return `array of ${described(schema.def.element)}`
+  if (type === 'tuple') return `[${schema.def.items.map(describeSchema).join(', ')}]`
   if (type === 'record') return `record of ${describeSchema(schema.def.valueType)}`
   if (type === 'enum') return `enum (${enumValues(schema).join(' | ')})`
   if (type === 'literal') return `literal ${JSON.stringify(schema.def.values[0])}`
@@ -59,10 +75,14 @@ export function describeSchema(schema) {
   if (type === 'object') {
     const fields = Object.entries(schema.def.shape).map(([name, field]) =>
       field.def.type === 'optional' ? `${name}?: ${describeSchema(field.def.innerType)}` : `${name}: ${describeSchema(field)}`)
-    return `{${fields.join(', ')}}`
+    const rest = openTo(schema) ? [`...${describeSchema(schema.def.catchall)}`] : []
+    return `{${[...fields, ...rest].join(', ')}}`
   }
   return type
 }
+
+// A list's item as text: a union in parentheses, so it reads as one item.
+const described = (schema) => unwrap(schema).def.type === 'union' ? `(${describeSchema(schema)})` : describeSchema(schema)
 
 // The one schema several share, or any when they differ (or there are none).
 export function sharedSchema(schemas) {
@@ -124,17 +144,11 @@ function baseTypeOf(schema) {
 }
 
 // Each field of an expected object against what the actual object, or
-// record, has for it.
+// record, has for it: a field it doesn't list is maybe of the type of the
+// fields it's open to (a record's values), else absent.
 function compareFields(expected, actual, path) {
   return Object.entries(expected.def.shape).flatMap(([name, field]) => {
-    const at = [...path, name]
-    if (actual.def.type === 'record') {
-      const absent = mayBeMissing(field) ? [] : issue('maybe-missing', at, field, actual.def.valueType)
-      return [...absent, ...compare(field, actual.def.valueType, at)]
-    }
-    const actualField = actual.def.shape[name]
-    if (actualField) return compare(field, actualField, at)
-    return mayBeMissing(field) ? [] : issue('type-mismatch', at, field, any)
+    return compare(field, fieldOf(actual, name), [...path, name])
   })
 }
 
@@ -193,27 +207,150 @@ export function compare(expected, actual, path = []) {
 // The members of a schema: a union's options, else the schema itself.
 const membersOf = (schema) => unwrap(schema).def.type === 'union' ? unwrap(schema).def.options : [schema]
 
-const unionOf = (members) => members.length === 1 ? members[0] : z.union(members)
+// One schema of several members, each type named once.
+function unionOf(members) {
+  const named = [...new Map(members.map(member => [describeSchema(member), member])).values()]
+  return named.length === 1 ? named[0] : z.union(named)
+}
+
+/*
+ * Type operators: what a declaration's sources compute (see declaration.js),
+ * each a pure function of zod schemas. union and difference are the set
+ * operations; pick and merge mirror [util]/pick and [util]/merge.
+ */
 
 /**
  * A value of one schema or the other, as one union. A never (what a call that
- * always throws returns) adds nothing. Provisional: the plan's union of what a
- * call returns and what its catch does.
+ * always throws returns) adds nothing.
  */
-export const eitherOf = (one, other) => {
+export const union = (one, other) => {
   const members = [...membersOf(one), ...membersOf(other)].filter(member => typeOf(member) !== 'never')
   return members.length ? unionOf(members) : z.never()
 }
 
 /**
  * The schema less the members that fit the removed one: what's left of a
- * list's items once those matching a skip schema are left out. Unchanged when
- * there is nothing to remove; never when nothing is left.
+ * list's items once those matching a skip schema are left out. Removing never
+ * removes nothing; removing what isn't known (any) keeps the schema, since
+ * what it removes can't be told. Never when nothing is left.
  */
-export function without(schema, removed) {
-  if (!removed) return schema
+export function difference(schema, removed) {
+  if (isAny(removed)) return schema
   const members = membersOf(schema)
   const kept = members.filter(member => compare(removed, member).length > 0)
   if (kept.length === members.length) return schema
   return kept.length ? unionOf(kept) : z.never()
+}
+
+const isScalar = (value) => ['string', 'number', 'boolean'].includes(typeof value) || value === null
+
+/**
+ * The literal type of a value written in a Query: a scalar's literal, a list's
+ * tuple, an object's fields, item by item; undefined for nothing. A value
+ * that isn't known (a reference, to plan()) or has no literal type (a RegExp,
+ * a zod schema) is any.
+ */
+export function literalOf(value, isUnknown = () => false) {
+  if (isUnknown(value)) return any
+  if (isScalar(value)) return z.literal(value)
+  if (value === undefined) return z.undefined()
+  if (Array.isArray(value)) return z.tuple(value.map(item => literalOf(item, isUnknown)))
+  if (isPlainObject(value)) return z.object(mapValues(value, item => literalOf(item, isUnknown)))
+  return any
+}
+
+// What makes up a literal type, by kind: the types its value is read from.
+const LITERAL_PARTS = {
+  literal: () => [],
+  undefined: () => [],
+  tuple: (schema) => schema.def.items,
+  object: (schema) => Object.values(schema.def.shape)
+}
+
+// Whether a type is a literal type through and through, so its value is known.
+export const isLiteral = (schema) => {
+  const parts = LITERAL_PARTS[schema.def.type]
+  return Boolean(parts) && parts(schema).every(isLiteral)
+}
+
+// The value a literal type was read from (see literalOf).
+export function valueOfLiteral(schema) {
+  const {def} = schema
+  if (def.type === 'literal') return def.values[0]
+  if (def.type === 'tuple') return def.items.map(valueOfLiteral)
+  if (def.type === 'object') return mapValues(def.shape, valueOfLiteral)
+  return undefined
+}
+
+/**
+ * The schema a zodly descriptor describes, given the descriptor's literal
+ * type: never for no descriptor, so there's nothing it describes; any when the
+ * descriptor isn't known before the Run.
+ */
+export function describedBy(type) {
+  if (typeOf(type) === 'undefined') return z.never()
+  return isLiteral(type) ? parseSchema(valueOfLiteral(type)) : any
+}
+
+// The key names a type of keys holds: a tuple's items, or a union's members,
+// each a string literal; none when they aren't known.
+function keysIn(keys) {
+  const members = keys.def.type === 'tuple' ? keys.def.items : membersOf(keys)
+  const names = members.map(member => member.def.type === 'literal' ? member.def.values[0] : undefined)
+  return names.every(name => typeof name === 'string') ? names : undefined
+}
+
+/**
+ * The schema with only the named fields its objects have, as TypeScript's
+ * Pick does: a name a loose object doesn't list may be there, of the type
+ * its other fields have, or not. Unchanged when the keys aren't known before
+ * the Run.
+ */
+export function pick(schema, keys) {
+  const names = keysIn(keys)
+  if (!names) return schema
+  const pickFrom = (member) => {
+    const inner = unwrap(member)
+    if (inner.def.type !== 'object') return member
+    const picked = names.map(name => [name, fieldOf(inner, name)]).filter(([, field]) => typeOf(field) !== 'undefined')
+    return z.object(Object.fromEntries(picked))
+  }
+  return unionOf(membersOf(schema).map(pickFrom))
+}
+
+// A schema's alternatives, with optional as undefined and nullable as null.
+function alternativesOf(schema) {
+  const {type, innerType} = schema.def
+  if (type === 'optional') return [...alternativesOf(innerType), z.undefined()]
+  if (type === 'nullable') return [...alternativesOf(innerType), z.null()]
+  if (WRAPPERS.includes(type)) return alternativesOf(innerType)
+  return type === 'union' ? schema.def.options.flatMap(alternativesOf) : [schema]
+}
+
+// Merging one alternative of `with` onto one of `on`, as [util]/merge does:
+// undefined keeps on's, objects merge field by field, lists join, and any
+// other value wins.
+function mergeOne(on, added) {
+  const [a, b] = [on.def.type, added.def.type]
+  if (b === 'undefined') return on
+  if (isAny(on)) return ['object', 'array'].includes(b) ? any : added
+  if (a === 'object' && b === 'object') {
+    const names = [...new Set([...Object.keys(on.def.shape), ...Object.keys(added.def.shape)])]
+    const shape = Object.fromEntries(names.map(name => [name, merge(fieldOf(on, name), fieldOf(added, name))]))
+    return objectLike(openTo(on) ? on : added, shape)
+  }
+  if (a === 'array' && b === 'array') return z.array(union(on.def.element, added.def.element))
+  return added
+}
+
+/**
+ * What [util]/merge returns, given on's type and with's: each alternative of
+ * with merged onto each of on's. Any when with isn't known, or when an object
+ * or list of with's merges onto an on that isn't, since on may have fields or
+ * items with doesn't.
+ */
+export function merge(on, added) {
+  if (isAny(added)) return any
+  const merged = alternativesOf(on).flatMap(a => alternativesOf(added).map(b => mergeOne(a, b)))
+  return merged.reduce(union)
 }

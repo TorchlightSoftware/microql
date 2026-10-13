@@ -24,8 +24,8 @@ The tables below are generated. Regenerate them with `npm run docs:functions` af
 | line | name | kind | lines | refs | 0.6 |
 |---|---|---|---|---|---|
 | 14 | `getServiceColorName` | const | 6 | 1 | ✓ |
-| 23 | `isPlainObject` | const | 5 | 15 |  |
-| 33 | `mapValues` | const | 5 | 12 |  |
+| 23 | `isPlainObject` | const | 5 | 16 |  |
+| 33 | `mapValues` | const | 5 | 14 |  |
 | 40 | `filterObject` | const | 2 | 1 |  |
 | 44 | `pick` | const | 2 | 6 | ✓ |
 | 47 | `omit` | const | 1 | 5 |  |
@@ -80,16 +80,20 @@ The tables below are generated. Regenerate them with `npm run docs:functions` af
 
 | line | name | kind | lines | refs | 0.6 |
 |---|---|---|---|---|---|
-| 43 | `checkSource` | function | 16 | 3 |  |
-| 61 | `readTag` | function | 8 | 2 |  |
-| 71 | `readField` | function | 14 | 1 |  |
-| 73 | `named` | const | 1 | 6 |  |
-| 86 | `isPrefix` | const | 1 | 1 |  |
-| 91 | `inputSchemaOf` | function | 21 | 1 |  |
-| 104 | `toSchema` | const | 6 | 2 |  |
-| 113 | `readOutput` | function | 5 | 1 |  |
-| 119 | `readDeclaration` | function | 15 | 1 |  |
-| 142 | `declarationOf` | function | 4 | 1 |  |
+| 49 | `fits` | property | 1 | — |  |
+| 50 | `fits` | property | 1 | — |  |
+| 51 | `fits` | property | 1 | — |  |
+| 52 | `fits` | property | 1 | — |  |
+| 71 | `checkSource` | function | 10 | 3 |  |
+| 83 | `readTag` | function | 8 | 2 |  |
+| 93 | `readField` | function | 14 | 1 |  |
+| 95 | `named` | const | 1 | 6 |  |
+| 108 | `isPrefix` | const | 1 | 1 |  |
+| 113 | `inputSchemaOf` | function | 21 | 1 |  |
+| 126 | `toSchema` | const | 6 | 2 |  |
+| 135 | `readOutput` | function | 5 | 1 |  |
+| 141 | `readDeclaration` | function | 15 | 1 |  |
+| 164 | `declarationOf` | function | 4 | 1 |  |
 
 ## errors.js
 
@@ -185,34 +189,36 @@ The tables below are generated. Regenerate them with `npm run docs:functions` af
 | line | name | kind | lines | refs | 0.6 |
 |---|---|---|---|---|---|
 | 23 | `typeOfArgument` | function | 10 | 3 |  |
-| 36 | `schemaIn` | const | 1 | 1 |  |
-| 41 | `fromZod` | property | 1 | — |  |
-| 42 | `fromField` | property | 1 | — |  |
-| 43 | `fromList` | property | 1 | — |  |
-| 44 | `fromObject` | property | 1 | — |  |
-| 45 | `toList` | property | 1 | — |  |
-| 46 | `toObject` | property | 1 | — |  |
-| 47 | `without` | property | 1 | — |  |
-| 51 | `resolveSource` | function | 5 | 6 |  |
-| 59 | `type-mismatch` | property | 1 | — |  |
-| 60 | `maybe-missing` | property | 1 | — |  |
-| 61 | `type-narrowing` | property | 1 | — |  |
-| 67 | `checkType` | function | 6 | 2 |  |
-| 74 | `stepsTypes` | function | 5 | 3 |  |
-| 84 | `fieldsOf` | function | 16 | 1 |  |
-| 87 | `declared` | const | 1 | 3 |  |
-| 89 | `typeOf` | const | 6 | 1 |  |
-| 95 | `valueAt` | const | 1 | 1 |  |
-| 103 | `argumentTypes` | function | 7 | 1 |  |
-| 113 | `itemOf` | const | 4 | 1 |  |
-| 120 | `catchType` | const | 2 | 2 |  |
-| 127 | `positionTypes` | function | 15 | 1 |  |
-| 129 | `inputOf` | const | 1 | 2 |  |
-| 144 | `returnType` | const | 2 | 1 |  |
-| 148 | `callTypes` | function | 8 | 1 |  |
-| 160 | `triggerType` | const | 2 | 1 |  |
-| 164 | `inferTypes` | function | 14 | 1 |  |
-| 184 | `plan` | function | 35 | 0 |  |
+| 35 | `onPair` | const | 1 | 4 |  |
+| 40 | `fromZod` | property | 1 | — |  |
+| 41 | `fromField` | property | 1 | — |  |
+| 42 | `fromList` | property | 1 | — |  |
+| 43 | `fromObject` | property | 1 | — |  |
+| 44 | `fromValue` | property | 1 | — |  |
+| 45 | `fromZodly` | property | 1 | — |  |
+| 46 | `toList` | property | 1 | — |  |
+| 47 | `toObject` | property | 1 | — |  |
+| 55 | `resolveSource` | function | 5 | 8 |  |
+| 63 | `type-mismatch` | property | 1 | — |  |
+| 64 | `maybe-missing` | property | 1 | — |  |
+| 65 | `type-narrowing` | property | 1 | — |  |
+| 71 | `checkType` | function | 6 | 2 |  |
+| 78 | `stepsTypes` | function | 5 | 3 |  |
+| 87 | `argumentsType` | function | 5 | 1 |  |
+| 97 | `fieldsOf` | function | 16 | 1 |  |
+| 100 | `declared` | const | 1 | 3 |  |
+| 102 | `typeOf` | const | 6 | 1 |  |
+| 108 | `valueAt` | const | 1 | 1 |  |
+| 116 | `argumentTypes` | function | 7 | 1 |  |
+| 126 | `itemOf` | const | 4 | 1 |  |
+| 133 | `catchType` | const | 2 | 2 |  |
+| 140 | `positionTypes` | function | 15 | 1 |  |
+| 142 | `inputOf` | const | 1 | 2 |  |
+| 157 | `returnType` | const | 2 | 1 |  |
+| 161 | `callTypes` | function | 8 | 1 |  |
+| 173 | `triggerType` | const | 2 | 1 |  |
+| 177 | `inferTypes` | function | 14 | 1 |  |
+| 197 | `plan` | function | 35 | 0 |  |
 
 ## query.js
 
@@ -279,63 +285,83 @@ The tables below are generated. Regenerate them with `npm run docs:functions` af
 | 20 | `copyPlain` | const | 2 | 5 |  |
 | 24 | `union` | function | 10 | 1 |  |
 | 38 | `mergeValues` | function | 9 | 2 |  |
-| 52 | `typed` | const | 1 | 29 |  |
-| 63 | `eachItem` | const | 1 | 2 |  |
-| 66 | `leaveOut` | function | 5 | 2 |  |
-| 74 | `asError` | const | 1 | 2 |  |
-| 93 | `init` | property | 3 | — |  |
-| 101 | `call` | property | 1 | — |  |
-| 108 | `call` | property | 1 | — |  |
-| 115 | `call` | property | 1 | — |  |
-| 122 | `call` | property | 3 | — |  |
-| 135 | `call` | property | 5 | — |  |
-| 146 | `call` | property | 1 | — |  |
-| 153 | `call` | property | 1 | — |  |
-| 158 | `call` | property | 1 | — |  |
-| 164 | `call` | property | 1 | — |  |
-| 171 | `call` | property | 1 | — |  |
-| 178 | `call` | property | 1 | — |  |
-| 184 | `call` | property | 1 | — |  |
-| 190 | `call` | property | 1 | — |  |
-| 197 | `call` | property | 1 | — |  |
-| 204 | `call` | property | 1 | — |  |
-| 211 | `call` | property | 1 | — |  |
-| 218 | `call` | property | 5 | — |  |
-| 229 | `call` | property | 4 | — |  |
-| 238 | `call` | property | 1 | — |  |
-| 247 | `lookup` | property | 4 | — |  |
+| 52 | `typed` | const | 1 | 27 |  |
+| 59 | `leftOver` | const | 1 | 2 |  |
+| 67 | `eachItem` | const | 1 | 2 |  |
+| 70 | `leaveOut` | function | 5 | 2 |  |
+| 78 | `asError` | const | 1 | 2 |  |
+| 97 | `init` | property | 3 | — |  |
+| 105 | `call` | property | 1 | — |  |
+| 112 | `call` | property | 1 | — |  |
+| 119 | `call` | property | 1 | — |  |
+| 126 | `call` | property | 3 | — |  |
+| 139 | `call` | property | 5 | — |  |
+| 150 | `call` | property | 1 | — |  |
+| 157 | `call` | property | 1 | — |  |
+| 163 | `call` | property | 1 | — |  |
+| 169 | `call` | property | 1 | — |  |
+| 176 | `call` | property | 1 | — |  |
+| 183 | `call` | property | 1 | — |  |
+| 189 | `call` | property | 1 | — |  |
+| 195 | `call` | property | 1 | — |  |
+| 202 | `call` | property | 1 | — |  |
+| 209 | `call` | property | 1 | — |  |
+| 216 | `call` | property | 1 | — |  |
+| 223 | `call` | property | 5 | — |  |
+| 234 | `call` | property | 4 | — |  |
+| 243 | `call` | property | 1 | — |  |
+| 252 | `lookup` | property | 4 | — |  |
 
 ## types.js
 
 | line | name | kind | lines | refs | 0.6 |
 |---|---|---|---|---|---|
-| 29 | `unwrap` | const | 1 | 9 |  |
-| 31 | `typeOf` | const | 1 | 3 |  |
-| 33 | `isAny` | const | 1 | 4 |  |
-| 36 | `mayBeMissing` | const | 1 | 5 |  |
-| 38 | `enumValues` | const | 1 | 3 |  |
-| 41 | `isAbsent` | const | 1 | 1 |  |
-| 48 | `describeSchema` | function | 18 | 16 |  |
-| 68 | `sharedSchema` | function | 4 | 4 |  |
-| 74 | `schemaOfValue` | function | 9 | 5 |  |
-| 85 | `elementOf` | function | 4 | 1 |  |
-| 92 | `valueOf` | function | 8 | 1 |  |
-| 102 | `schemaAtPath` | function | 9 | 3 |  |
-| 113 | `severityOf` | const | 1 | 3 |  |
-| 115 | `issue` | const | 1 | 15 |  |
-| 119 | `baseTypeOf` | function | 6 | 3 |  |
-| 128 | `compareFields` | function | 12 | 1 |  |
-| 143 | `array` | property | 3 | — |  |
-| 146 | `object` | property | 3 | — |  |
-| 149 | `record` | property | 7 | — |  |
-| 156 | `enum` | property | 6 | — |  |
-| 162 | `literal` | property | 4 | — |  |
-| 169 | `compareToUnion` | function | 4 | 1 |  |
-| 179 | `compare` | function | 13 | 9 |  |
-| 194 | `membersOf` | const | 1 | 3 |  |
-| 196 | `unionOf` | const | 1 | 2 |  |
-| 203 | `eitherOf` | const | 4 | 3 |  |
-| 213 | `without` | function | 7 | 1 |  |
+| 29 | `unwrap` | const | 1 | 11 |  |
+| 31 | `typeOf` | const | 1 | 6 |  |
+| 33 | `isAny` | const | 1 | 7 |  |
+| 36 | `mayBeMissing` | const | 1 | 3 |  |
+| 40 | `openTo` | const | 4 | 5 |  |
+| 47 | `fieldOf` | const | 2 | 4 |  |
+| 51 | `objectLike` | const | 1 | 1 |  |
+| 53 | `enumValues` | const | 1 | 3 |  |
+| 56 | `isAbsent` | const | 1 | 1 |  |
+| 63 | `describeSchema` | function | 20 | 20 |  |
+| 85 | `described` | const | 1 | 1 |  |
+| 88 | `sharedSchema` | function | 4 | 4 |  |
+| 94 | `schemaOfValue` | function | 9 | 5 |  |
+| 105 | `elementOf` | function | 4 | 1 |  |
+| 112 | `valueOf` | function | 8 | 1 |  |
+| 122 | `schemaAtPath` | function | 9 | 3 |  |
+| 133 | `severityOf` | const | 1 | 3 |  |
+| 135 | `issue` | const | 1 | 13 |  |
+| 139 | `baseTypeOf` | function | 6 | 3 |  |
+| 149 | `compareFields` | function | 5 | 1 |  |
+| 157 | `array` | property | 3 | — |  |
+| 160 | `object` | property | 3 | — |  |
+| 163 | `record` | property | 7 | — |  |
+| 170 | `enum` | property | 6 | — |  |
+| 176 | `literal` | property | 4 | — |  |
+| 183 | `compareToUnion` | function | 4 | 1 |  |
+| 193 | `compare` | function | 13 | 8 |  |
+| 208 | `membersOf` | const | 1 | 5 |  |
+| 211 | `unionOf` | function | 4 | 3 |  |
+| 226 | `union` | const | 4 | 6 |  |
+| 237 | `difference` | function | 7 | 1 |  |
+| 245 | `isScalar` | const | 1 | 1 |  |
+| 253 | `literalOf` | function | 8 | 3 |  |
+| 264 | `literal` | property | 1 | — |  |
+| 265 | `undefined` | property | 1 | — |  |
+| 266 | `tuple` | property | 1 | — |  |
+| 267 | `object` | property | 1 | — |  |
+| 271 | `isLiteral` | const | 4 | 2 |  |
+| 277 | `valueOfLiteral` | function | 7 | 3 |  |
+| 290 | `describedBy` | function | 4 | 1 |  |
+| 297 | `keysIn` | function | 5 | 1 |  |
+| 309 | `pick` | function | 11 | 1 | ✓ |
+| 312 | `pickFrom` | const | 6 | 1 |  |
+| 322 | `alternativesOf` | function | 7 | 6 |  |
+| 333 | `mergeOne` | function | 12 | 1 |  |
+| 352 | `merge` | function | 5 | 2 | ✓ |
 
 ## wrappers.js
 

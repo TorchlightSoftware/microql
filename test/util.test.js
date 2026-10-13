@@ -232,7 +232,7 @@ describe('Util Service Tests', () => {
       const {input, output} = util.lookup({service: 'util', resource: '/each', method: null})
       assert.ok(input.on.includes('target'))
       assert.deepStrictEqual(input.service, [['call', {fromList: 'on'}]])
-      assert.deepStrictEqual(output, [['type', {toList: {without: [{fromField: 'service'}, 'skip']}}]])
+      assert.deepStrictEqual(output, [['type', {toList: {difference: [{fromField: 'service'}, {fromZodly: {fromValue: 'skip'}}]}}]])
     })
 
     it('refuses a verb', () => {

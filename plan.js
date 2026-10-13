@@ -15,9 +15,9 @@ import compile from './compile.js'
 import {columnsOf} from './graph.js'
 import {formsOf} from './forms.js'
 import {isReference, parseReference, rootScope, enterPosition, scopedRoot} from './reference.js'
-import {any, isAny, schemaOfValue, schemaAtPath, sharedSchema, elementOf, valueOf, compare, describeSchema, eitherOf, without} from './types.js'
+import {any, isAny, schemaOfValue, schemaAtPath, sharedSchema, elementOf, valueOf, compare, describeSchema, literalOf, describedBy, union, difference, pick, merge} from './types.js'
 import {isPlainObject, mapValues, getIn, setPaths, parseFieldPath} from './common.js'
-import {errorSchema, parseSchema} from './zodly.js'
+import {errorSchema} from './zodly.js'
 
 // The type of an argument: a literal's own type, or what its reference names.
 function typeOfArgument(value, scope, env) {
@@ -31,9 +31,8 @@ function typeOfArgument(value, scope, env) {
   return schemaOfValue(value)
 }
 
-// The schema a field's literal zodly descriptor names; none when the field
-// holds a reference, or nothing, so its schema isn't known before the Run.
-const schemaIn = (value) => value === undefined || isReference(value) ? undefined : parseSchema(value)
+// A type operator over the types of a pair of sources.
+const onPair = (operator) => ([one, other], fields) => operator(resolveSource(one, fields), resolveSource(other, fields))
 
 // How each kind of source in a declaration names a type, given the call's
 // fields: their types, and their literal values (see declaration.js).
@@ -42,9 +41,14 @@ const SOURCES = {
   fromField: (path, fields) => fields.typeOf(path),
   fromList: (path, fields) => elementOf(fields.typeOf(path)),
   fromObject: (path, fields) => valueOf(fields.typeOf(path)),
+  fromValue: (path, fields) => literalOf(fields.valueAt(path), isReference),
+  fromZodly: (source, fields) => describedBy(resolveSource(source, fields)),
   toList: (source, fields) => z.array(resolveSource(source, fields)),
   toObject: (source, fields) => z.record(z.string(), resolveSource(source, fields)),
-  without: ([source, path], fields) => without(resolveSource(source, fields), schemaIn(fields.valueAt(path)))
+  union: onPair(union),
+  difference: onPair(difference),
+  pick: onPair(pick),
+  merge: onPair(merge)
 }
 
 // The type a source names; any when there is no source.
@@ -77,13 +81,22 @@ function stepsTypes(steps, scope, env) {
   return flow
 }
 
+// The type of a call's arguments: what flows into them, except the fields the
+// call's own precheck names, which take its types, since the call checks them
+// before it runs.
+function argumentsType(call, args, scope, env) {
+  const flowing = typeOfArgument(args, scope, env)
+  const precheck = call.validators?.precheck?.call
+  return precheck?.def.type === 'object' ? z.object({...flowing.shape, ...precheck.shape}) : flowing
+}
+
 // A call's fields, for resolving its declaration's sources. A field's type is
-// what flows into it (for a call field, what its nested call returns, or its
-// catch does, once typed), or what the declaration says when nothing known
-// flows in.
+// what flows into it, or what its precheck says (for a call field, what its
+// nested call returns, or its catch does, once typed), or what the
+// declaration says when nothing known flows in.
 function fieldsOf(call, scope, env) {
   const args = setPaths(call.args, call.settingsArgs)
-  const argsType = typeOfArgument(args, scope, env)
+  const argsType = argumentsType(call, args, scope, env)
   const declared = (path) => call.declaration.fields.find(field => field.path === path)
   const returns = {}
   const typeOf = (path) => {
@@ -112,7 +125,7 @@ function argumentTypes(call, fields, env) {
 // type when they share it.
 const itemOf = (received) => {
   const shared = sharedSchema(received)
-  return isAny(shared) && received.length > 1 ? received.reduce(eitherOf) : shared
+  return isAny(shared) && received.length > 1 ? received.reduce(union) : shared
 }
 
 // What a catch returns, given the error and the item whose call failed; none
@@ -131,7 +144,7 @@ function positionTypes(call, scope, fields, env) {
   const types = mapValues(held, (position, path) => {
     const input = inputOf(path)
     const returned = stepsTypes(position.steps, enterPosition(position, scope, input), env)
-    const actual = caught ? eitherOf(returned, caught) : returned
+    const actual = caught ? union(returned, caught) : returned
     const expected = fields.expectedOf(path)
     checkType(expected, actual, `${call.address}.${path}`, env)
     fields.returns[path] = actual
@@ -171,7 +184,7 @@ function inferTypes(compiled, columns, trigger) {
   const caught = catchType(compiled.settings.catch, rootScope, any, env)
   for (const name of columns.flat()) {
     const returned = stepsTypes(compiled.phases[name].steps, {...rootScope, flow: any}, env)
-    env.phases[name] = caught ? eitherOf(returned, caught) : returned
+    env.phases[name] = caught ? union(returned, caught) : returned
   }
   return env
 }

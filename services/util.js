@@ -54,6 +54,10 @@ const listTarget = {on: ['target', typed(list)]}
 
 // What `each` and `flattenEach` share: a nested call for every item of `on`,
 // and a zodly schema of the results to leave out.
+// What `each` and `flattenEach` return of their nested calls' results: those
+// not fitting the zodly schema written in skip.
+const leftOver = (results) => ({difference: [results, {fromZodly: {fromValue: 'skip'}}]})
+
 const eachInput = {
   ...listTarget,
   service: [['call', {fromList: 'on'}]],
@@ -97,14 +101,14 @@ const table = {
   '/each': {
     description: 'Run a call for every item of a list, returning their results in order, less those that fit skip',
     input: eachInput,
-    output: [['type', {toList: {without: [{fromField: 'service'}, 'skip']}}]],
+    output: [['type', {toList: leftOver({fromField: 'service'})}]],
     call: async (args) => leaveOut(await eachItem(args), args.skip)
   },
 
   '/flattenEach': {
     description: 'Run a call that returns a list for every item of a list, returning one list of all their items, less those that fit skip',
     input: {...eachInput, service: [['call', {fromList: 'on'}], typed(list)]},
-    output: [['type', {without: [{fromField: 'service'}, 'skip']}]],
+    output: [['type', leftOver({fromField: 'service'})]],
     call: async (args) => leaveOut((await eachItem(args)).flat(), args.skip)
   },
 
@@ -155,6 +159,7 @@ const table = {
 
   '/when': {
     description: '`then` when test is truthy, otherwise `otherwise`',
+    output: [['type', {union: [{fromField: 'then'}, {fromField: 'otherwise'}]}]],
     call: async ({test, then, otherwise}) => test ? then : otherwise
   },
 
@@ -193,14 +198,14 @@ const table = {
   '/pick': {
     description: 'The listed fields that an object has',
     input: {on: ['target', typed(object)], fields: [typed(z.array(z.string()).min(1))]},
-    output: [typed(object)],
+    output: [['type', {pick: [{fromField: 'on'}, {fromValue: 'fields'}]}]],
     call: async ({on, fields}) => pick(on, fields)
   },
 
   '/merge': {
     description: 'Deep merge of `with` onto `on`, as a new object; lists are a set union',
     input: {on: ['target', typed(object)], with: [typed(object)]},
-    output: [typed(object)],
+    output: [['type', {merge: [{fromField: 'on'}, {fromField: 'with'}]}]],
     call: async ({on, with: withObj}) => mergeValues(on, withObj)
   },
 

@@ -226,7 +226,7 @@ Hashes are SHA-256 over canonical JSON, computed synchronously in pure JS (`@nob
 `plan()` infers a type for every service call and every input field, as zod schemas. An editor, such as a visual Builder, converts them to whatever types it displays; core has no types of its own. `z.any()` stands for a type that can't be known.
 
 - A field's **expected** type comes from the operation's declaration: its `fromZod` type, or a relationship to another field's type. A call field's expected type is what its nested call must return; `util/filter` wants boolean.
-- Its **actual** type is a literal's own type, a phase's return type, or the flow at that point, with paths walking into them. Inside a nested call, `@` is what the declaration says the call field receives (`util/each`: one item of `on`), or `z.any()`.
+- Its **actual** type is a literal's own type, a phase's return type, or the flow at that point, with paths walking into them; a field the call's own `precheck` names has the precheck's type. Inside a nested call, `@` is what the declaration says the call field receives (`util/each`: one item of `on`), or `z.any()`.
 - A call's **return** type is its own `postcheck`, else its declared output, resolved against its fields.
 
 Declarations are described in the [Service Development Guide](service_guide.md#declarations). Type issues are listed in `plan().errors` ([Plan errors](#plan-errors)). `plan()` never runs anything, and run-time validation still decides whether a call runs.
@@ -281,7 +281,7 @@ Each of `plan().errors` is `{address, code, message, expected, actual}`. `addres
 | `maybe-missing` | an optional or nullable value goes into a required field | only when the value is there |
 | `type-narrowing` | a value whose type isn't known (`any`), or is wider (a string for an enum), goes into a narrower field | when the value fits; the field's validation decides |
 
-A `postcheck` on the call that produces a value gives it a type, which turns `type-narrowing` into either nothing or a definite answer.
+A `postcheck` on the call that produces a value gives it a type, as does a `precheck` on the call that receives it; either turns `type-narrowing` into either nothing or a definite answer.
 
 A call field with a `catch` returns its nested call's type or the `catch`'s, as a union; `[util]/throw` returns `never`, which adds nothing, and `skip` removes the members its schema fits. This union is provisional.
 

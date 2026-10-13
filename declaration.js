@@ -17,15 +17,22 @@
  *   type       the field's type; on a call field, what the nested call
  *              returns; on the output, what the operation returns
  *
- * A source names a type, by reading one (from*) or building one (to*):
+ * A source names a type, by reading one (from*) or building one (to*), or
+ * by operating on two (the type operators in types.js):
  *   {fromZod: schema}     a concrete zod schema
  *   {fromField: path}     the type of another field (a call field: its return)
  *   {fromList: path}      one item of a list field
  *   {fromObject: path}    one value of an object field
+ *   {fromValue: path}     the literal written in a field, as a type: ['name']
+ *                         is the tuple of literal 'name'
+ *   {fromZodly: source}   the schema a zodly descriptor describes, given the
+ *                         descriptor's literal type
  *   {toList: source}      a list of the source's type
  *   {toObject: source}    an object whose values are the source's type
- *   {without: [source, path]}  the source's type less the members that fit
- *                         the zodly schema the field at path holds
+ *   {union: [a, b]}       a value of either
+ *   {difference: [a, b]}  a's members less those that fit b
+ *   {pick: [a, keys]}     a with only the fields keys names, as [util]/pick
+ *   {merge: [a, b]}       b laid over a, as [util]/merge
  *
  * Only fromZod types are checked at run time; the rest are resolved by plan().
  * Field paths are dotted, with `..` for a dot inside a field name.
@@ -35,25 +42,40 @@ import {z} from 'zod'
 import {isPlainObject, mapValues, parseFieldPath} from './common.js'
 
 const FLAGS = ['target', 'reserve', 'settings']
-const READ_SOURCES = ['fromField', 'fromList', 'fromObject']
-const BUILD_SOURCES = ['toList', 'toObject']
-const SOURCES = ['fromZod', ...READ_SOURCES, ...BUILD_SOURCES, 'without']
+
+// What each kind of source takes: a zod schema, a field path, a source, or a
+// pair of sources.
+const TAKES = {
+  schema: {as: 'a zod schema', fits: (value) => value instanceof z.ZodType},
+  path: {as: 'a field path', fits: (value) => typeof value === 'string'},
+  source: {as: 'a source', fits: (value) => checkSource(value)},
+  pair: {as: '[source, source]', fits: (value) => Array.isArray(value) && value.length === 2 && value.every(checkSource)}
+}
+
+const SOURCES = {
+  fromZod: 'schema',
+  fromField: 'path',
+  fromList: 'path',
+  fromObject: 'path',
+  fromValue: 'path',
+  fromZodly: 'source',
+  toList: 'source',
+  toObject: 'source',
+  union: 'pair',
+  difference: 'pair',
+  pick: 'pair',
+  merge: 'pair'
+}
 
 // A source is checked whole, so a malformed one is refused where it's declared.
 function checkSource(source) {
   const keys = isPlainObject(source) ? Object.keys(source) : []
-  if (keys.length !== 1 || !SOURCES.includes(keys[0])) {
-    throw new Error(`A source has exactly one of ${SOURCES.join(', ')}. Got: ${JSON.stringify(source)}`)
+  if (keys.length !== 1 || !Object.hasOwn(SOURCES, keys[0])) {
+    throw new Error(`A source has exactly one of ${Object.keys(SOURCES).join(', ')}. Got: ${JSON.stringify(source)}`)
   }
   const [kind] = keys
-  const value = source[kind]
-  if (kind === 'fromZod' && !(value instanceof z.ZodType)) throw new Error('fromZod takes a zod schema')
-  if (READ_SOURCES.includes(kind) && typeof value !== 'string') throw new Error(`${kind} takes a field path`)
-  if (BUILD_SOURCES.includes(kind)) checkSource(value)
-  if (kind === 'without') {
-    if (!Array.isArray(value) || value.length !== 2 || typeof value[1] !== 'string') throw new Error('without takes [source, field path]')
-    checkSource(value[0])
-  }
+  const takes = TAKES[SOURCES[kind]]
+  if (!takes.fits(source[kind])) throw new Error(`${kind} takes ${takes.as}`)
   return source
 }
 

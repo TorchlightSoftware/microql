@@ -14,7 +14,9 @@ const branch = serviceFromTable({
     input: {url: [['type', {fromZod: z.string()}]]},
     output: [['type', {fromZod: z.object({url: z.string(), images: z.array(z.object({src: z.string()})).optional()})}]],
     call: async ({url}) => ({url})
-  }
+  },
+  // Declares nothing, so the plan can't know what it returns.
+  '/fetch': {call: async () => ({name: 'x', age: 1})}
 })
 
 const query = {
@@ -206,6 +208,7 @@ describe('type inference', () => {
       [{address: '$kept.@1.service', code: 'type-mismatch', message: '$kept.@1.service expects boolean but receives {url: string, images?: array of {src: string}}'}])
   })
 
+  const person = {name: 'Ada', age: 36, tags: ['math']}
   // [description, phase, its return type]
   const relationships = [
     ['each returns a list of what its call returns (toList)',
@@ -222,21 +225,36 @@ describe('type inference', () => {
       '{url: string}'],
     ['each returns what its catch does in place of a failed item',
       ['$given.urls', '[util]/each', {service: ['[branch]/extract', {url: '@'}], catch: ['@err', '[util]/log']}],
-      'array of {url: string, images?: array of {src: string}} | error'],
+      'array of ({url: string, images?: array of {src: string}} | error)'],
     ['each leaves out the members of its items\' type that fit skip',
       ['$given.urls', '[util]/each', {service: ['[branch]/extract', {url: '@'}], catch: ['@err', '[util]/log'], skip: ['error']}],
       'array of {url: string, images?: array of {src: string}}'],
     ['try returns what its call returns',
       ['$given.u', '[util]/try', {service: ['[branch]/extract', {url: '@'}], catch: ['@err', '[util]/log']}],
       '{url: string, images?: array of {src: string}} | error'],
+    ['when returns either branch (union)',
+      ['[util]/when', {test: true, then: 1, otherwise: 'none'}],
+      'number | string'],
+    ['pick keeps the fields named in a written-out list (pick, fromValue)',
+      ['$given.person', '[util]/pick', {fields: ['name', 'tags']}],
+      '{name: string, tags: array of string}'],
+    ['pick keeps the whole type when its fields aren\'t known before the Run',
+      ['$given.person', '[util]/pick', {fields: '$given.keys'}],
+      '{name: string, age: number, tags: array of string}'],
+    ['merge lays with over on, deeply, joining lists (merge)',
+      ['$given.person', '[util]/merge', {with: {age: 'unknown', tags: [1], profile: {theme: 'dark'}}}],
+      '{name: string, age: string, tags: array of (string | number), profile: {theme: string}}'],
+    ['a call\'s precheck over what flows into its fields',
+      [['[branch]/fetch', {}], ['@', '[util]/pick', {fields: ['name'], precheck: {on: {name: ['string'], age: ['number']}}}]],
+      '{name: string}'],
     ['any where nothing is declared',
-      ['[util]/when', {test: true, then: 1, otherwise: 2}],
+      ['[branch]/fetch', {}],
       'any']
   ]
 
   for (const [description, phase, returns] of relationships) {
     it(`knows ${description}`, () => {
-      const {phases, errors} = plan({given: {u: 'x', urls: ['a', 'b'], groups: [['a'], ['b']]}, services: {branch}, phases: {a: phase}})
+      const {phases, errors} = plan({given: {u: 'x', urls: ['a', 'b'], groups: [['a'], ['b']], person, keys: ['name']}, services: {branch}, phases: {a: phase}})
       assert.deepEqual(errors, [])
       assert.equal(describeSchema(phases[0].returns), returns)
     })

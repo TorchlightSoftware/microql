@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
 import {z} from 'zod'
-import {any, isAny, schemaOfValue, schemaAtPath, elementOf, valueOf, compare, describeSchema, eitherOf, without} from '../types.js'
+import {any, isAny, schemaOfValue, schemaAtPath, elementOf, valueOf, compare, describeSchema, union, difference, literalOf, isLiteral, valueOfLiteral, describedBy, pick, merge} from '../types.js'
 import {errorSchema} from '../errors.js'
 
 describe('describeSchema', () => {
@@ -23,7 +23,9 @@ describe('describeSchema', () => {
     [z.record(z.string(), z.number()), 'record of number'],
     [z.string().optional(), 'string (optional)'],
     [z.string().nullable(), 'string (nullable)'],
-    [z.string().default('x'), 'string']
+    [z.string().default('x'), 'string'],
+    [z.tuple([z.literal('a'), z.number()]), '[literal "a", number]'],
+    [z.array(z.union([z.string(), z.number()])), 'array of (string | number)']
   ]
 
   for (const [schema, description] of cases) {
@@ -134,9 +136,14 @@ describe('compare', () => {
     ['an object with a field of the wrong type', z.object({a: z.string()}), z.object({a: z.number()}), at('type-mismatch', 'a')],
     ['an object lacking a required field', z.object({a: z.string()}), z.object({}), at('type-mismatch', 'a')],
     ['an object lacking an optional field', z.object({a: z.string().optional()}), z.object({}), fits],
+    ['a loose object not listing a required field, which it may have', z.object({a: z.string()}), z.looseObject({}), at('type-narrowing', 'a')],
+    ['an object open to fields of a type, not listing one of it', z.object({a: z.string()}), z.object({}).catchall(z.string()), at('maybe-missing', 'a')],
+    ['an object open to fields of another type, not listing one', z.object({a: z.string()}), z.object({}).catchall(z.number()), [{code: 'maybe-missing', path: ['a']}, {code: 'type-mismatch', path: ['a']}]],
+    ['a strict object lacking a required field', z.object({a: z.string()}), z.strictObject({}), at('type-mismatch', 'a')],
     ['an object whose field may be missing', z.object({a: z.string()}), z.object({a: z.string().optional()}), at('maybe-missing', 'a')],
     ['nested objects', z.object({a: z.object({b: z.string()})}), z.object({a: z.object({b: z.number()})}), at('type-mismatch', 'a', 'b')],
     ['a record, into an object', z.object({a: z.string()}), z.record(z.string(), z.string()), at('maybe-missing', 'a')],
+    ['a record of unknown values, into an object', z.object({a: z.string()}), z.record(z.string(), z.any()), at('type-narrowing', 'a')],
     ['an object, into a record', z.record(z.string(), z.number()), z.object({a: z.number(), b: z.string()}), at('type-mismatch', 'b')],
     ['records of the same values', z.record(z.string(), z.number()), z.record(z.string(), z.number()), fits],
     ['what fits one member, into a union', z.union([z.string(), z.number()]), z.number(), fits],
@@ -161,23 +168,24 @@ describe('compare', () => {
   })
 })
 
-describe('eitherOf', () => {
+describe('union', () => {
   // [description, one, other, the union described]
   const cases = [
     ['joins two schemas', z.string(), z.number(), 'string | number'],
     ['flattens unions into one', z.union([z.string(), z.number()]), errorSchema, 'string | number | error'],
+    ['names a type once', z.number(), z.union([z.number(), z.string()]), 'number | string'],
     ['adds nothing for never, what a call that always throws returns', z.string(), z.never(), 'string'],
     ['is never when both are', z.never(), z.never(), 'never']
   ]
 
-  for (const [description, one, other, union] of cases) {
+  for (const [description, one, other, joined] of cases) {
     it(description, () => {
-      assert.equal(describeSchema(eitherOf(one, other)), union)
+      assert.equal(describeSchema(union(one, other)), joined)
     })
   }
 })
 
-describe('without', () => {
+describe('difference', () => {
   // [description, schema, removed, what's left]
   const cases = [
     ['removes the members that fit', z.union([z.string(), errorSchema]), errorSchema, 'string'],
@@ -185,12 +193,106 @@ describe('without', () => {
     ['keeps a schema with nothing that fits', z.string(), errorSchema, 'string'],
     ['keeps any, which might be anything', z.union([any, errorSchema]), errorSchema, 'any'],
     ['is never when everything fits', errorSchema, errorSchema, 'never'],
-    ['keeps the schema when nothing is removed', z.string(), undefined, 'string']
+    ['keeps the schema when nothing is removed (never)', z.string(), z.never(), 'string'],
+    ['keeps the schema when what is removed is unknown (any)', z.union([z.string(), errorSchema]), any, 'string | error']
   ]
 
   for (const [description, schema, removed, left] of cases) {
     it(description, () => {
-      assert.equal(describeSchema(without(schema, removed)), left)
+      assert.equal(describeSchema(difference(schema, removed)), left)
+    })
+  }
+})
+
+describe('literals', () => {
+  // [description, value, its literal type described]
+  const cases = [
+    ['a string', 'name', 'literal "name"'],
+    ['a number', 3, 'literal 3'],
+    ['null', null, 'literal null'],
+    ['nothing', undefined, 'undefined'],
+    ['a list, item by item', ['name', 'url'], '[literal "name", literal "url"]'],
+    ['an object, field by field', {min: 1}, '{min: literal 1}'],
+    ['a value with no literal type, as any', /x/, 'any']
+  ]
+
+  for (const [description, value, described] of cases) {
+    it(`types ${description}`, () => {
+      assert.equal(describeSchema(literalOf(value)), described)
+    })
+  }
+
+  // [description, value]
+  const roundTrips = [
+    ['a zodly descriptor', ['union', ['error'], ['null']]],
+    ['a descriptor with options', ['array', ['string'], {min: 1}]],
+    ['an object descriptor', {name: ['string', 'optional']}]
+  ]
+
+  for (const [description, value] of roundTrips) {
+    it(`reads back ${description} from its literal type`, () => {
+      assert.deepEqual(valueOfLiteral(literalOf(value)), value)
+    })
+  }
+
+  it('reads back no value from a type that isn\'t a literal', () => {
+    assert.equal(isLiteral(z.tuple([z.literal('a'), z.string()])), false)
+  })
+})
+
+describe('describedBy', () => {
+  // [description, literal type, the schema it describes]
+  const cases = [
+    ['a zodly descriptor\'s schema', literalOf(['error']), 'error'],
+    ['nothing, for no descriptor', literalOf(undefined), 'never'],
+    ['any, for a descriptor not known before the Run', any, 'any']
+  ]
+
+  for (const [description, type, described] of cases) {
+    it(`is ${description}`, () => {
+      assert.equal(describeSchema(describedBy(type)), described)
+    })
+  }
+})
+
+describe('pick', () => {
+  const person = z.object({name: z.string(), age: z.number().optional(), url: z.string()})
+  // [description, schema, keys, what's picked]
+  const cases = [
+    ['keeps the named fields', person, literalOf(['name', 'age']), '{name: string, age?: number}'],
+    ['leaves out names the object doesn\'t have', person, literalOf(['name', 'nope']), '{name: string}'],
+    ['takes keys as a union of literals, as TypeScript\'s Pick does', person, z.union([z.literal('url'), z.literal('name')]), '{url: string, name: string}'],
+    ['picks from each member of a union', z.union([person, z.object({name: z.number()})]), literalOf(['name']), '{name: string} | {name: number}'],
+    ['keeps the schema when the keys aren\'t known before the Run', person, z.array(z.string()), '{name: string, age?: number, url: string}'],
+    ['keeps any', any, literalOf(['name']), 'any'],
+    ['takes a name a loose object may have as unknown, and maybe absent', z.looseObject({name: z.string()}), literalOf(['name', 'href']), '{name: string, href?: unknown}']
+  ]
+
+  for (const [description, schema, keys, picked] of cases) {
+    it(description, () => {
+      assert.equal(describeSchema(pick(schema, keys)), picked)
+    })
+  }
+})
+
+describe('merge', () => {
+  // [description, on, with, merged]: what [util]/merge returns, as a type
+  const cases = [
+    ['adds fields', z.object({a: z.string()}), z.object({b: z.number()}), '{a: string, b: number}'],
+    ['merges objects field by field, deeply', z.object({p: z.object({a: z.string()})}), z.object({p: z.object({b: z.number()})}), '{p: {a: string, b: number}}'],
+    ['joins lists as a list of either item', z.object({tags: z.array(z.string())}), z.object({tags: z.array(z.number())}), '{tags: array of (string | number)}'],
+    ['lets any other value of with win', z.object({a: z.string()}), z.object({a: z.number()}), '{a: number}'],
+    ['keeps on\'s value where with\'s may be undefined', z.object({a: z.string()}), z.object({a: z.number().optional()}), '{a: number | string}'],
+    ['is on when with is nothing', z.object({a: z.string()}), z.undefined(), '{a: string}'],
+    ['is any when on is and with is an object: on may have fields with doesn\'t', any, z.object({a: z.string()}), 'any'],
+    ['is with when on is any and with is a value, which wins', any, z.number(), 'number'],
+    ['is any when with is', z.object({a: z.string()}), any, 'any'],
+    ['keeps on loose, so it may still have fields neither lists', z.looseObject({a: z.string()}), z.object({b: z.number()}), '{a: string, b: number, ...unknown}']
+  ]
+
+  for (const [description, on, withSchema, merged] of cases) {
+    it(description, () => {
+      assert.equal(describeSchema(merge(on, withSchema)), merged)
     })
   }
 })
