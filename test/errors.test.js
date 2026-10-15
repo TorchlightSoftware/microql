@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import {zerialize, dezerialize} from 'zodex'
-import {errorSchema, isErrorData, toErrorData, fromErrorData} from '../errors.js'
-import {parseSchema} from '../zodly.js'
+import {isErrorData, toErrorData, fromErrorData} from '../errors.js'
 
 // An Error labelled the way MicroQL labels the call that raised it.
 const labelled = (message, fields, options) => Object.assign(new Error(message, options), fields)
@@ -60,27 +58,4 @@ describe('errors as data', () => {
       assert.equal(isErrorData(value), expected)
     })
   }
-
-  it('is zodly\'s error type', () => {
-    assert.equal(parseSchema(['error']), errorSchema)
-    assert.equal(parseSchema('error'), errorSchema)
-    assert.equal(parseSchema(['error', 'optional']).safeParse(undefined).success, true)
-  })
-
-  it('serializes through zodex as the object it is (docs/zodly-zodex.md § The error type)', () => {
-    assert.deepEqual(zerialize(errorSchema), {
-      type: 'object',
-      properties: {
-        '@type': {type: 'literal', values: ['Error']},
-        name: {type: 'string'},
-        message: {type: 'string'}
-      },
-      catchall: {type: 'unknown'}
-    })
-  })
-
-  it('round-trips through zodex, recognising the same values', () => {
-    const revived = dezerialize(zerialize(errorSchema))
-    for (const [value, expected] of recognised) assert.equal(revived.safeParse(value).success, expected)
-  })
 })

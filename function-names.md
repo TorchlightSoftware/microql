@@ -24,12 +24,12 @@ The tables below are generated. Regenerate them with `npm run docs:functions` af
 | line | name | kind | lines | refs | 0.6 |
 |---|---|---|---|---|---|
 | 14 | `getServiceColorName` | const | 6 | 1 | ✓ |
-| 23 | `isPlainObject` | const | 5 | 16 |  |
-| 33 | `mapValues` | const | 5 | 14 |  |
+| 23 | `isPlainObject` | const | 5 | 17 |  |
+| 33 | `mapValues` | const | 5 | 13 |  |
 | 40 | `filterObject` | const | 2 | 1 |  |
 | 44 | `pick` | const | 2 | 6 | ✓ |
 | 47 | `omit` | const | 1 | 5 |  |
-| 50 | `getIn` | const | 1 | 12 |  |
+| 50 | `getIn` | const | 1 | 11 |  |
 | 54 | `setIn` | const | 4 | 3 |  |
 | 60 | `omitIn` | const | 4 | 2 |  |
 | 68 | `parseFieldPath` | const | 5 | 5 |  |
@@ -80,20 +80,37 @@ The tables below are generated. Regenerate them with `npm run docs:functions` af
 
 | line | name | kind | lines | refs | 0.6 |
 |---|---|---|---|---|---|
-| 49 | `fits` | property | 1 | — |  |
-| 50 | `fits` | property | 1 | — |  |
-| 51 | `fits` | property | 1 | — |  |
-| 52 | `fits` | property | 1 | — |  |
-| 71 | `checkSource` | function | 10 | 3 |  |
-| 83 | `readTag` | function | 8 | 2 |  |
-| 93 | `readField` | function | 14 | 1 |  |
-| 95 | `named` | const | 1 | 6 |  |
-| 108 | `isPrefix` | const | 1 | 1 |  |
-| 113 | `inputSchemaOf` | function | 21 | 1 |  |
-| 126 | `toSchema` | const | 6 | 2 |  |
-| 135 | `readOutput` | function | 5 | 1 |  |
-| 141 | `readDeclaration` | function | 15 | 1 |  |
-| 164 | `declarationOf` | function | 4 | 1 |  |
+| 55 | `fits` | property | 1 | — |  |
+| 56 | `fits` | property | 1 | — |  |
+| 57 | `fits` | property | 1 | — |  |
+| 58 | `fits` | property | 1 | — |  |
+| 77 | `checkSource` | function | 10 | 3 |  |
+| 90 | `readType` | function | 8 | 1 |  |
+| 100 | `readTag` | function | 8 | 2 |  |
+| 110 | `readField` | function | 14 | 1 |  |
+| 112 | `named` | const | 1 | 6 |  |
+| 125 | `isPrefix` | const | 1 | 1 |  |
+| 130 | `inputSchemaOf` | function | 21 | 1 |  |
+| 143 | `toSchema` | const | 6 | 2 |  |
+| 152 | `readOutput` | function | 5 | 1 |  |
+| 158 | `readDeclaration` | function | 15 | 1 |  |
+| 181 | `declarationOf` | function | 4 | 1 |  |
+
+## define-service.js
+
+| line | name | kind | lines | refs | 0.6 |
+|---|---|---|---|---|---|
+| 16 | `isOperation` | const | 1 | 1 |  |
+| 20 | `operationOf` | function | 4 | 1 |  |
+| 22 | `call` | property | 1 | — |  |
+| 26 | `operationsByResource` | function | 8 | 1 |  |
+| 35 | `verbsOf` | const | 1 | 2 |  |
+| 41 | `defineService` | function | 24 | 1 |  |
+| 43 | `name` | const | 1 | 3 |  |
+| 45 | `lookup` | function | 11 | 1 |  |
+| 59 | `operations` | property | 1 | — |  |
+| 61 | `init` | property | 1 | — |  |
+| 62 | `tearDown` | property | 1 | — |  |
 
 ## errors.js
 
@@ -262,55 +279,38 @@ The tables below are generated. Regenerate them with `npm run docs:functions` af
 | 30 | `list` | property | 3 | — |  |
 | 34 | `clear` | property | 4 | — |  |
 
-## service-table.js
-
-| line | name | kind | lines | refs | 0.6 |
-|---|---|---|---|---|---|
-| 16 | `isOperation` | const | 1 | 1 |  |
-| 20 | `operationOf` | function | 4 | 1 |  |
-| 22 | `call` | property | 1 | — |  |
-| 26 | `operationsByResource` | function | 8 | 1 |  |
-| 35 | `verbsOf` | const | 1 | 2 |  |
-| 41 | `serviceFromTable` | function | 24 | 1 |  |
-| 43 | `name` | const | 1 | 3 |  |
-| 45 | `lookup` | function | 11 | 1 |  |
-| 59 | `operations` | property | 1 | — |  |
-| 61 | `init` | property | 1 | — |  |
-| 62 | `tearDown` | property | 1 | — |  |
-
 ## services/util.js
 
 | line | name | kind | lines | refs | 0.6 |
 |---|---|---|---|---|---|
-| 20 | `copyPlain` | const | 2 | 5 |  |
-| 24 | `union` | function | 10 | 1 |  |
-| 38 | `mergeValues` | function | 9 | 2 |  |
-| 52 | `typed` | const | 1 | 27 |  |
-| 59 | `leftOver` | const | 1 | 2 |  |
-| 67 | `eachItem` | const | 1 | 2 |  |
-| 70 | `leaveOut` | function | 5 | 2 |  |
-| 78 | `asError` | const | 1 | 2 |  |
-| 97 | `init` | property | 3 | — |  |
-| 105 | `call` | property | 1 | — |  |
-| 112 | `call` | property | 1 | — |  |
-| 119 | `call` | property | 1 | — |  |
-| 126 | `call` | property | 3 | — |  |
-| 139 | `call` | property | 5 | — |  |
-| 150 | `call` | property | 1 | — |  |
-| 157 | `call` | property | 1 | — |  |
-| 163 | `call` | property | 1 | — |  |
-| 169 | `call` | property | 1 | — |  |
-| 176 | `call` | property | 1 | — |  |
-| 183 | `call` | property | 1 | — |  |
-| 189 | `call` | property | 1 | — |  |
-| 195 | `call` | property | 1 | — |  |
-| 202 | `call` | property | 1 | — |  |
-| 209 | `call` | property | 1 | — |  |
-| 216 | `call` | property | 1 | — |  |
-| 223 | `call` | property | 5 | — |  |
-| 234 | `call` | property | 4 | — |  |
-| 243 | `call` | property | 1 | — |  |
-| 252 | `lookup` | property | 4 | — |  |
+| 19 | `copyPlain` | const | 2 | 5 |  |
+| 23 | `union` | function | 10 | 1 |  |
+| 37 | `mergeValues` | function | 9 | 2 |  |
+| 57 | `leftOver` | const | 1 | 2 |  |
+| 65 | `eachItem` | const | 1 | 2 |  |
+| 68 | `leaveOut` | function | 5 | 2 |  |
+| 76 | `asError` | const | 1 | 2 |  |
+| 95 | `init` | property | 3 | — |  |
+| 103 | `call` | property | 1 | — |  |
+| 110 | `call` | property | 1 | — |  |
+| 117 | `call` | property | 1 | — |  |
+| 124 | `call` | property | 3 | — |  |
+| 137 | `call` | property | 5 | — |  |
+| 148 | `call` | property | 1 | — |  |
+| 155 | `call` | property | 1 | — |  |
+| 161 | `call` | property | 1 | — |  |
+| 167 | `call` | property | 1 | — |  |
+| 174 | `call` | property | 1 | — |  |
+| 181 | `call` | property | 1 | — |  |
+| 187 | `call` | property | 1 | — |  |
+| 193 | `call` | property | 1 | — |  |
+| 200 | `call` | property | 1 | — |  |
+| 207 | `call` | property | 1 | — |  |
+| 214 | `call` | property | 1 | — |  |
+| 221 | `call` | property | 5 | — |  |
+| 232 | `call` | property | 4 | — |  |
+| 241 | `call` | property | 1 | — |  |
+| 250 | `lookup` | property | 4 | — |  |
 
 ## types.js
 
@@ -394,19 +394,4 @@ The tables below are generated. Regenerate them with `npm run docs:functions` af
 | 239 | `wrappersFor` | function | 16 | 1 |  |
 | 257 | `wrap` | function | 4 | 1 |  |
 | 258 | `operation` | const | 1 | 1 |  |
-
-## zodly.js
-
-| line | name | kind | lines | refs | 0.6 |
-|---|---|---|---|---|---|
-| 32 | `error` | property | 1 | — |  |
-| 35 | `primitive` | const | 1 | 2 |  |
-| 69 | `showAsJson` | const | 1 | 1 |  |
-| 72 | `pathText` | const | 2 | 1 |  |
-| 77 | `formatError` | function | 26 | 1 | ✓ |
-| 107 | `validate` | function | 10 | 3 | ✓ |
-| 123 | `parseSchema` | function | 10 | 4 | ✓ |
-| 134 | `parseSchemaRecursive` | function | 116 | 7 | ✓ |
-| 251 | `applyModifiers` | function | 16 | 8 | ✓ |
-| 268 | `transformObjectShape` | const | 1 | 2 | ✓ |
 <!-- /generated:function-names -->

@@ -25,7 +25,7 @@ The platform is yours. [A suggested architecture](#a-suggested-architecture) at 
 | `microql` | `index.js` | core with the node runtime wired in. `query()` uses the node runtime, and a fresh in-memory Run State unless you pass one. Also exports `nodeRuntime` and `fileStore`. |
 | `microql/core` | `core.js` | core alone, with no runtime of its own. `execute` refuses to run without a `runtime` and a `runState`. A lint rule keeps node built-ins out of every core file. |
 
-MicroQL has an internal compile step that turns a Query into a plan - an internal memory representation which is also serializeable. "compile" does not infer any sort of language transpilation: MicroQL is just JavaScript. A plan's types are zod schemas, which [zodex](https://www.npmjs.com/package/zodex) serializes.
+MicroQL has an internal compile step that turns a Query into a plan - an internal memory representation which is also serializeable. "compile" does not infer any sort of language transpilation: MicroQL is just JavaScript. A plan's types are zod schemas, which [zodex](https://www.npmjs.com/package/zodex) serializes; zodex 4.0.1 drops a format written as a check, such as zodly's `['string', 'email']` (see zodly's comparison with zodex).
 
 Both export:
 
@@ -39,7 +39,8 @@ Both export:
 | `addressToPath(plan, address)`, `pathToAddress(plan, path)` | [Service Call Addresses](#service-call-addresses) ↔ JSON paths |
 | `memoryStore()` | an [entry store](#entry-stores) in memory |
 | `util` | the built-in service |
-| `serviceFromTable(table)` | a service written as a table of operations; see the [Service Development Guide](service_guide.md#writing-a-service-as-a-table) |
+| `defineService(serviceDefinition)` | a service from a service definition, resources mapped to operations; see the [Service Development Guide](service-guide.md#writing-a-service-with-defineservice) |
+| `parseSchema(descriptor)` | the zod schema a [zodly](validation.md#schema-syntax) descriptor describes, for a service that hands schemas to a library |
 | `errorSchema`, `isErrorData`, `toErrorData`, `fromErrorData` | [errors as data](#errors-as-data) |
 | `format(value, options)` | a value as text, the same on every runtime |
 
@@ -225,11 +226,11 @@ Hashes are SHA-256 over canonical JSON, computed synchronously in pure JS (`@nob
 
 `plan()` infers a type for every service call and every input field, as zod schemas. An editor, such as a visual Builder, converts them to whatever types it displays; core has no types of its own. `z.any()` stands for a type that can't be known.
 
-- A field's **expected** type comes from the operation's declaration: its `fromZod` type, or a relationship to another field's type. A call field's expected type is what its nested call must return; `util/filter` wants boolean.
+- A field's **expected** type comes from the operation's declaration: its concrete type (a zodly descriptor or zod schema), or a relationship to another field's type. A call field's expected type is what its nested call must return; `util/filter` wants boolean.
 - Its **actual** type is a literal's own type, a phase's return type, or the flow at that point, with paths walking into them; a field the call's own `precheck` names has the precheck's type. Inside a nested call, `@` is what the declaration says the call field receives (`util/each`: one item of `on`), or `z.any()`.
 - A call's **return** type is its own `postcheck`, else its declared output, resolved against its fields.
 
-Declarations are described in the [Service Development Guide](service_guide.md#declarations). Type issues are listed in `plan().errors` ([Plan errors](#plan-errors)). `plan()` never runs anything, and run-time validation still decides whether a call runs.
+Declarations are described in the [Service Development Guide](service-guide.md#declarations). Type issues are listed in `plan().errors` ([Plan errors](#plan-errors)). `plan()` never runs anything, and run-time validation still decides whether a call runs.
 
 ## Errors
 
@@ -309,13 +310,13 @@ The Run State is per Run, so it is an option of `execute`, not a capability of t
 A Query should run on any runtime that has the services it names, without changes. So services, not Queries, deal with the runtime: a Query calls `[util]/log`, and `util` calls `runtime.log`.
 
 - **A runtime may offer more keys than the standard ones.** That is how new capabilities are tried out.
-- **A service that uses a key lists it in `requires`** (`serviceFromTable` takes it from the table). A Run on a runtime without it fails before any call starts, with `missing-capability`, rather than halfway through.
+- **A service that uses a key lists it in `requires`** (`defineService` takes it from the service definition). A Run on a runtime without it fails before any call starts, with `missing-capability`, rather than halfway through.
 - **Name a platform-specific service for what it does, not for the platform**: `[store]`, not `[otto]`. Another platform can then implement the same service, and Queries using it move with it.
 - **To make a key standard, bring it back to the MicroQL maintainers**, with the services that use it. A key every runtime provides is one Queries can rely on everywhere. Avoid vendor prefixes (`x-fs`): renaming one when it becomes standard breaks everything that used it.
 
 ### Services
 
-**A service is an object with `lookup(parts)` and `operations()`**, as the [Service Development Guide](service_guide.md) describes. Core needs nothing more. Turning a description of an API (an OpenAPI spec, an MCP server's tool list, a platform's route map) into such an object belongs outside core, in whatever builds services for the platform. A service that discovers its operations asynchronously does so before the Query is compiled, since `lookup` answers synchronously.
+**A service is an object with `lookup(parts)` and `operations()`**, as the [Service Development Guide](service-guide.md) describes. Core needs nothing more. Turning a description of an API (an OpenAPI spec, an MCP server's tool list, a platform's route map) into such an object belongs outside core, in whatever builds services for the platform. A service that discovers its operations asynchronously does so before the Query is compiled, since `lookup` answers synchronously.
 
 ### Service init and tearDown
 

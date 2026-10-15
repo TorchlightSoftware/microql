@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import {describe, it, beforeEach} from 'node:test'
-import query, {nodeRuntime, fileStore, serviceFromTable} from '../index.js'
+import query, {nodeRuntime, fileStore, defineService} from '../index.js'
 import {rm} from 'fs/promises'
 
 const CACHEDIR = '.cache-test-cache-error-handling'
@@ -22,7 +22,7 @@ describe('Cache Error Handling Tests', () => {
 
   // Reusable services
   const unreliableService = {
-    unreliable: serviceFromTable({
+    unreliable: defineService({
       async '/getData'({value}) {
         unreliableService.callCount++
         if (unreliableService.callCount === 1) {
@@ -35,13 +35,13 @@ describe('Cache Error Handling Tests', () => {
   unreliableService.callCount = 0
 
   const failingServices = {
-    failing: serviceFromTable({
+    failing: defineService({
       async '/process'() {
         failingServices.serviceCallCount++
         throw new Error('Always fails')
       }
     }),
-    errorHandler: serviceFromTable({
+    errorHandler: defineService({
       async '/handleError'() {
         failingServices.errorHandlerCallCount++
         return {errorHandled: true, handlerCall: failingServices.errorHandlerCallCount}
@@ -52,7 +52,7 @@ describe('Cache Error Handling Tests', () => {
   failingServices.errorHandlerCallCount = 0
 
   const conditionalServices = {
-    conditional: serviceFromTable({
+    conditional: defineService({
       async '/process'({shouldFail}) {
         conditionalServices.serviceCallCount++
         if (shouldFail) {
@@ -61,7 +61,7 @@ describe('Cache Error Handling Tests', () => {
         return {serviceResult: true, call: conditionalServices.serviceCallCount}
       }
     }),
-    errorHandler: serviceFromTable({
+    errorHandler: defineService({
       async '/handleError'() {
         conditionalServices.errorHandlerCallCount++
         return {errorResult: true, call: conditionalServices.errorHandlerCallCount}
@@ -72,7 +72,7 @@ describe('Cache Error Handling Tests', () => {
   conditionalServices.errorHandlerCallCount = 0
 
   const testServices = {
-    test: serviceFromTable({
+    test: defineService({
       async '/getData'({value}) {
         testServices.serviceCallCount++
         if (value === 'fail') {
@@ -81,7 +81,7 @@ describe('Cache Error Handling Tests', () => {
         return {data: value, call: testServices.serviceCallCount}
       }
     }),
-    errorHandler: serviceFromTable({
+    errorHandler: defineService({
       async '/handle'() {return {error: 'handled'}}
     })
   }
@@ -159,12 +159,12 @@ describe('Cache Error Handling Tests', () => {
   describe('Timestamp-based verification of cache behavior', () => {
     it('should not cache error handler results between identical calls', async () => {
       const timestampServices = {
-        failingService: serviceFromTable({
+        failingService: defineService({
           async '/process'() {
             throw new Error('Always fails')
           }
         }),
-        errorHandler: serviceFromTable({
+        errorHandler: defineService({
           async '/handle'() {
             return {handled: true, timestamp: Date.now()}
           }
@@ -204,7 +204,7 @@ describe('Cache Error Handling Tests', () => {
   describe('Source tracking verification of cache behavior', () => {
     it('should return correct source type and not mix error handler with service results', async () => {
       const sourceTrackingServices = {
-        conditionalService: serviceFromTable({
+        conditionalService: defineService({
           async '/getData'({shouldFail, id}) {
             if (shouldFail) {
               throw new Error('Intentional failure')
@@ -212,7 +212,7 @@ describe('Cache Error Handling Tests', () => {
             return {success: true, id, source: 'service'}
           }
         }),
-        errorService: serviceFromTable({
+        errorService: defineService({
           async '/handleError'() {
             return {success: false, source: 'error-handler'}
           }
@@ -289,7 +289,7 @@ describe('Cache Error Handling Tests', () => {
     it('should not allow error handler results to pollute cache for successful service calls', async () => {
       let serviceCallCount = 0
       const services = {
-        test: serviceFromTable({
+        test: defineService({
           async '/getData'({value}) {
             serviceCallCount++
             if (value === 'fail') {
@@ -298,7 +298,7 @@ describe('Cache Error Handling Tests', () => {
             return {data: value, call: serviceCallCount}
           }
         }),
-        errorHandler: serviceFromTable({
+        errorHandler: defineService({
           async '/handle'() {return {error: 'handled'}}
         })
       }

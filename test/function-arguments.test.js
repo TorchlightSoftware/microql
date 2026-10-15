@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query, {serviceFromTable} from '../index.js'
+import query, {defineService} from '../index.js'
 import util from '../services/util.js'
 
 describe('Function Arguments Tests', () => {
@@ -70,7 +70,7 @@ describe('Function Arguments Tests', () => {
   describe('Proper Service Descriptor Functions Should Work', () => {
     const testServices = {
       util,
-      string: serviceFromTable({
+      string: defineService({
         async '/includesLetter'({text, letter}) {
           return text.includes(letter)
         },

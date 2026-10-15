@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import query, {memoryStore, plan, serviceFromTable} from '../index.js'
+import query, {memoryStore, plan, defineService} from '../index.js'
 
 // A service that counts its calls by id, and fails the ids it's told to.
 const counting = (failing = new Set()) => ({
@@ -14,7 +14,7 @@ const counting = (failing = new Set()) => ({
 
 // categories → listings → records; summary depends only on categories
 const pipeline = (source) => ({
-  services: {source: serviceFromTable(source)},
+  services: {source: defineService(source)},
   phases: {
     categories: ['[source]/fetch', {id: 'categories'}],
     listings: ['[source]/fetch', {id: 'listings', after: '$categories'}],
@@ -137,7 +137,7 @@ describe('target', () => {
     const runState = memoryStore()
     const config = {
       given: {ids: [1, 2]},
-      services: {source: serviceFromTable(source)},
+      services: {source: defineService(source)},
       phases: {fetched: ['$given.ids', '[util]/each', {service: ['[source]/fetch', {id: '@'}]}]}
     }
     await query(config, {runState})
@@ -174,7 +174,7 @@ describe('abort', () => {
   }
 
   const gatedQuery = (gate, handler) => ({
-    services: {gate: serviceFromTable(gate)},
+    services: {gate: defineService(gate)},
     settings: handler ? {catch: handler} : {},
     phases: {
       quick: ['[gate]/quick', {}],
@@ -226,7 +226,7 @@ describe('abort', () => {
     gate['/handle'] = async () => { handled.push('handled') }
     const controller = new AbortController()
     const run = query({
-      services: {gate: serviceFromTable(gate)},
+      services: {gate: defineService(gate)},
       phases: {waiting: ['[util]/each', {on: [1], service: ['[gate]/wait', {}], catch: ['[gate]/handle', {}]}]}
     }, {signal: controller.signal})
 

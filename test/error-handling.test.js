@@ -3,11 +3,10 @@ import {describe, it, after} from 'node:test'
 import os from 'node:os'
 import path from 'node:path'
 import {mkdtemp, rm} from 'node:fs/promises'
-import {z} from 'zod'
-import query, {plan, serviceFromTable, fileStore} from '../index.js'
+import query, {plan, defineService, fileStore} from '../index.js'
 
 describe('Error Handling Tests', () => {
-  const errorService = serviceFromTable({
+  const errorService = defineService({
     '/fail': async () => {
       throw new Error('Service failed')
     },
@@ -18,7 +17,7 @@ describe('Error Handling Tests', () => {
 
   // Hands back what it's given, and remembers it.
   const seen = []
-  const keep = serviceFromTable({
+  const keep = defineService({
     '/same': {
       input: {on: ['target']},
       call: async ({on}) => { seen.push(on); return on }
@@ -121,7 +120,7 @@ describe('Error Handling Tests', () => {
   describe('retry', () => {
     it('runs before catch: a catch sees only a failure that outlasted its retries', async () => {
       let attempts = 0
-      const flaky = serviceFromTable({
+      const flaky = defineService({
         '/once': async () => {
           attempts++
           if (attempts === 1) throw new Error('first attempt fails')
@@ -161,10 +160,10 @@ describe('Error Handling Tests', () => {
 
   describe('Validation Error Attribution in Nested Services', () => {
     it('should attribute postcheck errors to nested service, not wrapper service', async () => {
-      const atLeastOne = z.array(z.object({})).min(1)
-      const scraper = serviceFromTable({
+      const atLeastOne = ['array', ['object', {}], {min: 1}]
+      const scraper = defineService({
         '/extract': {
-          output: [['type', {fromZod: z.object({images: atLeastOne, websites: atLeastOne})}]],
+          output: [['type', ['object', {images: atLeastOne, websites: atLeastOne}]]],
           async call() {
             return {
               images: [], // Will fail postcheck

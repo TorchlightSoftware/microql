@@ -1,10 +1,10 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query, {serviceFromTable} from '../index.js'
+import query, {defineService} from '../index.js'
 
 describe('Timeout Tests', () => {
   // Test service with configurable delays
-  const createDelayService = (delay, name) => serviceFromTable({
+  const createDelayService = (delay, name) => defineService({
     async '/delay'(_args) {
       await new Promise((resolve) => setTimeout(resolve, delay))
       return `${name} completed after ${delay}ms`

@@ -54,13 +54,13 @@
     "eslint": "^9.31.0",
     "espree": "^10.4.0",
     "fs-extra": "^11.4.1",
-    "simple-git-hooks": "^2.13.0",
-    "zodex": "^4.0.1"
+    "simple-git-hooks": "^2.13.0"
   },
   "dependencies": {
     "@noble/hashes": "^2.4.0",
     "@tlsft/service-key": "^0.4.0",
-    "zod": "^4.0.5"
+    "zod": "^4.0.5",
+    "@tlsft/zodly": "^0.1.0"
   },
   "engines": {
     "node": ">=22"

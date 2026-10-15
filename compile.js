@@ -24,7 +24,7 @@ import {parseServiceKey} from '@tlsft/service-key'
 import {RESERVE_ARGS, VALIDATION_NAMES, isPlainObject, mapValues, pick, omit, omitIn, getIn, setIn, defaults} from './common.js'
 import {declarationOf} from './declaration.js'
 import {isReference, parseReference, readOf, readsOutside} from './reference.js'
-import {parseSchema} from './zodly.js'
+import {parseSchema} from 'zodly'
 import {fieldPathOf} from './addresses.js'
 import util from './services/util.js'
 
@@ -97,7 +97,7 @@ function lookupOperation(site, services, parts) {
   const service = services[parts.service]
   if (!service) fail(site, 'unknown-service', `Service '${parts.service}' not found`)
   if (!isService(service)) {
-    fail(site, 'not-a-service', `Service '${parts.service}' must provide lookup(parts) and operations(). A service written as a table of operations gets both from serviceFromTable`)
+    fail(site, 'not-a-service', `Service '${parts.service}' must provide lookup(parts) and operations(). A service definition gets both from defineService`)
   }
   let operation
   try {

@@ -8,7 +8,7 @@ This guide is the spec for MicroQL services: what core asks of a service, how a 
 
 - [What a service is](#what-a-service-is)
 - [Service keys](#service-keys)
-- [Writing a service as a table](#writing-a-service-as-a-table)
+- [Writing a service with defineService](#writing-a-service-with-defineservice)
 - [Declarations](#declarations)
 - [Types and plan()](#types-and-plan)
 - [init and tearDown](#init-and-teardown)
@@ -36,7 +36,7 @@ An **operation** is:
 
 Everything but `call` is optional: an operation with no declaration takes any fields and returns any value. A service may also have `init` and `tearDown` ([init and tearDown](#init-and-teardown)).
 
-**Core never reads where a declaration came from.** A service may be written by hand, read from an OpenAPI document, an MCP server's tool list or a protobuf file, or generated from route definitions. Its implementation turns that into operations whose types are zod schemas. A service that discovers its operations asynchronously (fetching a spec, connecting to a server) does so before the Query is compiled, so that `lookup` can answer synchronously.
+**Core never reads where a declaration came from.** A service may be written by hand, read from an OpenAPI document, an MCP server's tool list or a protobuf file, or generated from route definitions. Its implementation turns that into operations whose types are zodly descriptors or zod schemas. A service that discovers its operations asynchronously (fetching a spec, connecting to a server) does so before the Query is compiled, so that `lookup` can answer synchronously.
 
 ## Service keys
 
@@ -61,20 +61,19 @@ Calls are request and reply. A stream, or a message that arrives later (an EDI a
 
 The retired `service:action` form is a compile error that names its replacement.
 
-## Writing a service as a table
+## Writing a service with defineService
 
-Most services are a table: resources mapped to operations. `serviceFromTable` gives a table `lookup` and `operations`:
+Most services are written as a service definition: resources mapped to operations. `defineService` turns a service definition into a service, giving it `lookup` and `operations`:
 
 ```javascript
-import {z} from 'zod'
-import {serviceFromTable} from 'microql'
+import {defineService} from 'microql'
 
-const orders = serviceFromTable({
+const orders = defineService({
   // a verbless operation, with a declaration
   '/total': {
     description: 'The sum of an order\'s prices',
-    input: {on: ['target', ['type', {fromZod: z.array(z.number())}]]},
-    output: [['type', {fromZod: z.number()}]],
+    input: {on: ['target', ['type', ['array', ['number']]]]},
+    output: [['type', ['number']]],
     call: async ({on}) => on.reduce((sum, price) => sum + price, 0)
   },
 
@@ -91,9 +90,9 @@ const orders = serviceFromTable({
 
 - A resource maps to an operation (an object with `call`, or a bare function), which answers verbless keys only, or to an object of one operation per verb, which needs one of those verbs.
 - Resource keys keep their leading `/` and may contain more of them (`'/orders/:id/items'`).
-- Operations, `init` and `tearDown` run with the table as `this`, so a table can keep what `init` gave it.
+- Operations, `init` and `tearDown` run with the service definition as `this`, so it can keep what `init` gave it.
 
-`serviceFromTable` is a convenience, not part of the spec: any object with `lookup` and `operations` is a service.
+`defineService` is a convenience, not part of the spec: any object with `lookup` and `operations` is a service.
 
 ## Declarations
 
@@ -101,9 +100,9 @@ An operation's `input` maps field paths to tags; its `output` is a list of tags.
 
 ```javascript
 input: {
-  on: ['target', ['type', {fromZod: z.array(z.any())}]],
+  on: ['target', ['type', ['array']]],
   service: [['call', {fromList: 'on'}]],
-  skip: [['type', {fromZod: z.any().optional()}]]
+  skip: [['type', ['any', 'optional']]]
 },
 output: [['type', {toList: {difference: [{fromField: 'service'}, {fromZodly: {fromValue: 'skip'}}]}}]]
 ```
@@ -113,16 +112,18 @@ output: [['type', {toList: {difference: [{fromField: 'service'}, {fromZodly: {fr
 | `'target'` | none | method syntax fills this field: `['$items', '[orders]/total']`. At most one per operation. |
 | `'reserve'` | none | the field configures the call rather than feeding it data |
 | `'settings'` | none | the field receives the call's merged settings (`inspect`, `timeout`, ...) |
-| `'call'` | optional source | the field holds a nested call or chain, handed to `call` as a function of one input; the source says what the nested call receives as `@` |
-| `'type'` | source | the field's type; on a call field, what the nested call returns; in `output`, what the operation returns |
+| `'call'` | optional type | the field holds a nested call or chain, handed to `call` as a function of one input; the type says what the nested call receives as `@` |
+| `'type'` | type | the field's type; on a call field, what the nested call returns; in `output`, what the operation returns |
 
 **Field paths** are dotted, `'params.messages'`, with `..` for a dot inside a field name (`'a..b'` is the field `a.b`).
+
+**A type** is a [zodly](validation.md) descriptor, `['string', 'url']`, a zod schema, or a source. An object is always a source, so an object type is boxed, `[{name: ['string']}]`, or written `['object', {name: ['string']}]`; a loose one, `[{name: ['string']}, 'loose']`.
 
 **A source** names a type: it reads one, builds one, or operates on two:
 
 | Source | Names |
 |---|---|
-| `{fromZod: schema}` | a zod schema |
+| `{fromZod: schema}` | a zod schema, as written in place of a descriptor |
 | `{fromField: path}` | the type of another field; for a call field, what its nested call returns |
 | `{fromList: path}` | one item of a list field |
 | `{fromObject: path}` | one value of an object field |
@@ -137,7 +138,7 @@ output: [['type', {toList: {difference: [{fromField: 'service'}, {fromZodly: {fr
 
 Sources compose: `{toObject: {fromList: 'on'}}` is an object whose values are the items of `on`. When an operator's input isn't known before the Run, it gives what it can: `pick` with unknown keys is a as it is, `merge` onto `any` is `any`.
 
-**Only `fromZod` is checked at run time.** Core builds one schema from an operation's `fromZod` input fields and checks every call's fields against it (its Service Schema Validation precheck); a `fromZod` output is checked against what the call returns (its postcheck). The other sources are relationships between fields, which `plan()` resolves ([Types and plan()](#types-and-plan)). A path and its parent can't both have a schema.
+**Only concrete types are checked at run time:** zodly descriptors, zod schemas and `fromZod`. Core builds one schema from an operation's concretely typed input fields and checks every call's fields against it (its Service Schema Validation precheck); a concrete output type is checked against what the call returns (its postcheck). The other sources are relationships between fields, which `plan()` resolves ([Types and plan()](#types-and-plan)). A path and its parent can't both have a schema.
 
 **A call that holds other calls has no timeout of its own**, unless it sets one: the calls it holds have theirs. It doesn't take a concurrency slot either, so it can't starve the calls it waits on.
 
@@ -158,7 +159,7 @@ Sources compose: `{toObject: {fromList: 'on'}}` is an object whose values are th
 
 ## Types and plan()
 
-`plan()` types every call's fields and result as zod schemas, without running anything. A field's type is what flows into it: a `$given` value's own type, the trigger's schema, or the output type of the call that feeds it. When nothing known flows in, the field's declared `fromZod` type stands in. What can't be known is `z.any()`. Where it reaches a typed field, the plan says so with a `type-narrowing` error, which a platform may treat as a warning: the field's own validation checks the value when the call runs ([Runtime Integration § Errors](runtime-integration.md#errors)).
+`plan()` types every call's fields and result as zod schemas, without running anything. A field's type is what flows into it: a `$given` value's own type, the trigger's schema, or the output type of the call that feeds it. When nothing known flows in, the field's declared concrete type stands in. What can't be known is `z.any()`. Where it reaches a typed field, the plan says so with a `type-narrowing` error, which a platform may treat as a warning: the field's own validation checks the value when the call runs ([Runtime Integration § Errors](runtime-integration.md#errors)).
 
 **Relationships carry types through flow control.** `util/each` declares that its nested call receives one item of `on`, and that it returns a list of what its nested call returns:
 
@@ -184,9 +185,9 @@ A service may define two lifecycle functions:
 - **`tearDown()`** is called after a Run, on each service the Run used. Errors thrown here are logged and swallowed.
 
 ```javascript
-import {serviceFromTable, format} from 'microql'
+import {defineService, format} from 'microql'
 
-const reporter = serviceFromTable({
+const reporter = defineService({
   requires: ['log'],
   init(runtime) {
     this.runtime = runtime
@@ -213,7 +214,7 @@ const reporter = serviceFromTable({
 Services throw errors for exceptional conditions. MicroQL labels each error with the `address` and `key` of the call that raised it, the Query's form hash, and the inputs it was given.
 
 ```javascript
-const users = serviceFromTable({
+const users = defineService({
   async '/getUser'({id}) {
     const user = await db.users.findById(id)
     if (!user) throw new Error(`User not found: ${id}`)
@@ -285,7 +286,7 @@ await query({runtime, phases: {...}})
 
 1. **One responsibility per operation.** Compose in the Query, where MicroQL can see the dependencies and run independent calls in parallel, rather than calling one service from another.
 2. **Clear field names.** `{to, subject, body}`, not `{a, b, c}`.
-3. **Declare what you can.** A `fromZod` type on each input field and on the output catches bad calls at their first run, and lets `plan()` type everything downstream.
+3. **Declare what you can.** A concrete type on each input field and on the output catches bad calls at their first run, and lets `plan()` type everything downstream.
 4. **Stateless calls.** MicroQL runs identical calls once and reuses results from the Run State and the Cache, so a call's result should depend only on its fields. What `init` gives a service isn't call state.
 5. **Reach the environment through the runtime**, so a service runs wherever MicroQL does.
 
@@ -332,7 +333,7 @@ For a service that needs configuration, close over it:
 
 ```javascript
 function api(baseUrl, apiKey) {
-  return serviceFromTable({
+  return defineService({
     async '/get'({endpoint, params}) {
       const url = new URL(endpoint, baseUrl)
       Object.entries(params ?? {}).forEach(([key, value]) => url.searchParams.set(key, value))

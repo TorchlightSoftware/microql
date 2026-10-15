@@ -1,7 +1,6 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import {z} from 'zod'
-import query, {serviceFromTable} from '../index.js'
+import query, {defineService} from '../index.js'
 
 describe('Rate Limit Tests', () => {
   describe('Basic Rate Limiting', () => {
@@ -10,7 +9,7 @@ describe('Rate Limit Tests', () => {
       const callTimes = []
 
       const services = {
-        claude: serviceFromTable({
+        claude: defineService({
           async '/process'({input}) {
             callTimes.push(Date.now() - startTime)
             return {processed: input, callNumber: callTimes.length}
@@ -59,13 +58,13 @@ describe('Rate Limit Tests', () => {
       const callTimes = []
 
       const services = {
-        fast: serviceFromTable({
+        fast: defineService({
           async '/process'({input}) {
             callTimes.push(Date.now() - startTime)
             return {processed: input}
           }
         }),
-        claude: serviceFromTable({
+        claude: defineService({
           async '/process'({input}) {
             callTimes.push(Date.now() - startTime)
             return {processed: input}
@@ -103,13 +102,13 @@ describe('Rate Limit Tests', () => {
       const callTimesB = []
 
       const services = {
-        serviceA: serviceFromTable({
+        serviceA: defineService({
           async '/process'({input}) {
             callTimesA.push(Date.now() - startTime)
             return {service: 'A', processed: input}
           }
         }),
-        serviceB: serviceFromTable({
+        serviceB: defineService({
           async '/process'({input}) {
             callTimesB.push(Date.now() - startTime)
             return {service: 'B', processed: input}
@@ -157,10 +156,10 @@ describe('Rate Limit Tests', () => {
       const startTime = Date.now()
 
       const services = {
-        validated: serviceFromTable({
+        validated: defineService({
           '/process': {
-            input: {value: [['type', {fromZod: z.string()}]]},
-            output: [['type', {fromZod: z.object({processed: z.string()})}]],
+            input: {value: [['type', ['string']]]},
+            output: [['type', ['object', {processed: ['string']}]]],
             async call({value}) {
               callTimes.push(Date.now() - startTime)
               return {processed: value, timestamp: Date.now()}
@@ -196,7 +195,7 @@ describe('Rate Limit Tests', () => {
       const startTime = Date.now()
 
       const services = {
-        flaky: serviceFromTable({
+        flaky: defineService({
           async '/process'({input}) {
             callTimes.push(Date.now() - startTime)
             callCount++
@@ -242,7 +241,7 @@ describe('Rate Limit Tests', () => {
       const startTime = Date.now()
 
       const services = {
-        timed: serviceFromTable({
+        timed: defineService({
           async '/process'({input}) {
             callTimes.push(Date.now() - startTime)
             await new Promise(resolve => setTimeout(resolve, 50))
@@ -278,7 +277,7 @@ describe('Rate Limit Tests', () => {
       let callCount = 0
 
       const services = {
-        errorProne: serviceFromTable({
+        errorProne: defineService({
           async '/process'({input}) {
             callCount++
             if (input === 'bad') {
@@ -316,7 +315,7 @@ describe('Rate Limit Tests', () => {
       const startTime = Date.now()
 
       const services = {
-        sometimes: serviceFromTable({
+        sometimes: defineService({
           async '/process'({input}) {
             callTimes.push(Date.now() - startTime)
             if (input === 'fail') {

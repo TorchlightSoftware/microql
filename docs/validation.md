@@ -1,6 +1,6 @@
 # MicroQL Validation System
 
-MicroQL validates with [Zod](https://zod.dev/): a call's input fields before it runs (precheck), and its result after (postcheck). A Query's author writes checks in a terse JSON-based shorthand that MicroQL turns into zod; a service's author declares zod schemas directly.
+MicroQL validates with [Zod](https://zod.dev/): a call's input fields before it runs (precheck), and its result after (postcheck). Checks are written in [zodly](https://www.npmjs.com/package/zodly), a terse shorthand for zod schemas, or as zod schemas directly.
 
 ## Table of Contents
 
@@ -14,9 +14,9 @@ MicroQL validates with [Zod](https://zod.dev/): a call's input fields before it 
 Validation in MicroQL can be defined in two places:
 
 1. **Service Call Validations**: the Query's author adds `precheck` and `postcheck` to one service call, to enforce what that call should receive and return.
-2. **Service Schema Validations**: the service's author declares zod schemas for an operation's input fields and its result, in lieu of imperative input checks: the `fromZod` types in its declaration ([Service Development Guide](service_guide.md#declarations)).
+2. **Service Schema Validations**: the service's author declares types for an operation's input fields and its result, in lieu of imperative input checks: the zodly descriptors (or zod schemas) in its declaration ([Service Development Guide](service-guide.md#declarations)).
 
-The shorthand below is for Service Call Validations and the trigger's schema; a raw zod schema is accepted anywhere shorthand is. There is no validation spanning a whole Query. The closest is the schema a Query may declare for its trigger payload (`trigger.schema`), which uses the same syntax; see [Runtime Integration](runtime-integration.md#trigger).
+zodly is used for both, and for the trigger's schema; a raw zod schema is accepted anywhere a descriptor is. There is no validation spanning a whole Query. The closest is the schema a Query may declare for its trigger payload (`trigger.schema`), which uses the same syntax; see [Runtime Integration](runtime-integration.md#trigger).
 
 ## Validation Execution Order
 
@@ -51,12 +51,12 @@ const config = {
 
 // Service definition, with its Service Schema Validations: the declared types
 // of its input fields (precheck) and of its result (postcheck)
-const userService = serviceFromTable({
+const userService = defineService({
   '/createUser': {
     input: {
-      userData: [['type', {fromZod: z.object({name: z.string(), email: z.email(), age: z.number().positive()})}]]
+      userData: [['type', ['object', {name: ['string'], email: ['string', 'email'], age: ['number', 'positive']}]]]
     },
-    output: [['type', {fromZod: z.object({id: z.number(), name: z.string(), email: z.email()})}]],
+    output: [['type', ['object', {id: ['number'], name: ['string'], email: ['string', 'email']}]]],
     call: async ({userData}) => ({id: 123, ...userData})
   }
 })
@@ -65,35 +65,15 @@ const userService = serviceFromTable({
 
 ## Schema Syntax
 
-A Query's validators use a JSON-based syntax that gets transformed into Zod schemas. There are three main forms:
-
-### 1. Array Syntax (Most Common)
+Schemas are written in [zodly](https://www.npmjs.com/package/zodly): zod schemas as plain data, `['string', 'email', 'optional']`, `{name: ['string']}`, `['array', [{id: ['string']}], {min: 1}]`. Its README has the whole syntax: types, modifiers (any zod method by name), boxed object schemas, and its error messages. A zod schema is accepted anywhere a descriptor is, whole or inside one:
 
 ```javascript
-// Basic types
-['string']
-['number']
-['boolean']
-['date']
+import {z} from 'zod'
 
-// With modifiers
-['string', 'email']
-['number', 'positive', 'int']
-['string', {min: 5, max: 100}]
-
-// Optional/nullable
-['string', 'optional']
-['number', 'nullable']
-
-// Combining multiple modifiers (flat syntax)
-['string', 'optional', 'nullable']
-['number', 'positive', 'int', 'optional']
-
-// A failure as data, as a catch receives it (see below)
-['error']
+['[userService]/create', {username: '$given.username', precheck: {username: z.string().min(8).regex(/^[A-Z]/)}}]
 ```
 
-**`error`** is a failure as data, a JSON-LD node of type Error: `{'@type': 'Error', name, message, ...}`, recognised by those three fields whatever else it has. It is what a `catch` receives as `@err`, and what stands in a list where a `catch` put a failure ([Runtime Integration § Errors as data](runtime-integration.md#errors-as-data)). It is the schema core exports as `errorSchema`, and it composes like any type: `['error', 'optional']`, `['union', ['error'], ['null']]`, `['array', ['error']]`. `util/each`'s `skip` takes these schemas to leave failures out of its results:
+**`error`** is zodly's type for a failure as data, a JSON-LD node of type Error: `{'@type': 'Error', name, message, ...}`, recognised by those three fields whatever else it has. It is what a `catch` receives as `@err`, and what stands in a list where a `catch` put a failure ([Runtime Integration § Errors as data](runtime-integration.md#errors-as-data)). Core exports it as `errorSchema`. `util/each`'s `skip` takes a schema like it to leave failures out of its results:
 
 ```javascript
 ['$given.urls', '[util]/each', {
@@ -102,69 +82,6 @@ A Query's validators use a JSON-based syntax that gets transformed into Zod sche
   skip: ['error']
 }]
 ```
-
-### 2. Object Syntax
-
-Shorthand syntax for objects.  See longhand syntax below in Wrapper Types.
-
-```javascript
-{
-  name: ['string'],
-  age: ['number', 'positive'],
-  email: ['string', 'email', 'optional']
-}
-```
-
-### 3. Wrapper Types
-
-Wrapper types handle complex data structures and can be combined with modifiers:
-
-```javascript
-// Arrays
-['array', ['string']]                    // Array of strings
-['array', ['number'], {min: 2, max: 10}] // Array with constraints
-['array', ['string'], 'optional']       // Optional array of strings
-['array', ['string'], 'nullable']       // Nullable array of strings
-['array']                               // Array of any type (shorthand)
-
-// Objects
-['object', {name: ['string'], age: ['number']}] // Object with specific shape
-{name: ['string'], age: ['number']}             // Same object, shorthand, if you don't need modifiers
-['object', {name: ['string']}, 'optional']      // Optional object
-['object', {name: ['string']}, 'nullable']      // Nullable object
-['object']                                      // Any object (shorthand)
-
-// Unions
-['union', ['string'], ['number']]               // String or number
-['union', ['string'], ['number'], 'optional']  // Optional union
-['union', ['string'], ['number'], 'nullable']  // Nullable union
-
-// Enums
-['enum', ['red', 'green', 'blue']]             // Must be one of the values
-['enum', ['red', 'blue', 'green'], 'optional'] // Optional enum
-
-// Tuples
-['tuple', ['string'], ['number']]              // Fixed-length typed array
-['tuple', ['string'], ['number'], 'optional']  // Optional tuple
-
-// Nullable/Optional wrappers (legacy - prefer flat syntax above)
-['nullable', ['string']]
-['optional', ['number']]
-```
-
-### 4. Direct Zod Schema Usage
-
-For advanced cases not covered by the JSON syntax, you can use Zod schemas directly, whole or inside shorthand:
-
-```javascript
-import {z} from 'zod'
-
-const CustomSchema = z.string().min(8).regex(/^[A-Z]/)
-
-['[userService]/create', {username: '$given.username', precheck: {username: CustomSchema}}]
-```
-
-See the [Zod documentation](https://zod.dev/) for full schema capabilities.
 
 ## Error Messages
 
@@ -182,8 +99,6 @@ The error names which validation failed. A schema that can't be parsed fails bef
 ## Examples
 
 Each example is a call's own checks. The syntax is the same for `precheck` and `postcheck`, and for the trigger's schema, so any of them can be used anywhere a validator is expected.
-
-**For comprehensive examples and test cases**, see `test/validation.test.js` which contains data-driven tests demonstrating all syntax patterns, modifier combinations, and edge cases.
 
 ### Basic String Validation
 
@@ -333,7 +248,3 @@ const config = {
   }
 }]
 ```
-
-## Conclusions
-
-In general we try to map closely to the `zod` API and do minimal processing.  But in a few places we don't mind letting go of "syntax regularity" in order to support less verbosity and a more intuitive API.

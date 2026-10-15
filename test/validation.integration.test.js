@@ -6,14 +6,14 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
 import {z} from 'zod'
-import query, {serviceFromTable} from '../index.js'
+import query, {defineService} from '../index.js'
 
 // A declaration's input: each field typed by its zod schema.
-const typedInput = (schemas) => Object.fromEntries(Object.entries(schemas).map(([field, schema]) => [field, [['type', {fromZod: schema}]]]))
-const typedOutput = (schema) => [['type', {fromZod: schema}]]
+const typedInput = (schemas) => Object.fromEntries(Object.entries(schemas).map(([field, schema]) => [field, [['type', schema]]]))
+const typedOutput = (schema) => [['type', schema]]
 
 // A service with one operation, '/process', with an optional declaration.
-const processor = (call, declaration = {}) => serviceFromTable({'/process': {...declaration, call}})
+const processor = (call, declaration = {}) => defineService({'/process': {...declaration, call}})
 
 describe('Validation Integration Tests', () => {
   // Reusable operations
@@ -311,7 +311,7 @@ describe('Validation Integration Tests', () => {
   })
 
   describe('Invalid validation syntax in user queries', () => {
-    const testService = serviceFromTable({
+    const testService = defineService({
       async '/test'(args) {
         return args.value
       }
@@ -319,12 +319,12 @@ describe('Validation Integration Tests', () => {
 
     // [description, the call's precheck, error]
     const malformed = [
-      ['undefined schema descriptors', {value: undefined}, /Invalid option: expected one of/],
-      ['null schema descriptors', {value: null}, /Invalid option: expected one of/],
-      ['invalid array format - non-string first element', {value: [123, 'modifier']}, /Invalid option: expected one of/],
-      ['invalid array format - empty array', {value: []}, /Array descriptors must start with a valid type name/],
-      ['malformed enum - no values', {value: ['enum']}, /Enum must have an array of values/],
-      ['malformed enum - empty values array', {value: ['enum', []]}, /Enum must have an array of values/]
+      ['undefined schema descriptors', {value: undefined}, /Not a descriptor[\s\S]* at value/],
+      ['null schema descriptors', {value: null}, /Not a descriptor[\s\S]* at value/],
+      ['invalid array format - non-string first element', {value: [123, 'modifier']}, /A descriptor array starts with a type name[\s\S]* at value/],
+      ['invalid array format - empty array', {value: []}, /A descriptor array starts with a type name[\s\S]* at value/],
+      ['malformed enum - no values', {value: ['enum']}, /'enum' takes a list of values first/],
+      ['malformed enum - empty values array', {value: ['enum', []]}, /'enum' takes a list of values first/]
     ]
 
     for (const [description, precheck, error] of malformed) {
@@ -342,6 +342,8 @@ describe('Validation Integration Tests', () => {
     // [description, input declaration]
     const malformed = [
       ['a schema that is not zod', {value: [['type', {fromZod: ['notARealType']}]]}],
+      ['an unknown zodly type', {value: [['type', ['notARealType']]]}],
+      ['an unknown zodly modifier', {value: [['type', ['string', 'optinal']]]}],
       ['a type with no source', {value: ['type']}],
       ['an unknown tag', {value: ['notARealTag']}]
     ]
@@ -349,7 +351,7 @@ describe('Validation Integration Tests', () => {
     for (const [description, input] of malformed) {
       it(`should fail compilation for ${description}`, async () => {
         const config = {
-          services: {testService: serviceFromTable({'/test': {input, call: async (args) => args.value}})},
+          services: {testService: defineService({'/test': {input, call: async (args) => args.value}})},
           phases: {result: ['[testService]/test', {value: 'hello'}]}
         }
         await assert.rejects(query(config), /The declaration of \[testService\]\/test is malformed/)

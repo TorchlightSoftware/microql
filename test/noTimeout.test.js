@@ -1,12 +1,12 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query, {serviceFromTable} from '../index.js'
+import query, {defineService} from '../index.js'
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
 // A higher-order service that runs its nested call once per item, one after
 // another, so the whole call outlasts any one nested call.
-const serial = serviceFromTable({
+const serial = defineService({
   '/run': {
     input: {on: ['target'], service: ['call']},
     async call({on, service}) {
@@ -18,7 +18,7 @@ const serial = serviceFromTable({
 })
 
 // A service whose calls take the given time.
-const taking = (ms) => serviceFromTable({
+const taking = (ms) => defineService({
   async '/process'({value}) {
     await sleep(ms)
     return {processed: value}
@@ -65,7 +65,7 @@ describe('NoTimeout Tests', () => {
       const result = await query({
         given: {words: ['hi', 'hello', 'world', 'a']},
         services: {
-          fastFilter: serviceFromTable({
+          fastFilter: defineService({
             async '/isLong'({value}) {
               await sleep(10)
               return value.length > 2
@@ -89,7 +89,7 @@ describe('NoTimeout Tests', () => {
       const result = await query({
         given: {words: ['hi', 'bye']},
         services: {
-          fastSplit: serviceFromTable({
+          fastSplit: defineService({
             async '/chars'({word}) {
               await sleep(10)
               return word.split('')

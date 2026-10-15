@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query, {serviceFromTable} from '../index.js'
+import query, {defineService} from '../index.js'
 
 describe('Service This Binding Tests', () => {
   it('should allow services to use this for internal state', async () => {
@@ -26,7 +26,7 @@ describe('Service This Binding Tests', () => {
 
     const result = await query({
       given: {value: 'test-input'},
-      services: {testService: serviceFromTable(testService)},
+      services: {testService: defineService(testService)},
       phases: {
         result: ['[testService]/testMethod', {input: '$given.value'}]
       },
@@ -56,7 +56,7 @@ describe('Service This Binding Tests', () => {
     }
 
     const result = await query({
-      services: {counterService: serviceFromTable(counterService)},
+      services: {counterService: defineService(counterService)},
       phases: {
         first: ['[counterService]/increment', {by: 5}],
         second: ['[counterService]/increment', {by: 3}],

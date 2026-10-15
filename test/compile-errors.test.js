@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
 import {readFile} from 'node:fs/promises'
 import compile from '../compile.js'
-import {serviceFromTable} from '../service-table.js'
+import {defineService} from '../define-service.js'
 
-const echo = serviceFromTable({
+const echo = defineService({
   '/echo': {input: {on: ['target']}, call: async ({on}) => on},
   '/items': {
     async GET() { return [] },

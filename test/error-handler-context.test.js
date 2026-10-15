@@ -5,19 +5,19 @@
 
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import query, {serviceFromTable, errorSchema} from '../index.js'
+import query, {defineService} from '../index.js'
 
 describe('Error Handler Context Tests', () => {
   // Fails for every item; the recorder takes error data as its target.
   const failingWith = (captured) => ({
-    failing: serviceFromTable({
+    failing: defineService({
       async '/process'({data}) {
         throw new Error(`Test failure ${data}`)
       }
     }),
-    recorder: serviceFromTable({
+    recorder: defineService({
       '/record': {
-        input: {on: ['target', ['type', {fromZod: errorSchema}]]},
+        input: {on: ['target', ['type', ['error']]]},
         async call({on, location}) {
           captured.push({on, location})
           return {recorded: true}

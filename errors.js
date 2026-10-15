@@ -17,7 +17,7 @@
  * given. `[util]/throw` turns it back into an Error.
  */
 
-import {errorSchema} from './zodly.js'
+import {errorSchema} from 'zodly'
 
 export {errorSchema}
 

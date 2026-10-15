@@ -86,14 +86,14 @@ Every string beginning with `$` or `@` is a reference. A literal like `"$5.00"` 
 
 ### Services
 
-A service answers a key with an operation: an async function that takes an object of named fields and returns a promise, plus an optional declaration of those fields. Most services are a table of them, and wrapping an API, a model or a database takes a few lines:
+A service answers a key with an operation: an async function that takes an object of named fields and returns a promise, plus an optional declaration of those fields. Most services are written as a service definition, resources mapped to operations, and wrapping an API, a model or a database takes a few lines:
 
 ```javascript
-import {serviceFromTable} from 'microql'
+import {defineService} from 'microql'
 
 const headers = {Authorization: `Bearer ${process.env.HUBSPOT_TOKEN}`, 'Content-Type': 'application/json'}
 
-export const hubspot = serviceFromTable({
+export const hubspot = defineService({
   '/companies': {
     async GET({domain}) {
       const response = await fetch(`https://api.hubapi.com/crm/v3/objects/companies/${domain}?idProperty=domain`, {headers})
@@ -114,7 +114,7 @@ export const hubspot = serviceFromTable({
 })
 ```
 
-A resource with several verbs has one operation per verb; a resource given as one operation takes keys with no verb. A declaration's tags say which field method syntax fills, which fields hold nested calls, and the types of the input and output. See the [Service Development Guide](docs/service_guide.md).
+A resource with several verbs has one operation per verb; a resource given as one operation takes keys with no verb. A declaration's tags say which field method syntax fills, which fields hold nested calls, and the types of the input and output. See the [Service Development Guide](docs/service-guide.md).
 
 ### Chains
 
@@ -319,8 +319,8 @@ A draft that fails its `postcheck` — a thread entry over 280 characters — is
 
 ## Documentation
 
-- **[Service Development Guide](docs/service_guide.md)** - How to write and structure services
-- **[Validation System](docs/validation.md)** - Type validation and contracts
+- **[Service Development Guide](docs/service-guide.md)** - How to write and structure services
+- **[Validation System](docs/validation.md)** - Type validation and contracts, written in [zodly](https://www.npmjs.com/package/zodly)
 - **[Runtime Integration](docs/runtime-integration.md)** - Building on MicroQL beyond a node script: core, runtimes and platforms, storage, planning, partial runs, progress updates and abort
 
 ## Testing

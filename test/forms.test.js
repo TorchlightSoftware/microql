@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
 import compile from '../compile.js'
 import {canonical, hashOf, formsOf} from '../forms.js'
-import {serviceFromTable} from '../service-table.js'
+import {defineService} from '../define-service.js'
 
 describe('canonical serialization', () => {
   // [value, canonical text]
@@ -35,7 +35,7 @@ describe('canonical serialization', () => {
 
 describe('form hashes', () => {
   const services = {
-    scraper: serviceFromTable({
+    scraper: defineService({
       async '/extract'({url}) { return {url} },
       '/images': {input: {on: ['target']}, call: async ({on}) => on}
     })

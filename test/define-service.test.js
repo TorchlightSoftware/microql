@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import {serviceFromTable} from '../service-table.js'
+import {defineService} from '../define-service.js'
 
 const parts = (method, resource) => ({method, service: 'shop', resource, local: false})
 
-describe('serviceFromTable', () => {
-  const shop = serviceFromTable({
+describe('defineService', () => {
+  const shop = defineService({
     '/total': {description: 'Sum the prices', input: {on: ['target']}, call: async ({on}) => on.reduce((a, b) => a + b, 0)},
     '/ping': async () => 'pong',
     '/orders': {
@@ -60,20 +60,20 @@ describe('serviceFromTable', () => {
     assert.equal(shop.lookup(parts(null, '/total')), shop.lookup(parts(null, '/total')))
   })
 
-  it('calls operations and lifecycle hooks with the table as this', async () => {
-    const table = {
+  it('calls operations and lifecycle hooks with the service definition as this', async () => {
+    const serviceDefinition = {
       init(runtime) { this.runtime = runtime },
       async tearDown() { this.closed = true },
       async '/whoami'() { return this.runtime.name }
     }
-    const service = serviceFromTable(table)
+    const service = defineService(serviceDefinition)
     await service.init({name: 'node'})
     assert.equal(await service.lookup(parts(null, '/whoami')).call({}), 'node')
     await service.tearDown()
-    assert.equal(table.closed, true)
+    assert.equal(serviceDefinition.closed, true)
   })
 
-  it('has no lifecycle hooks the table lacks', () => {
+  it('has no lifecycle hooks the service definition lacks', () => {
     assert.equal(shop.init, undefined)
     assert.equal(shop.tearDown, undefined)
   })

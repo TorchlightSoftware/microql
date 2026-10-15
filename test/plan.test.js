@@ -1,19 +1,24 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import {z} from 'zod'
-import {plan, addressToPath, pathToAddress, serviceFromTable} from '../core.js'
+import {plan, addressToPath, pathToAddress, defineService} from '../core.js'
 import {describeSchema} from '../types.js'
 
 // A service whose resource takes two calls, to exercise field lettering.
-const branch = serviceFromTable({
+const branch = defineService({
   '/choose': {
     input: {on: ['target'], pass: [['call', {fromField: 'on'}]], fail: [['call', {fromField: 'on'}]]},
     call: async ({on, pass, fail}) => on ? pass(on) : fail(on)
   },
   '/extract': {
-    input: {url: [['type', {fromZod: z.string()}]]},
-    output: [['type', {fromZod: z.object({url: z.string(), images: z.array(z.object({src: z.string()})).optional()})}]],
+    input: {url: [['type', ['string']]]},
+    output: [['type', ['object', {url: ['string'], images: ['array', [{src: ['string']}], 'optional']}]]],
     call: async ({url}) => ({url})
+  },
+  // A list with gaps, for skip to leave out.
+  '/words': {
+    input: {url: [['type', ['string']]]},
+    output: [['type', ['array', ['union', ['string'], ['null']]]]],
+    call: async () => ['a', null]
   },
   // Declares nothing, so the plan can't know what it returns.
   '/fetch': {call: async () => ({name: 'x', age: 1})}
@@ -159,7 +164,7 @@ describe('type inference', () => {
   })
 
   it('types @ as any inside a call field that declares nothing it receives', () => {
-    const tally = serviceFromTable({'/reduce': {input: {on: ['target'], service: ['call']}, call: async () => 0}})
+    const tally = defineService({'/reduce': {input: {on: ['target'], service: ['call']}, call: async () => 0}})
     const {calls} = plan({
       given: {xs: [1, 2]},
       services: {branch, tally},
@@ -216,6 +221,9 @@ describe('type inference', () => {
       'array of {url: string, images?: array of {src: string}}'],
     ['flattenEach returns what its call returns, flattened into one list',
       ['$given.groups', '[util]/flattenEach', {service: ['@', '[util]/filter', {service: ['[util]/exists', {value: '@'}]}]}],
+      'array of string'],
+    ['flattenEach leaves out the members of its items\' type that fit skip',
+      ['$given.urls', '[util]/flattenEach', {service: ['[branch]/words', {url: '@'}], skip: ['null']}],
       'array of string'],
     ['filter returns the list it was given (fromField)',
       ['$given.urls', '[util]/filter', {service: ['[util]/exists', {value: '@'}]}],
@@ -281,7 +289,7 @@ describe('type inference', () => {
   })
 
   it('composes sources: an object of the items of a list (toObject of fromList)', () => {
-    const index = serviceFromTable({
+    const index = defineService({
       '/byId': {input: {on: ['target']}, output: [['type', {toObject: {fromList: 'on'}}]], call: async () => ({})}
     })
     const {phases} = plan({given: {rows: [{id: 'a'}]}, services: {index}, phases: {a: ['$given.rows', '[index]/byId']}})
@@ -289,7 +297,7 @@ describe('type inference', () => {
   })
 
   it('reads a value of an object field (fromObject)', () => {
-    const first = serviceFromTable({
+    const first = defineService({
       '/any': {input: {on: ['target']}, output: [['type', {fromObject: 'on'}]], call: async ({on}) => Object.values(on)[0]}
     })
     const {phases} = plan({given: {prices: {tea: 2, cake: 3}}, services: {first}, phases: {a: ['$given.prices', '[first]/any']}})
@@ -297,9 +305,9 @@ describe('type inference', () => {
   })
 
   it('falls back to a field\'s declared type when nothing known flows in', () => {
-    const names = serviceFromTable({
+    const names = defineService({
       '/each': {
-        input: {on: ['target', ['type', {fromZod: z.array(z.string())}]], service: [['call', {fromList: 'on'}]]},
+        input: {on: ['target', ['type', ['array', ['string']]]], service: [['call', {fromList: 'on'}]]},
         call: async ({on, service}) => Promise.all(on.map(service))
       }
     })

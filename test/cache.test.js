@@ -1,8 +1,7 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query, {nodeRuntime, fileStore, serviceFromTable} from '../index.js'
+import query, {nodeRuntime, fileStore, defineService} from '../index.js'
 import {readdir, rm} from 'fs/promises'
-import {z} from 'zod'
 
 const CACHEDIR = '.cache-test-cache'
 // the node runtime with its Cache kept in a test directory
@@ -20,7 +19,7 @@ describe('Cache Tests', () => {
 
       let callCount = 0
       const services = {
-        counter: serviceFromTable({
+        counter: defineService({
           async '/increment'({value}) {
             callCount++
             return {count: callCount, input: value}
@@ -79,7 +78,7 @@ describe('Cache Tests', () => {
 
       let callCount = 0
       const services = {
-        counter: serviceFromTable({
+        counter: defineService({
           async '/increment'({value}) {
             callCount++
             return {count: callCount, input: value}
@@ -118,7 +117,7 @@ describe('Cache Tests', () => {
       await cleanup()
 
       const services = {
-        test: serviceFromTable({
+        test: defineService({
           async '/action'({input}) {
             return {processed: input}
           }
@@ -151,7 +150,7 @@ describe('Cache Tests', () => {
       await cleanup()
 
       const services = {
-        test: serviceFromTable({
+        test: defineService({
           async '/process'({input}) {
             return {processed: input, timestamp: Date.now()}
           }
@@ -188,7 +187,7 @@ describe('Cache Tests', () => {
       const startTime = Date.now()
 
       const services = {
-        slow: serviceFromTable({
+        slow: defineService({
           async '/process'({input}) {
             callCount++
             callTimes.push(Date.now() - startTime)
@@ -254,9 +253,9 @@ describe('Cache Tests', () => {
 
       let callCount = 0
       const services = {
-        validator: serviceFromTable({
+        validator: defineService({
           '/process': {
-            input: {value: [['type', {fromZod: z.string()}]]},
+            input: {value: [['type', ['string']]]},
             async call({value}) {
               callCount++
               return {validated: value, count: callCount}

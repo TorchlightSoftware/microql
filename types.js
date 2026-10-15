@@ -19,7 +19,7 @@
 
 import {z} from 'zod'
 import {isPlainObject, mapValues} from './common.js'
-import {errorSchema, parseSchema} from './zodly.js'
+import {errorSchema, parseSchema} from 'zodly'
 
 export const any = z.any()
 

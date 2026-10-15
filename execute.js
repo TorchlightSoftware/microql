@@ -22,7 +22,7 @@ import {rootScope, enterPosition} from './reference.js'
 import RateLimitedQueue from './ratelimit.js'
 import {concurrencyLimit} from './concurrency.js'
 import {mapValues, pick} from './common.js'
-import {validate} from './zodly.js'
+import {validate} from 'zodly'
 import {format} from './format.js'
 
 // The runtime each service last received at init. A service is initialized
@@ -185,7 +185,7 @@ function checkRunInputs(compiled, {runState, trigger}) {
   if (!runState) throw new Error('execute needs a runState: the entry store for this Run, such as memoryStore()')
   checkCapabilities(compiled)
   try {
-    validate(compiled.triggerSchema, trigger, format, false)
+    validate(compiled.triggerSchema, trigger, format)
   } catch (error) {
     error.message = `$trigger validation failed:\n${error.message}`
     throw error

@@ -4,7 +4,7 @@
  * An operation (what a service's lookup returns) declares its input as field
  * paths, each with a list of tags, and its output as a list of tags:
  *
- *   input:  {on: ['target', ['type', {fromZod: z.array(z.any())}]],
+ *   input:  {on: ['target', ['type', ['array']]],
  *            service: [['call', {fromList: 'on'}]]}
  *   output: [['type', {toList: {fromField: 'service'}}]]
  *
@@ -13,9 +13,13 @@
  *   reserve    configures the call rather than feeding it data
  *   settings   receives the call's merged settings
  *   call       holds a nested call or chain, handed over as a function; its
- *              config is a source for what the nested call receives (`@`)
+ *              config is the type of what the nested call receives (`@`)
  *   type       the field's type; on a call field, what the nested call
  *              returns; on the output, what the operation returns
+ *
+ * A type is a zodly descriptor (['string', 'url'], [{name: ['string']}]), a
+ * zod schema, or a source. An object is always a source, so an object schema
+ * is boxed: [shape]. A descriptor or schema is read as {fromZod: schema}.
  *
  * A source names a type, by reading one (from*) or building one (to*), or
  * by operating on two (the type operators in types.js):
@@ -40,6 +44,7 @@
 
 import {z} from 'zod'
 import {isPlainObject, mapValues, parseFieldPath} from './common.js'
+import {parseSchema} from 'zodly'
 
 const FLAGS = ['target', 'reserve', 'settings']
 
@@ -79,14 +84,25 @@ function checkSource(source) {
   return source
 }
 
+// A type as a source: an object is one, checked whole; anything else is a
+// zodly descriptor (or a zod schema), read as the zod schema it describes.
+function readType(type, path) {
+  if (isPlainObject(type)) return checkSource(type)
+  try {
+    return {fromZod: parseSchema(type)}
+  } catch (error) {
+    throw new Error(`${error.message}, on '${path}'`, {cause: error})
+  }
+}
+
 // A tag as {name, config}, from a name or a [name, config] pair.
 function readTag(tag, path) {
   const [name, config] = typeof tag === 'string' ? [tag] : Array.isArray(tag) && typeof tag[0] === 'string' && tag.length <= 2 ? tag : []
   if (name === undefined) throw new Error(`Tags are a name or [name, config]. Got: ${JSON.stringify(tag)} on '${path}'`)
   if (FLAGS.includes(name) && config !== undefined) throw new Error(`'${name}' takes no config, on '${path}'`)
-  if (name === 'type' && config === undefined) throw new Error(`'type' needs a source, on '${path}'`)
+  if (name === 'type' && config === undefined) throw new Error(`'type' needs a source or a zodly type, on '${path}'`)
   if (![...FLAGS, 'call', 'type'].includes(name)) throw new Error(`Unknown tag '${name}' on '${path}'`)
-  return {name, config: config === undefined ? undefined : checkSource(config)}
+  return {name, config: config === undefined ? undefined : readType(config, path)}
 }
 
 // One input field: its path, and what its tags say about it.

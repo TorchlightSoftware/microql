@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import query, {memoryStore, nodeRuntime, plan, serviceFromTable} from '../index.js'
+import query, {memoryStore, nodeRuntime, plan, defineService} from '../index.js'
 
 // A service that counts its calls by input, and fails the inputs it's told to.
 const counting = (failing = new Set()) => {
   const calls = {}
-  const service = serviceFromTable({
+  const service = defineService({
     async '/fetch'({id}) {
       calls[id] = (calls[id] ?? 0) + 1
       if (failing.has(id)) throw new Error(`interrupted at ${id}`)
@@ -77,7 +77,7 @@ describe('Run State', () => {
 
   it('settles the calls a failure left running before the Run reports, and before tearDown', async () => {
     const events = []
-    const service = serviceFromTable({
+    const service = defineService({
       async '/fast'() { throw new Error('fast failure') },
       async '/slow'() {
         await new Promise(resolve => setTimeout(resolve, 20))
@@ -187,8 +187,8 @@ describe('Cache', () => {
 // holds read from outside it: the item of an enclosing iteration, an enclosing
 // catch's error, a phase.
 describe('the input of a call that holds calls', () => {
-  const pair = serviceFromTable({async '/of'({x, y}) { return `${x}${y}` }})
-  const failing = serviceFromTable({async '/on'({item}) { throw new Error(`no ${item}`) }})
+  const pair = defineService({async '/of'({x, y}) { return `${x}${y}` }})
+  const failing = defineService({async '/on'({item}) { throw new Error(`no ${item}`) }})
   const services = {pair, failing}
 
   // [description, phases, the selected result]

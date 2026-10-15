@@ -4,7 +4,7 @@
  */
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import query, {plan, serviceFromTable} from '../index.js'
+import query, {plan, defineService} from '../index.js'
 import {describeSchema} from '../types.js'
 
 const acme = {'@type': 'Organization', '@id': 'https://acme.example/#org', name: 'Acme Fabrication'}
@@ -15,7 +15,7 @@ const press = {'@type': 'Organization', '@id': 'https://press.example/#org', nam
 const directory = {'@context': 'https://schema.org', '@graph': [acme, bolt, unreadable, press]}
 
 const services = {
-  ld: serviceFromTable({
+  ld: defineService({
     '/same': {input: {node: []}, call: async ({node}) => node},
     '/isType': {input: {node: [], type: []}, call: async ({node, type}) => node['@type'] === type}
   })

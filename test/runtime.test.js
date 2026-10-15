@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import coreQuery, {memoryStore, serviceFromTable} from '../core.js'
+import coreQuery, {memoryStore, defineService} from '../core.js'
 import query from '../index.js'
 
 // Core, as a platform calls it: its own runtime, a fresh Run State.
@@ -20,7 +20,7 @@ describe('init', () => {
   // A service, and the runtimes its init has received.
   const initCounting = () => {
     const inits = []
-    const service = serviceFromTable({
+    const service = defineService({
       init(runtime) { inits.push(runtime) },
       async '/run'({n}) { return n }
     })
@@ -42,7 +42,7 @@ describe('init', () => {
 
   it('runs before any call', async () => {
     const order = []
-    const service = serviceFromTable({
+    const service = defineService({
       init() { order.push('init') },
       async '/run'() { order.push('run') }
     })
@@ -92,7 +92,7 @@ describe('what core requires of its caller', () => {
   }
 
   it('refuses to run a service that requires a key the runtime lacks', async () => {
-    const mailer = serviceFromTable({requires: ['send'], async '/mail'() { return 'sent' }})
+    const mailer = defineService({requires: ['send'], async '/mail'() { return 'sent' }})
     await assert.rejects(runCore({runtime: recordingRuntime(), services: {mailer}, phases: {a: ['[mailer]/mail', {}]}}), {
       code: 'missing-capability',
       address: '$a.@1',
@@ -102,7 +102,7 @@ describe('what core requires of its caller', () => {
 })
 
 describe('$trigger', () => {
-  const echo = serviceFromTable({async '/echo'({on}) { return on }})
+  const echo = defineService({async '/echo'({on}) { return on }})
 
   it('holds the payload the host passes at start', async () => {
     const result = await query({
@@ -141,7 +141,7 @@ describe('$trigger', () => {
   for (const [payload, why] of refused) {
     it(`refuses a payload with ${why}, before any call runs`, async () => {
       let calls = 0
-      const counted = {...greeting, services: {echo: serviceFromTable({async '/echo'({on}) { calls++; return on }})}}
+      const counted = {...greeting, services: {echo: defineService({async '/echo'({on}) { calls++; return on }})}}
       await assert.rejects(query(counted, {trigger: payload}), /\$trigger validation failed/)
       assert.equal(calls, 0)
     })
@@ -152,7 +152,7 @@ describe('concurrency setting', () => {
   it('caps the calls in flight across the Run, without counting an each itself', async () => {
     let active = 0
     let peak = 0
-    const slow = serviceFromTable({
+    const slow = defineService({
       async '/work'({n}) {
         active++
         peak = Math.max(peak, active)

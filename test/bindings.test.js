@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import query, {serviceFromTable} from '../index.js'
+import query, {defineService} from '../index.js'
 
 describe('Scope: @ and named bindings', () => {
-  const inspector = serviceFromTable({
+  const inspector = defineService({
     '/check'({level1, level2}) {
       return {level1, level2}
     }
   })
 
   const onTarget = (call) => ({input: {on: ['target']}, call})
-  const math = serviceFromTable({
+  const math = defineService({
     '/add1': onTarget(async ({on}) => on + 1),
     '/times10': onTarget(async ({on}) => on * 10),
     '/reduce': {input: {on: ['target'], service: ['call']}, call: async ({on, service}) => on.reduce(async (l, r) => service([await l, r]))},
@@ -56,7 +56,7 @@ describe('Scope: @ and named bindings', () => {
   })
 
   it('flows each chain step into the next', async () => {
-    const chain = serviceFromTable({
+    const chain = defineService({
       '/step1': {input: {on: ['target']}, call: ({on}) => `${on}-step1`},
       '/step2': {input: {on: ['target']}, call: ({on}) => `${on}-step2`}
     })
@@ -106,7 +106,7 @@ describe('Scope: @ and named bindings', () => {
   })
 
   it('lets catch see the error as @err and the enclosing bindings by name', async () => {
-    const flaky = serviceFromTable({
+    const flaky = defineService({
       async '/fetch'({id}) {
         if (id === 2) throw new Error(`no ${id}`)
         return id

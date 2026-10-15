@@ -103,7 +103,7 @@ query {
 Simple async functions focused on business logic:
 
 ```javascript
-const userService = serviceFromTable({
+const userService = defineService({
   async '/getProfile'({id}) {
     return await db.users.findById(id)
   },
@@ -111,8 +111,8 @@ const userService = serviceFromTable({
   // Optional: declare the input, as a validation contract
   '/updateProfile': {
     input: {
-      id: [['type', {fromZod: z.uuid()}]],
-      updates: [['type', {fromZod: z.object({name: z.string().optional(), email: z.email().optional()})}]]
+      id: [['type', ['string', 'uuid']]],
+      updates: [['type', ['object', {name: ['string', 'optional'], email: ['string', 'email', 'optional']}]]]
     },
     call: async ({id, updates}) => db.users.update(id, updates)
   }

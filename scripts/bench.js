@@ -14,7 +14,7 @@ const get = async ({id}) => ({id})
 const add1 = async ({on}) => on + 1
 const echo = old
   ? Object.assign({get, add1}, {add1: Object.assign(add1, {_argtypes: {on: {argOrder: 0}}})})
-  : microql.serviceFromTable({'/get': get, '/add1': {input: {on: ['target']}, call: add1}})
+  : microql.defineService({'/get': get, '/add1': {input: {on: ['target']}, call: add1}})
 
 const key = (action) => old ? `echo:${action}` : `[echo]/${action}`
 const ref = (name) => old ? `$.${name}` : `$${name}`

@@ -1,13 +1,13 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query, {serviceFromTable} from '../index.js'
+import query, {defineService} from '../index.js'
 
 describe('TearDown Tests', () => {
   it('should call tearDown on services that have it', async () => {
     let tearDownCalled = false
 
     // Mock service with tearDown method
-    const mockService = serviceFromTable({
+    const mockService = defineService({
       async '/testAction'() {
         return 'test result'
       },
@@ -29,7 +29,7 @@ describe('TearDown Tests', () => {
 
   it('should not fail if service does not have tearDown', async () => {
     // Service without tearDown method
-    const serviceWithoutTearDown = serviceFromTable({
+    const serviceWithoutTearDown = defineService({
       async '/testAction'() {
         return 'test result'
       }
@@ -49,7 +49,7 @@ describe('TearDown Tests', () => {
   it('should call tearDown on multiple services', async () => {
     const tearDownCalls = []
 
-    const service1 = serviceFromTable({
+    const service1 = defineService({
       async '/action'() {
         return 'result1'
       },
@@ -58,7 +58,7 @@ describe('TearDown Tests', () => {
       }
     })
 
-    const service2 = serviceFromTable({
+    const service2 = defineService({
       async '/action'() {
         return 'result2'
       },
@@ -93,7 +93,7 @@ describe('TearDown Tests', () => {
   it('should call tearDown even if query fails', async () => {
     let tearDownCalled = false
 
-    const serviceWithError = serviceFromTable({
+    const serviceWithError = defineService({
       async '/failingAction'() {
         throw new Error('Test error')
       },
@@ -126,13 +126,13 @@ describe('TearDown Tests', () => {
   it('should not call tearDown for unused services', async () => {
     let tearDownCalled = false
 
-    const usedService = serviceFromTable({
+    const usedService = defineService({
       async '/action'() {
         return 'result'
       }
     })
 
-    const unusedService = serviceFromTable({
+    const unusedService = defineService({
       async '/action'() {
         return 'unused'
       },
@@ -158,7 +158,7 @@ describe('TearDown Tests', () => {
   it('should handle tearDown errors gracefully', async () => {
     const _queryCompleted = false
 
-    const serviceWithBadTearDown = serviceFromTable({
+    const serviceWithBadTearDown = defineService({
       async '/action'() {
         return 'result'
       },

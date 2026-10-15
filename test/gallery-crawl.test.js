@@ -7,7 +7,7 @@
  */
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import query, {memoryStore, plan, serviceFromTable} from '../index.js'
+import query, {memoryStore, plan, defineService} from '../index.js'
 
 const GALLERY_PAGES = {
   'https://museum.example/sculpture': {
@@ -29,7 +29,7 @@ const stubServices = () => {
   // method syntax fills the field tagged target
   const onTarget = (call) => ({input: {on: ['target']}, call})
 
-  const crawler = serviceFromTable({
+  const crawler = defineService({
     async '/extract'({url, queries}) {
       if (queries.galleries) {
         return record('extract', {
@@ -44,7 +44,7 @@ const stubServices = () => {
     }
   })
 
-  const assistant = serviceFromTable({
+  const assistant = defineService({
     '/filter': onTarget(async ({on}) => record('filter', on.filter(g => g.text !== 'Gift shop'))),
     '/classify': onTarget(async ({on}) =>
       record('classify', on.map(g => ({...g, period: g.text === 'Sculpture' ? 'modern' : 'early', medium: g.text})))),
@@ -52,7 +52,7 @@ const stubServices = () => {
     '/readWebsite': onTarget(async ({on}) => record('readWebsite', {name: new URL(on).hostname, website: on}))
   })
 
-  const catalogue = serviceFromTable({
+  const catalogue = defineService({
     '/dedupe': onTarget(async ({on}) => record('dedupe', on)),
     async '/createEntry'({data, title, extra}) {
       return record('createEntry', {created: true, title: title.find(Boolean), medium: data.medium, collection: extra.collection})
@@ -112,7 +112,7 @@ const galleryCrawl = (services) => ({
           url: '@gallery.href',
           queries: {images: 'main img', websites: 'main a'},
           // at least 1 image or website should be present
-          postcheck: ['union', {images: ['array', ['object'], {min: 1}]}, {websites: ['array', ['object'], {min: 1}]}],
+          postcheck: ['union', [{images: ['array', ['object'], {min: 1}]}], [{websites: ['array', ['object'], {min: 1}]}]],
           cache: true
         }],
         ['@', '[util]/merge', {with: {period: '@gallery.period', medium: '@gallery.medium'}}]
@@ -167,7 +167,7 @@ const galleryCrawl = (services) => ({
       ['@', '[util]/each', {
         service: ['[catalogue]/createEntry', {
           data: '@',
-          precheck: {data: ['union', {name: 'string'}, {website: 'string'}]},
+          precheck: {data: ['union', [{name: 'string'}], [{website: 'string'}]]},
           title: ['@.name', '@.website'],
           extra: {
             status: 'draft',

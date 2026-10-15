@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import {describe, it, beforeEach, afterEach} from 'node:test'
-import query, {plan, serviceFromTable} from '../index.js'
+import query, {plan, defineService} from '../index.js'
 import util from '../services/util.js'
 import {ANSI_COLORS} from '../index.js'
 
@@ -35,7 +35,7 @@ describe('Util Service Tests', () => {
 
   // Mock services
   const mockServices = {
-    data: serviceFromTable({
+    data: defineService({
       async '/isEngineer'(args) {
         return args.person.department === 'Engineering'
       },
@@ -319,7 +319,7 @@ describe('Util Service Tests', () => {
       const result = await query({
         given: {person: {name: 'Alice', age: 30}},
         services: {
-          age: serviceFromTable({
+          age: defineService({
             '/isAdult'({person}) {return person.age >= 18}
           })
         },
@@ -479,7 +479,7 @@ describe('Util Service Tests', () => {
 
   describe('catch and skip', () => {
     // Fails the items marked to fail; `same` hands back what it's given.
-    const items = serviceFromTable({
+    const items = defineService({
       async '/process'({item}) {
         if (item.fail) throw new Error(`Failed ${item.id}`)
         return {id: item.id, processed: true}
@@ -700,7 +700,7 @@ describe('Util Service Tests', () => {
     })
 
     it('appends each failure a catch logs to the file it names, and keeps the failure as data', async () => {
-      const failing = serviceFromTable({
+      const failing = defineService({
         async '/process'({item}) {
           if (item.fail) throw new Error(`Failed ${item.id}`)
           return item.id

@@ -25,7 +25,7 @@
 import {mapReferences, parseReference, resolveReference, resolveRead} from './reference.js'
 import {VALIDATION_NAMES, getServiceColorName, mapValues, defaults, setPaths} from './common.js'
 import {hashOf} from './forms.js'
-import {validate} from './zodly.js'
+import {validate} from 'zodly'
 import {format} from './format.js'
 import {toErrorData} from './errors.js'
 

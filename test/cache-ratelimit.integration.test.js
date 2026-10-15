@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query, {nodeRuntime, fileStore, serviceFromTable} from '../index.js'
+import query, {nodeRuntime, fileStore, defineService} from '../index.js'
 import {existsSync} from 'fs'
 import {rm} from 'fs/promises'
 
@@ -23,7 +23,7 @@ describe('Cache and Rate Limit Integration Tests', () => {
     const startTime = Date.now()
 
     const services = {
-      heavy: serviceFromTable({
+      heavy: defineService({
         async '/process'({input}) {
           callCount++
           callTimes.push(Date.now() - startTime)
@@ -80,7 +80,7 @@ describe('Cache and Rate Limit Integration Tests', () => {
 
     let callCount = 0
     const services = {
-      heavy: serviceFromTable({
+      heavy: defineService({
         async '/process'({input}) {
           callCount++
           await new Promise(resolve => setTimeout(resolve, 50)) // Slow operation
@@ -126,7 +126,7 @@ describe('Cache and Rate Limit Integration Tests', () => {
 
     let callCount = 0
     const services = {
-      timed: serviceFromTable({
+      timed: defineService({
         async '/process'({input}) {
           callCount++
           return {processed: input, call: callCount, created: new Date().toISOString()}

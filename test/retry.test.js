@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query, {serviceFromTable} from '../index.js'
+import query, {defineService} from '../index.js'
 
 describe('Retry Tests', () => {
   describe('Basic Retry Behavior', () => {
@@ -8,7 +8,7 @@ describe('Retry Tests', () => {
       let callCount = 0
 
       const services = {
-        flaky: serviceFromTable({
+        flaky: defineService({
           async '/process'(_args) {
             callCount++
             if (callCount < 3) {
@@ -42,7 +42,7 @@ describe('Retry Tests', () => {
       let callCount = 0
 
       const services = {
-        broken: serviceFromTable({
+        broken: defineService({
           async '/process'(_args) {
             callCount++
             throw new Error('Service permanently broken')
@@ -76,7 +76,7 @@ describe('Retry Tests', () => {
       let callCount = 0
 
       const services = {
-        stable: serviceFromTable({
+        stable: defineService({
           async '/process'(_args) {
             callCount++
             return {success: true}
@@ -106,7 +106,7 @@ describe('Retry Tests', () => {
     it('should pass retry and timeout values via settings', async () => {
       // The settings tag injects the call's settings
       const services = {
-        aware: serviceFromTable({
+        aware: defineService({
           '/check': {
             input: {settings: ['settings']},
             async call(args) {
@@ -148,7 +148,7 @@ describe('Retry Tests', () => {
 
       // on is the target, for method syntax
       const services = {
-        chain: serviceFromTable({
+        chain: defineService({
           '/step1': {
             input: {on: ['target']},
             async call(args) {
@@ -200,7 +200,7 @@ describe('Retry Tests', () => {
 
       // on is the target, for method syntax
       const services = {
-        processor: serviceFromTable({
+        processor: defineService({
           '/transform': {
             input: {on: ['target']},
             call: async ({on, _retry}) => {
@@ -242,7 +242,7 @@ describe('Retry Tests', () => {
           return {text: table.calls <= badDrafts ? `${topic} `.repeat(100) : topic}
         }
       }
-      return {table, service: serviceFromTable(table)}
+      return {table, service: defineService(table)}
     }
     const draft = (retry) => ['[writer]/write', {topic: 'retry', retry, postcheck: {text: ['string', {max: 50}]}}]
 

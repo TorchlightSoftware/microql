@@ -71,7 +71,7 @@ describe('published package', () => {
   const packed = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {encoding: 'utf8'}))[0].files.map(f => f.path)
 
   it('ships the entry points, core and the builtin service', () => {
-    for (const file of ['index.js', 'core.js', 'compile.js', 'declaration.js', 'service-table.js', 'services/util.js', 'README.md', 'package.json']) {
+    for (const file of ['index.js', 'core.js', 'compile.js', 'declaration.js', 'define-service.js', 'services/util.js', 'README.md', 'package.json']) {
       assert.ok(packed.includes(file), `${file} is shipped`)
     }
   })

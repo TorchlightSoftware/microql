@@ -17,7 +17,7 @@ import {formsOf} from './forms.js'
 import {isReference, parseReference, rootScope, enterPosition, scopedRoot} from './reference.js'
 import {any, isAny, schemaOfValue, schemaAtPath, sharedSchema, elementOf, valueOf, compare, describeSchema, literalOf, describedBy, union, difference, pick, merge} from './types.js'
 import {isPlainObject, mapValues, getIn, setPaths, parseFieldPath} from './common.js'
-import {errorSchema} from './zodly.js'
+import {errorSchema} from 'zodly'
 
 // The type of an argument: a literal's own type, or what its reference names.
 function typeOfArgument(value, scope, env) {

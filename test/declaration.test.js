@@ -68,6 +68,24 @@ describe('declarationOf', () => {
     assert.equal(declarationOf({output: [['type', {toList: {fromField: 'service'}}]], call}).outputSchema, undefined)
   })
 
+  it('reads a zodly type, or a zod schema, as the zod schema it describes', () => {
+    const {inputSchema, outputSchema, calls} = declarationOf({
+      input: {
+        url: [['type', ['string', 'url']]],
+        count: [['type', z.number().int()]],
+        each: [['call', ['number']]]
+      },
+      output: [['type', ['array', ['string']]]],
+      call
+    })
+    assert.equal(inputSchema.safeParse({url: 'https://example.com', count: 2}).success, true)
+    assert.equal(inputSchema.safeParse({url: 'not a url', count: 2}).success, false)
+    assert.equal(inputSchema.safeParse({url: 'https://example.com', count: 2.5}).success, false)
+    assert.equal(outputSchema.safeParse(['a']).success, true)
+    assert.equal(outputSchema.safeParse([1]).success, false)
+    assert.equal(calls[0].receives.fromZod.safeParse(1).success, true)
+  })
+
   it('is read once per operation', () => {
     const operation = {input: {on: ['target']}, call}
     assert.equal(declarationOf(operation), declarationOf(operation))
@@ -86,6 +104,8 @@ describe('declarationOf', () => {
     ['an operator with a malformed source in its pair', {output: [['type', {merge: [{fromField: 'a'}, 'b']}]]}, /A source has exactly one of/],
     ['fromZodly without a source', {input: {on: [['type', {fromZodly: 'skip'}]]}}, /A source has exactly one of/],
     ['fromZod without a zod schema', {input: {on: [['type', {fromZod: ['string']}]]}}, /fromZod takes a zod schema/],
+    ['a malformed zodly type', {input: {on: [['type', ['strng']]]}}, /Unknown type name 'strng' on \["strng"\], on 'on'/],
+    ['an unknown zodly modifier', {output: [['type', ['string', 'optinal']]]}, /'string' has an unknown modifier 'optinal' on \["string","optinal"\], on 'output'/],
     ['fromList without a path', {input: {on: [['type', {fromList: {fromField: 'a'}}]]}}, /fromList takes a field path/],
     ['toList without a source', {input: {on: [['type', {toList: 'a'}]]}}, /A source has exactly one of/],
     ['a schema on a path and its parent', {input: {params: [['type', {fromZod: z.object({})}]], 'params.a': [['type', {fromZod: z.string()}]]}}, /'params' and 'params.a' both have a schema/],
