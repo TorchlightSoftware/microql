@@ -5,12 +5,12 @@ import compile from '../compile.js'
 import {defineService} from '../define-service.js'
 
 const echo = defineService({
-  '/echo': {input: {on: ['target']}, call: async ({on}) => on},
+  '/echo': {input: {on: ['any', 'optional', {tags: ['target']}]}, call: async ({on}) => on},
   '/items': {
     async GET() { return [] },
     async POST({on}) { return on }
   },
-  '/broken': {input: {on: ['targte']}, call: async () => null}
+  '/broken': {input: {on: ['any', 'optional', {tags: ['targte']}]}, call: async () => null}
 })
 
 const compileQuery = (query) => compile({...query, services: {echo, ...query.services}})
@@ -141,29 +141,33 @@ describe('Compile-time errors', () => {
       /Service 'nope' not found/],
     ['an unknown resource',
       {phases: {a: ['[echo]/nope', {on: 1}]}},
-      {code: 'unknown-resource', address: '$a.@1'},
-      /Resource '\/nope' not found on service 'echo'/],
-    ['a verb on an operation that takes none',
+      {code: 'refused-key', address: '$a.@1'},
+      /\[\$a\.@1\] \[echo\]\/nope is not a resource of this service/],
+    ['a method on a service call that takes none',
       {phases: {a: ['POST [echo]/echo', {on: 1}]}},
       {code: 'refused-key', address: '$a.@1'},
-      /\[\$a\.@1\] \[echo\]\/echo takes no verb; got POST/],
-    ['a verb missing from a several-verb resource',
+      /\[\$a\.@1\] \[echo\]\/echo takes no method; got POST/],
+    ['a method missing from a resource with several',
       {phases: {a: ['DELETE [echo]/items', {}]}},
       {code: 'refused-key', address: '$a.@1'},
       /\[\$a\.@1\] \[echo\]\/items doesn't answer DELETE \(answers GET, POST\)/],
-    ['no verb on a resource that needs one',
+    ['no method on a resource that needs one',
       {phases: {a: ['[echo]/items', {}]}},
       {code: 'refused-key', address: '$a.@1'},
-      /\[echo\]\/items needs a verb: GET, POST/],
-    ['a service without lookup and operations',
+      /\[echo\]\/items needs a method: GET, POST/],
+    ['a service without lookup, supportedCalls and init',
       {services: {plain: {'/x': async () => 1}}, phases: {a: ['[plain]/x', {}]}},
       {code: 'not-a-service', address: '$a.@1'},
-      /Service 'plain' must provide lookup\(parts\) and operations\(\)/],
+      /Service 'plain' must provide lookup\(key\), supportedCalls\(\) and init\(runtime\)/],
+    ['a service with lookup only',
+      {services: {partial: {lookup: () => ({})}}, phases: {a: ['[partial]/x', {}]}},
+      {code: 'not-a-service', address: '$a.@1'},
+      /Service 'partial' must provide/],
     ['a malformed declaration',
       {phases: {a: ['[echo]/broken', {on: 1}]}},
       {code: 'malformed-declaration', address: '$a.@1'},
       /\[\$a\.@1\] The declaration of \[echo\]\/broken is malformed: Unknown tag 'targte' on 'on'/],
-    ['method syntax on an operation with no target',
+    ['method syntax on a service call with no target',
       {given: {x: 1}, phases: {a: ['$given.x', '[util]/when']}},
       {code: 'no-target', address: '$a.@1'},
       /Method syntax was used for \[util\]\/when but it declares no target field/],
@@ -191,11 +195,6 @@ describe('Compile-time errors', () => {
     assert.doesNotThrow(() => compileQuery({given: {price: '$5.00'}, phases: {a: ['[echo]/echo', {on: '$given.price'}]}}))
   })
 
-  it('dispatches each verb of a several-verb resource to its own operation', () => {
-    const {phases} = compileQuery({phases: {a: ['POST [echo]/items', {on: 1}], b: ['GET [echo]/items', {}]}})
-    assert.equal(phases.a.steps[0].operation, echo.lookup({service: 'echo', resource: '/items', method: 'POST'}))
-    assert.equal(phases.b.steps[0].operation, echo.lookup({service: 'echo', resource: '/items', method: 'GET'}))
-  })
 
   it('warns, but compiles, when a binding shares a phase name', () => {
     const {warnings} = compileQuery({
@@ -214,7 +213,7 @@ describe('error codes', () => {
   const read = (file) => readFile(new URL(`../${file}`, import.meta.url), 'utf8')
   const raised = async () => {
     const sources = await Promise.all(['compile.js', 'graph.js', 'types.js', 'execute.js'].map(read))
-    const codes = sources.flatMap(source => [...source.matchAll(/(?:fail\([^,]+, |code: |issue\()'([a-z-]+)'/g)].map(([, code]) => code))
+    const codes = sources.flatMap(source => [...source.matchAll(/(?:fail\([^,]+, |runError\([^,]+, |code: |issue\()'([a-z-]+)'/g)].map(([, code]) => code))
     return [...new Set(codes)].sort()
   }
   const documented = async () => {

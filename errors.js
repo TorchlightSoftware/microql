@@ -17,7 +17,7 @@
  * given. `[util]/throw` turns it back into an Error.
  */
 
-import {errorSchema} from 'zodly'
+import {errorSchema} from '@tlsft/zodly'
 
 export {errorSchema}
 

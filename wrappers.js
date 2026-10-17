@@ -8,7 +8,7 @@
  * They are applied in canonical order, outermost first:
  *
  *   arguments → debug → error label → run state → cache → precheck
- *   → rate limit → concurrency → retry → postcheck → timeout → the operation
+ *   → rate limit → concurrency → retry → postcheck → timeout → the service call
  *
  * A failure is thrown, labelled with the innermost call that raised it, until
  * a catch handles it. A call's catch wraps each invocation of the calls it
@@ -25,7 +25,7 @@
 import {mapReferences, parseReference, resolveReference, resolveRead} from './reference.js'
 import {VALIDATION_NAMES, getServiceColorName, mapValues, defaults, setPaths} from './common.js'
 import {hashOf} from './forms.js'
-import {validate} from 'zodly'
+import {validate} from '@tlsft/zodly'
 import {format} from './format.js'
 import {toErrorData} from './errors.js'
 
@@ -253,8 +253,9 @@ function wrappersFor(call, run) {
   ].filter(Boolean)
 }
 
-// The call's operation wrapped in its behaviour: a step `(args, invocation) => result`.
+// The call, made by its service's instance, wrapped in its behaviour: a step `(args, invocation) => result`.
 export function wrap(call, run) {
-  const operation = (args) => call.operation.call(args)
-  return wrappersFor(call, run).reduceRight((next, wrapper) => wrapper(next, call, run), operation)
+  const instance = run.instances[call.parts.service]
+  const serviceCall = (fields) => instance.call({...call.parts, fields})
+  return wrappersFor(call, run).reduceRight((next, wrapper) => wrapper(next, call, run), serviceCall)
 }

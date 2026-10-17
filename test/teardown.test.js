@@ -1,180 +1,57 @@
-import assert from 'node:assert'
+import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import query, {defineService} from '../index.js'
+import query, {defineService, nodeRuntime} from '../index.js'
 
-describe('TearDown Tests', () => {
-  it('should call tearDown on services that have it', async () => {
-    let tearDownCalled = false
-
-    // Mock service with tearDown method
-    const mockService = defineService({
-      async '/testAction'() {
-        return 'test result'
-      },
-
-      async tearDown() {
-        tearDownCalled = true
-      }
+// tearDown belongs to the runtime that keeps a service's instances: a Run
+// never calls it.
+describe('tearDown', () => {
+  // A service, and how often its instances' tearDown has run.
+  const tearDownCounting = () => {
+    const counted = {tearDowns: 0}
+    counted.service = defineService({
+      async '/run'() { return 'ran' },
+      async '/fail'() { throw new Error('failed') },
+      async tearDown() { counted.tearDowns++ }
     })
+    return counted
+  }
 
-    await query({
-      services: {mockService},
-      phases: {
-        test: ['[mockService]/testAction', {}]
-      }
+  // A runtime of its own, keeping its own instances, as a test would use.
+  const ownRuntime = () => ({...nodeRuntime})
+
+  // [description, phases, whether the Run fails]
+  const runs = [
+    ['a Run that succeeds', {a: ['[service]/run', {}]}, false],
+    ['a Run that fails', {a: ['[service]/fail', {}]}, true]
+  ]
+
+  for (const [description, phases, fails] of runs) {
+    it(`isn't called by ${description}`, async () => {
+      const counted = tearDownCounting()
+      const run = query({runtime: ownRuntime(), services: {service: counted.service}, phases})
+      if (fails) await assert.rejects(run, /failed/)
+      else await run
+      assert.equal(counted.tearDowns, 0)
     })
+  }
 
-    assert.strictEqual(tearDownCalled, true, 'tearDown should have been called')
+  it('is called by the node runtime\'s tearDown on each instance it keeps, once', async () => {
+    const one = tearDownCounting()
+    const other = tearDownCounting()
+    const runtime = ownRuntime()
+    await query({runtime, services: {one: one.service, other: other.service}, phases: {a: ['[one]/run', {}], b: ['[other]/run', {}]}})
+    await runtime.tearDown()
+    await runtime.tearDown()
+    assert.deepEqual([one.tearDowns, other.tearDowns], [1, 1])
   })
 
-  it('should not fail if service does not have tearDown', async () => {
-    // Service without tearDown method
-    const serviceWithoutTearDown = defineService({
-      async '/testAction'() {
-        return 'test result'
-      }
-    })
-
-    // This should not throw an error
-    const result = await query({
-      services: {serviceWithoutTearDown},
-      phases: {
-        test: ['[serviceWithoutTearDown]/testAction', {}]
-      }
-    })
-
-    assert.deepStrictEqual(result, {test: 'test result'})
-  })
-
-  it('should call tearDown on multiple services', async () => {
-    const tearDownCalls = []
-
-    const service1 = defineService({
-      async '/action'() {
-        return 'result1'
-      },
-      async tearDown() {
-        tearDownCalls.push('service1')
-      }
-    })
-
-    const service2 = defineService({
-      async '/action'() {
-        return 'result2'
-      },
-      async tearDown() {
-        tearDownCalls.push('service2')
-      }
-    })
-
-    await query({
-      services: {service1, service2},
-      phases: {
-        test1: ['[service1]/action', {}],
-        test2: ['[service2]/action', {}]
-      }
-    })
-
-    assert.strictEqual(
-      tearDownCalls.length,
-      2,
-      'Both services should have tearDown called'
-    )
-    assert(
-      tearDownCalls.includes('service1'),
-      'service1 tearDown should be called'
-    )
-    assert(
-      tearDownCalls.includes('service2'),
-      'service2 tearDown should be called'
-    )
-  })
-
-  it('should call tearDown even if query fails', async () => {
-    let tearDownCalled = false
-
-    const serviceWithError = defineService({
-      async '/failingAction'() {
-        throw new Error('Test error')
-      },
-
-      async tearDown() {
-        tearDownCalled = true
-      }
-    })
-
-    try {
-      await query({
-        services: {serviceWithError},
-        phases: {
-          test: ['[serviceWithError]/failingAction', {}]
-        }
-      })
-      assert.fail('Query should have thrown an error')
-    } catch (error) {
-      // Expected error
-      assert(error.message.includes('Test error'), 'Should get the test error')
-    }
-
-    assert.strictEqual(
-      tearDownCalled,
-      true,
-      'tearDown should be called even when query fails'
-    )
-  })
-
-  it('should not call tearDown for unused services', async () => {
-    let tearDownCalled = false
-
-    const usedService = defineService({
-      async '/action'() {
-        return 'result'
-      }
-    })
-
-    const unusedService = defineService({
-      async '/action'() {
-        return 'unused'
-      },
-      async tearDown() {
-        tearDownCalled = true
-      }
-    })
-
-    await query({
-      services: {usedService, unusedService},
-      phases: {
-        test: ['[usedService]/action', {}]
-      }
-    })
-
-    assert.strictEqual(
-      tearDownCalled,
-      false,
-      'tearDown should not be called for unused services'
-    )
-  })
-
-  it('should handle tearDown errors gracefully', async () => {
-    const _queryCompleted = false
-
-    const serviceWithBadTearDown = defineService({
-      async '/action'() {
-        return 'result'
-      },
-      async tearDown() {
-        throw new Error('TearDown failed')
-      }
-    })
-
-    // Should not throw despite tearDown error
-    const result = await query({
-      services: {serviceWithBadTearDown},
-      phases: {
-        test: ['[serviceWithBadTearDown]/action', {}]
-      }
-    })
-
-    assert.deepStrictEqual(result, {test: 'result'})
+  it('reaches only the instances of the runtime it is called on', async () => {
+    const counted = tearDownCounting()
+    const [used, other] = [ownRuntime(), ownRuntime()]
+    await query({runtime: used, services: {service: counted.service}, phases: {a: ['[service]/run', {}]}})
+    await other.tearDown()
+    assert.equal(counted.tearDowns, 0)
+    await used.tearDown()
+    assert.equal(counted.tearDowns, 1)
   })
 })

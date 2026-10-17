@@ -37,7 +37,7 @@ describe('form hashes', () => {
   const services = {
     scraper: defineService({
       async '/extract'({url}) { return {url} },
-      '/images': {input: {on: ['target']}, call: async ({on}) => on}
+      '/images': {input: {on: ['any', 'optional', {tags: ['target']}]}, call: async ({on}) => on}
     })
   }
 

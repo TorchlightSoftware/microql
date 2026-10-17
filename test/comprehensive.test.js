@@ -81,7 +81,7 @@ describe('MicroQL Comprehensive Tests', () => {
 
     it('should handle method syntax with data transformation', async () => {
       // method syntax fills the field tagged target
-      const onTarget = {on: ['target']}
+      const onTarget = {on: ['any', 'optional', {tags: ['target']}]}
       const services = servicesFromTables({
         transform: {
           '/filter': {input: onTarget, call: async ({on, fn}) => on.filter((item) => item.includes(fn))},
@@ -246,7 +246,7 @@ describe('MicroQL Comprehensive Tests', () => {
             result: ['[test]/invalidMethod', {value: '$given.x'}]
           }
         }),
-        /Resource '\/invalidMethod' not found on service 'test'/
+        /\[test\]\/invalidMethod is not a resource of this service/
       )
     })
 
@@ -280,7 +280,7 @@ describe('MicroQL Comprehensive Tests', () => {
             result: ['[invalid]/action', {value: '$given.data'}]
           }
         }),
-        /Service 'invalid' must provide lookup\(parts\) and operations\(\)/
+        /Service 'invalid' must provide lookup\(key\), supportedCalls\(\) and init\(runtime\)/
       )
     })
   })

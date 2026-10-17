@@ -158,8 +158,8 @@ describe('Rate Limit Tests', () => {
       const services = {
         validated: defineService({
           '/process': {
-            input: {value: [['type', ['string']]]},
-            output: [['type', ['object', {processed: ['string']}]]],
+            input: {value: ['string']},
+            output: {processed: ['string']},
             async call({value}) {
               callTimes.push(Date.now() - startTime)
               return {processed: value, timestamp: Date.now()}

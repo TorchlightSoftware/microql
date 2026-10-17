@@ -33,6 +33,36 @@ const leads = await query({
 })
 ```
 
+## Contents
+
+- [Target Audience](#target-audience)
+- [Installation](#installation)
+- [Core Concepts](#core-concepts)
+  - [Phases](#phases)
+  - [Service Calls](#service-calls)
+  - [Service Keys](#service-keys)
+  - [References](#references)
+  - [Services](#services)
+  - [Chains](#chains)
+  - [Iterating with each](#iterating-with-each)
+  - [Method Syntax](#method-syntax)
+- [Handling Failure](#handling-failure)
+- [Built-in Utilities](#built-in-utilities)
+- [Settings](#settings)
+- [Runs and stored results](#runs-and-stored-results)
+- [Running from the Command Line](#running-from-the-command-line)
+- [Examples](#examples)
+  - [Review monitoring](#review-monitoring)
+  - [Content repurposing](#content-repurposing)
+- [Documentation](#documentation)
+- [Testing](#testing)
+- [Generated docs](#generated-docs)
+- [Questions](#questions)
+  - [How is this different from GraphQL?](#how-is-this-different-from-graphql)
+  - [Why isn't this library written in TypeScript?](#why-isnt-this-library-written-in-typescript)
+  - [Is it fast?](#is-it-fast)
+- [License](#license)
+
 ## Target Audience
 
 If you're a programmer and you want to achieve the low risk/high productivity of something like Zapier or n8n, but without all the baggage that those services come with, use MicroQL.  You may 1) make yourself more productive, 2) enable a non-coder on the team to be able to compose queries, enabling a division of labor where you and other coders can focus on building out new services, or working on something else entirely.
@@ -49,7 +79,9 @@ MicroQL needs Node.js 22 or later. `import query from 'microql'` gives you core 
 
 ### Phases
 
-A Query's named nodes are **phases**. Each phase is a service call, or a chain of them. `$name` refers to a phase's result, and that reference is how MicroQL knows the order: a phase runs as soon as everything it references is ready, and phases that don't depend on each other run at the same time.
+At the top level, a Query has a set of named nodes called **phases**. Each phase begins with a chain of 1 or more service calls.  This chain will run sequentially.  Each call in a chain can access the results of the previous call through the special variable `@`.
+
+Phases can also refer to each other's data by referring to the name of the $phase.  Phase references are how MicroQL knows the order to run them in: a phase runs as soon as everything it references is ready, and phases that don't depend on each other run at the same time.
 
 ```javascript
 phases: {
@@ -65,13 +97,37 @@ phases: {
 }
 ```
 
-Circular references are caught before anything runs.
+Circular references are caught by the query planner and result in an error.
+
+### Service Calls
+
+The active parts of a Query are **service calls**. They are formed by a service key, naming what to call, then the fields to call it with.  By convention services typically accept a set of named arguments as their root:
+
+```
+['POST [claude]/write', {format: 'newsletter', source: '$post'}]
+```
+
+The above sends HTTP `POST` to the `/write` path on the `claude` service, feeding it the static string 'newsletter' and whatever the result of the `$post` phase is.  MicroQL first resolves references to their runtime values, then calls the service with those values.  This allows you to write queries declaratively (where do I need to get the data from?) without worrying about what order it will run in.
+
+Service calls also have retry, timeout, rate limit, and cache settings which can be configured on a case by case basis or by query wide defaults.
+
+Service calls may also receive other service calls: this allows services to perform flow control and higher order functions within a query.  See `[util]/each` which calls a service for each member of a list.
+
+You can build your own services or generate them from well defined API specs: see [our service guide](docs/service-guide.md).
 
 ### Service Keys
 
-A call is named by its **service key**, `[VERB] [service]/resource`: `POST [claude]/write` calls the `/write` resource of the `claude` service with `POST`, and `[util]/each` calls `util`'s `/each`, which takes no verb. Whether a resource takes a verb, and which, is the service's business. Services are passed in through `services`; a key naming a service, resource or verb that doesn't exist is an error before anything runs.
+A call is named by its **service key** in the form `METHOD [service]/resource`.  METHOD is optional.  Service keys allow us to describe RESTful routes, gRPC endpoints, SOAP, whatever you would like.  The service key omits the transport protocol and instead names the *identity* of the service you are talking to.  So service keys are *subjective* from the point of view of the execution context, whereas URIs are *absolute*.
+
+This has several advantages:
+
+1) We may use the same identifier whether a service is local or remote
+2) Some tenants in a system may choose to self host, or run different network topologies
+3) Perhaps we want to use a decentralized peer discovery protocol, or some other custom means of addressing
 
 ### References
+
+References are used to pull in values from other parts of a query.  Phase references act as implied dependencies, ensuring that the source phase will run before the destination.
 
 | Form | Means |
 |---|---|
@@ -80,41 +136,16 @@ A call is named by its **service key**, `[VERB] [service]/resource`: `POST [clau
 | `@name.path` | The current item of the enclosing iteration named `name` by `as:` |
 | `@err.path` | The failure, inside a `catch` (`@@err` for the one outside it) |
 
-Paths are `.field` and `[index]` segments: `$listings[0].images[1].src`. A path that names nothing gives `undefined`.
+Paths are `.field` and `[index]` segments such as: `$listings[0].images[1].src`. A path that names nothing gives `undefined`.
 
-Every string beginning with `$` or `@` is a reference. A literal like `"$5.00"` is supplied through `given`. Mistakes — an unknown name, `@` where nothing flows in, the 0.x `$.name` form — are reported with the call's address before anything runs.
+Every string beginning with `$` or `@` is a reference. A literal like `"$5.00"` can be supplied through `given`. Mistakes — an unknown name, `@` where nothing flows in, the 0.x `$.name` form — are reported with the call's address before anything runs.
 
 ### Services
 
-A service answers a key with an operation: an async function that takes an object of named fields and returns a promise, plus an optional declaration of those fields. Most services are written as a service definition, resources mapped to operations, and wrapping an API, a model or a database takes a few lines:
+A service is an API of some kind - like Google, Facebook, Square, Salesforce, etc.  It could be local or remote, and each service call can be sync or async.  See the [util.js](services/util.js) service for a built-in example of a service.  You will be using this service a lot for flow control within queries, like processing lists of things or creating conditional logic.  Also see the [microql-services](https://github.com/TorchlightSoftware/microql-services) project, where we are keeping a catalog of existing services.
 
-```javascript
-import {defineService} from 'microql'
+Wrapping existing APIs to create a new service is easy, see our [service development guide](docs/service-guide.md) for more information.
 
-const headers = {Authorization: `Bearer ${process.env.HUBSPOT_TOKEN}`, 'Content-Type': 'application/json'}
-
-export const hubspot = defineService({
-  '/companies': {
-    async GET({domain}) {
-      const response = await fetch(`https://api.hubapi.com/crm/v3/objects/companies/${domain}?idProperty=domain`, {headers})
-      return response.json()
-    },
-    POST: {
-      input: {on: ['target']},
-      async call({on: companies}) {
-        const response = await fetch('https://api.hubapi.com/crm/v3/objects/companies/batch/upsert', {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({inputs: companies.map(c => ({idProperty: 'domain', id: c.domain, properties: c}))})
-        })
-        return response.json()
-      }
-    }
-  }
-})
-```
-
-A resource with several verbs has one operation per verb; a resource given as one operation takes keys with no verb. A declaration's tags say which field method syntax fills, which fields hold nested calls, and the types of the input and output. See the [Service Development Guide](docs/service-guide.md).
 
 ### Chains
 
@@ -145,7 +176,7 @@ ocr: ['$listings', '[util]/flattenEach', {as: 'listing',
 
 ### Method Syntax
 
-The first argument may be written on the left: `['$members', '[util]/each', {...}]` is `['[util]/each', {on: '$members', ...}]`. Services opt in by tagging the field that comes first: `input: {on: ['target']}`.
+The first argument may be written on the left: `['$members', '[util]/each', {...}]` is `['[util]/each', {on: '$members', ...}]`. Services opt in by tagging the field that comes first: `input: {on: ['array', {tags: ['target']}]}`.
 
 ## Handling Failure
 
@@ -253,6 +284,8 @@ console.log(`Created ${created.length} companies`)
 process.exit(0) // HTTP clients may keep connections alive
 ```
 
+A script that's done can just exit, as this one does: the process takes its services' browsers and connections with it. A long-running process, or a test, cleans them up instead with `await nodeRuntime.tearDown()`, which calls the `tearDown` of each service instance the runtime keeps.
+
 ```bash
 chmod +x queries/lead-gen.js
 ./queries/lead-gen.js https://www.example-chamber.org/directory
@@ -290,7 +323,7 @@ await query({
 
 ### Content repurposing
 
-Turn one blog post into a LinkedIn post, an X thread and a newsletter, written in parallel, each checked before anything is scheduled:
+Turn one blog post into a LinkedIn post, an X thread and a newsletter, posted in parallel, each checked before anything is scheduled:
 
 ```javascript
 await query({
@@ -320,7 +353,7 @@ A draft that fails its `postcheck` — a thread entry over 280 characters — is
 ## Documentation
 
 - **[Service Development Guide](docs/service-guide.md)** - How to write and structure services
-- **[Validation System](docs/validation.md)** - Type validation and contracts, written in [zodly](https://www.npmjs.com/package/zodly)
+- **[Validation System](docs/validation.md)** - Type validation and contracts, written in [zodly](https://github.com/TorchlightSoftware/zodly)
 - **[Runtime Integration](docs/runtime-integration.md)** - Building on MicroQL beyond a node script: core, runtimes and platforms, storage, planning, partial runs, progress updates and abort
 
 ## Testing
@@ -342,7 +375,7 @@ npm run docs:functions   # function-names.md tables: after changing core
 
 ### How is this different from GraphQL?
 
-GraphQL is primarily developed for field extraction, whereas MicroQL was designed for service orchestration.  You can do service orchestration with GraphQL but it requires that you put a lot more leg work into resolvers and that you manually think about dependency resolution.  MicroQL infers dependency resolution and parallelism from the paths that are referenced.  MicroQL also doesn't invent a completely new syntax - it's mostly a subset of JSON.  We found ways to do that without being pedantic and verbose.
+GraphQL is primarily developed for field extraction, whereas MicroQL was designed for service orchestration.  You can do service orchestration with GraphQL but it requires that you put a lot more leg work into resolvers and that you manually think about dependency resolution.  MicroQL infers dependency resolution and parallelism from the paths that are referenced.  MicroQL also doesn't invent a completely new syntax - it's mostly a subset of JSON and JSON pathing.  We found ways to do that without being pedantic and verbose.
 
 The MicroQL codebase is also small, dependencies `zod`, `@noble/hashes` and `@tlsft/service-key`.
 
@@ -353,11 +386,15 @@ The MicroQL codebase is also small, dependencies `zod`, `@noble/hashes` and `@tl
 
 I think the problem that most people are trying to solve with TypeScript would be better solved with input validations.  That is: you can type for internal consistency all you like, but as soon as you incorporate something outside your domain, your static type analysis fails.  MicroQL is literally for composing things outside of your domain.
 
-Secondly, Javascript compilation layers became a Tower of Babel over ten years ago.  Your main tool is literally called `babel`.  Do you really need all that?  Maybe all you need is JSON.  Try it out.
+So MicroQL instead opts to give you great input/output validations with zod/zodly, and give you inference tools to understand how those types flow through your query.
+
+Secondly, Javascript compilation layers became a Tower of Babel over ten years ago.  The main tool is literally called `babel`.  Maybe all you need is JSON.
 
 ### Is it fast?
 
-It's faster than n8n, slower than native Javascript.  Performance optimization should be considered in its infancy - particularly I have not tried this with any long running processes to ensure that there are no memory leaks.
+It's faster than n8n, slower than native Javascript.  Performance optimization should be considered in its infancy - particularly I have not tried this with any long running processes to ensure that there are no memory leaks.  See [performance metrics](performance.md).
+
+Since it's raw JS, you don't have to wait for any compile times, or set up the build chains required for transpiling.
 
 ## License
 

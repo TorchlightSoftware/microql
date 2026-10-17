@@ -255,7 +255,7 @@ describe('Cache Tests', () => {
       const services = {
         validator: defineService({
           '/process': {
-            input: {value: [['type', ['string']]]},
+            input: {value: ['string']},
             async call({value}) {
               callCount++
               return {validated: value, count: callCount}

@@ -11,7 +11,7 @@ Three parties take part in running a Query, and each owns different things:
 | Party | Is | Owns |
 |---|---|---|
 | **Core** | `compile`, `plan` and `execute`, imported as `microql/core` | what a Query means: references, chains, `each`, retries, timeouts, error handling, scheduling, and which results to reuse |
-| **Runtime** | an object of environment capabilities, passed as `config.runtime` | output, failure records, and the [Cache](#the-cache) store |
+| **Runtime** | an object of environment capabilities, passed as `config.runtime` | output, failure records, the [Cache](#the-cache) store, configuration, and the [service instances](#services) |
 | **Platform** | whatever calls core: a node script, a server, an editor | [Runs](#runs): which [Run State](#storage) each one gets, where results are shown, and when stores are cleared |
 
 **Core is kept free from environment dependencies: the file system, the network and so on.** A runtime provides these. It is injected into core and into the [service initializers](#services). MicroQL ships one runtime, the **node runtime**, as the reference implementation. Any object that satisfies [the runtime API](#the-runtime-api) is a runtime.
@@ -38,8 +38,10 @@ Both export:
 | `applySelection(results, select)` | what `select` names |
 | `addressToPath(plan, address)`, `pathToAddress(plan, path)` | [Service Call Addresses](#service-call-addresses) ↔ JSON paths |
 | `memoryStore()` | an [entry store](#entry-stores) in memory |
+| `serviceRegistry()` | `init(services)` and `tearDown()` for a runtime to spread into itself: keeps one instance per service name and service, each given only the config filed under its name ([Service instances](#service-instances)) |
+| `serviceSmokeTests(service, {runtime, config})` | a table of tests checking a service against the service spec ([Service Development Guide § Testing services](service-guide.md#testing-services)) |
 | `util` | the built-in service |
-| `defineService(serviceDefinition)` | a service from a service definition, resources mapped to operations; see the [Service Development Guide](service-guide.md#writing-a-service-with-defineservice) |
+| `defineService(serviceDefinition)` | a service from a service definition, resources mapped to service calls; see the [Service Development Guide](service-guide.md#writing-a-service-with-defineservice) |
 | `parseSchema(descriptor)` | the zod schema a [zodly](validation.md#schema-syntax) descriptor describes, for a service that hands schemas to a library |
 | `errorSchema`, `isErrorData`, `toErrorData`, `fromErrorData` | [errors as data](#errors-as-data) |
 | `format(value, options)` | a value as text, the same on every runtime |
@@ -226,7 +228,7 @@ Hashes are SHA-256 over canonical JSON, computed synchronously in pure JS (`@nob
 
 `plan()` infers a type for every service call and every input field, as zod schemas. An editor, such as a visual Builder, converts them to whatever types it displays; core has no types of its own. `z.any()` stands for a type that can't be known.
 
-- A field's **expected** type comes from the operation's declaration: its concrete type (a zodly descriptor or zod schema), or a relationship to another field's type. A call field's expected type is what its nested call must return; `util/filter` wants boolean.
+- A field's **expected** type comes from the service call's declaration: its concrete type (a zodly descriptor or zod schema), or a relationship to another field's type. A call field's expected type is what its nested call must return; `util/filter` wants boolean.
 - Its **actual** type is a literal's own type, a phase's return type, or the flow at that point, with paths walking into them; a field the call's own `precheck` names has the precheck's type. Inside a nested call, `@` is what the declaration says the call field receives (`util/each`: one item of `on`), or `z.any()`.
 - A call's **return** type is its own `postcheck`, else its declared output, resolved against its fields.
 
@@ -252,14 +254,13 @@ It is zodly's `error` type: a JSON-LD node of type Error, recognised by `@type`,
 
 | Code | Means |
 |---|---|
-| `invalid-descriptor` | a call isn't `['[VERB] [service]/resource', {...}]`, or its arguments aren't an object |
+| `invalid-descriptor` | a call isn't `['[METHOD] [service]/resource', {...}]`, or its arguments aren't an object |
 | `retired-key` | a key uses the retired `service:action` form, or a call or the Query's settings use a retired argument (`onError`, `ignoreErrors`, `skipInputErrors`, `skipOutputErrors`); the message names its replacement |
 | `unknown-service` | no service is registered under the key's name |
-| `not-a-service` | the service has no `lookup(parts)` and `operations()` |
-| `unknown-resource` | the service's `lookup` answered nothing for the key |
-| `refused-key` | the service's `lookup` refused the key, such as a verb it doesn't take; the message is the service's |
-| `malformed-declaration` | the operation's declaration has an unknown tag or a malformed source |
-| `no-target` | method syntax was used for an operation that declares no target field |
+| `not-a-service` | the service lacks one of `lookup`, `supportedCalls` and `init` |
+| `refused-key` | the service's `lookup` refused the key: a resource it lacks, a method it doesn't take, a key confined or not as it doesn't answer; the message is the service's |
+| `malformed-declaration` | the service call's declaration has an unknown tag, a malformed zodly type or a malformed source |
+| `no-target` | method syntax was used for a service call that declares no target field |
 | `malformed-schema` | a Service Call Validation or the trigger schema can't be parsed |
 | `unknown-reference` | a reference names no phase, node, iteration or enclosing `catch` |
 | `invalid-reference` | a reference is malformed: bare `$`, `@@`, a Service Call Address, `@` where nothing flows in |
@@ -292,7 +293,8 @@ A call field with a `catch` returns its nested call's type or the `catch`'s, as 
 
 | Code | Means |
 |---|---|
-| `missing-capability` | a service the Query uses `requires` a runtime key this runtime doesn't provide; `address` is the first call to it |
+| `missing-capability` | a service the Query uses `requires` a runtime key this runtime doesn't provide (`config`, for a service that declares one); `address` is the first call to it |
+| `invalid-config` | the config filed under the name of a service the Query uses doesn't fit its config declaration (or there is none), or the declaration is malformed; `address` is the first call to it |
 
 ## The runtime API
 
@@ -302,6 +304,9 @@ A runtime is a plain object passed as `config.runtime`:
 |---|---|---|
 | `log(text, {color, to})` | write a line of text: shown, in the named colour if any; or kept at the destination `to`, which the runtime interprets; may be async | stdout in colour; with `to`, appended to that file |
 | `cache` | an [entry store](#entry-stores) whose entries outlive a Run | `fileStore('.cache')` |
+| `init(services)` | instances of the services a Run uses, given by name as `config.services` has them, each initialized with only the `config` filed under its name; may be async, as may each service's `init`. Core calls it as a method of the runtime, and waits for it before the Run's first call ([Services](#services)) | `serviceRegistry()`: one instance per name and service, kept until `tearDown()` |
+| `tearDown()` | optional, not a capability services use: releases the service instances the runtime keeps | `serviceRegistry()`: calls each instance's `tearDown` once |
+| `config` | optional: each service's configuration, such as credentials, filed under the service's name and scoped to the tenant the runtime serves: `{github: {token}}`. A service declares the config it reads ([Service Development Guide § Configuration](service-guide.md#configuration)), and a Run checks what's filed under each service's name against its declaration before it starts | none; a script adds it: `{...nodeRuntime, config}` |
 
 The Run State is per Run, so it is an option of `execute`, not a capability of the runtime. Text is rendered by core, the same on every runtime: `format` (exported) is what `[util]/format`, `[util]/inspect`, debug output and validation messages all use.
 
@@ -314,13 +319,48 @@ A Query should run on any runtime that has the services it names, without change
 - **Name a platform-specific service for what it does, not for the platform**: `[store]`, not `[otto]`. Another platform can then implement the same service, and Queries using it move with it.
 - **To make a key standard, bring it back to the MicroQL maintainers**, with the services that use it. A key every runtime provides is one Queries can rely on everywhere. Avoid vendor prefixes (`x-fs`): renaming one when it becomes standard breaks everything that used it.
 
+### Runtime environments
+
+Core runs anywhere JavaScript does: a lint rule keeps node built-ins out of every core file. The environments MicroQL is built for, and what each means for a runtime and its services:
+
+| Environment | Runtime | What services can rely on |
+|---|---|---|
+| **Node.js** | the node runtime (`microql`), the reference implementation: logs to stdout or to files, keeps the Cache on disk (`fileStore`) | a long-lived process with the file system, the network and any npm library, such as Puppeteer |
+| **Cloudflare Workers** | one of the platform's own, with `microql/core`: stores in KV, D1 or R2 behind the [entry store](#entry-stores) interface | `fetch` and what the runtime gives them. No local file system, node APIs only in part (with the `nodejs_compat` flag), limits on each request's time and memory, and an isolate whose module scope several requests share ([Tenant isolation](#tenant-isolation)). A browser comes from Cloudflare's Browser Rendering, or from a separate backend service called over the network. |
+
+**Services should support as many environments as they can.** A service that needs only `fetch` and its runtime's capabilities runs on both. One that needs more, such as the local file system or a node-only library, says which environments it supports, and reaches what it can through the runtime, so that a runtime for another environment can provide it.
+
 ### Services
 
-**A service is an object with `lookup(parts)` and `operations()`**, as the [Service Development Guide](service-guide.md) describes. Core needs nothing more. Turning a description of an API (an OpenAPI spec, an MCP server's tool list, a platform's route map) into such an object belongs outside core, in whatever builds services for the platform. A service that discovers its operations asynchronously does so before the Query is compiled, since `lookup` answers synchronously.
+**A service is an object with `lookup`, `supportedCalls` and `init`**, as the [Service Development Guide](service-guide.md) describes. Core asks `lookup` for each call's declaration while compiling; `supportedCalls()` is for a builder listing what a service offers, and core never pages through it. `init(runtime)` makes an **instance** of the service, whose `call` makes the Run's calls and whose `tearDown` releases what it holds. Turning a description of an API (an OpenAPI spec, an MCP server's tool list, a platform's route map) into a service belongs outside core, in whatever builds services for the platform. A service that discovers its calls asynchronously does so before the Query is compiled, since `lookup` answers synchronously.
 
-### Service init and tearDown
+### Service instances
 
-Before a Run begins, core calls an optional `init(runtime)` on each service the plan uses, at most once per runtime; `util` uses it to reach `log`. `init` receives instance-wide capabilities only — per-Run state never passes through a service — so a platform may keep its initialized services in a long-lived registry. After a Run, core calls an optional `tearDown()` on each service the Run used.
+**The runtime keeps service instances; core keeps none.** Before a Run's first call, core calls `runtime.init(services)` with the services the Run uses, by the names the Query gives them, and makes the Run's calls on the instances it returns. The runtime decides when to make an instance and how long to keep it:
+
+- **`serviceRegistry()` is the plain way to do it.** Spread into a runtime, it makes one instance of each service under each name for the runtime it's called on, given the config filed under that name, the first time a Run uses the service, and reuses it for every later Run. Runs that start together wait on the same `init`, so an async `init` runs once. `tearDown()` releases them all, calling each instance's `tearDown` once, and the next Run makes fresh ones. An `init` that fails is forgotten, so the next Run tries again. The node runtime is built with it.
+- **A runtime spreads `serviceRegistry()` in, rather than writing its own `init`.** Scoping to a tenant needs no `init` of its own: a runtime scoped to a tenant, with the registry spread in, keeps that tenant's instances ([Tenant isolation](#tenant-isolation)). A runtime that does write its own `init(services)`, to load instances up front say, takes on everything the registry does, including giving each instance only the config filed under its service's name.
+- **`tearDown()` is the runtime's, and never core's to call.** A Run never calls it. The runtime's owner calls it when done with the instances: a server shutting down, a test's `after()`, a platform unloading a tenant. A script that's done may simply `process.exit()`.
+- **Runs may overlap.** Core keeps no state between Runs: each Run's state is its own, and the Run State and Cache are the platform's, keyed by form and input. An instance serves every Run of its runtime, so services keep no per-Run state of their own ([Service Development Guide § init and tearDown](service-guide.md#init-and-teardown)).
+
+### Tenant isolation
+
+A platform serving several tenants in one process, such as a Cloudflare worker handling many requests, must keep each tenant's credentials, cached results and service state from the others. MicroQL's part is to keep core free of state, so that **isolation is the runtime's, and services never see an isolation boundary**: the runtime keys and stores tenant data, and a service only uses what its runtime gives it.
+
+**Within a process, a runtime scoped to a tenant.** The platform passes each Query a runtime scoped to its tenant: one runtime in the strict sense, but a scoped view of its state, whose `config`, `cache` and instances are that tenant's. So configuration is keyed by tenant and service name: the scoped runtime picks the tenant's, and each instance gets its service's. With `serviceRegistry()`, a scoped runtime is a runtime of its own (`{...runtime, config: configOf(tenant), cache: cacheOf(tenant)}`, kept per tenant), so it makes and keeps its own instances. What this gives, and what it costs:
+
+- **A service never holds a tenant identifier**, so it can't ask for another tenant's config or cache, and can't hand back the wrong keying: the runtime does the keying, and doesn't rely on services to behave.
+- **Every instance is one tenant's**, so what it holds (a token, a connection, a Puppeteer `BrowserContext`, which keeps its own cookies and storage within a shared browser) is that tenant's.
+- **The Cache must be scoped too.** Cache entries are keyed by form and input, so two tenants making an identical call share an entry in a shared cache: give each scoped runtime its own cache, or a cache keyed by tenant.
+- **Memory is still shared.** Every tenant's instances run in one process, with the same modules. A service that keeps data in module scope, or on its definition, carries it from one tenant to the next, and a hostile service can read anything in the process. Scoped runtimes guard against careless services, not hostile ones. Static checks for mutable module state catch the common accidents, never a service written to evade them.
+- **Instances multiply**: one per service per tenant, held until the runtime releases them. A platform with many tenants tears down the instances of tenants that go quiet.
+
+**Across processes, complete isolation.** Each tenant's Runs execute in a process (or isolate) of their own: on Cloudflare, a worker per tenant (Workers for Platforms dispatch namespaces), or tenant code loaded into an isolate of its own. What this gives, and what it costs:
+
+- **Nothing is shared**, so a hostile service, or a hostile Query, reaches only its own tenant's data. This is the boundary to have when tenants write their own services and Queries.
+- **Each process has its own runtime and instances**: startup cost per tenant, no instances shared across tenants, and more to deploy and monitor.
+
+MicroQL needs nothing more for either: core is stateless, and both are ways to build a runtime. A platform can start with scoped runtimes and move to complete isolation when tenants write their own code, without changing its Queries or its services.
 
 ## A suggested architecture
 

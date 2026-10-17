@@ -19,7 +19,7 @@ describe('Error Handling Tests', () => {
   const seen = []
   const keep = defineService({
     '/same': {
-      input: {on: ['target']},
+      input: {on: ['any', 'optional', {tags: ['target']}]},
       call: async ({on}) => { seen.push(on); return on }
     }
   })
@@ -163,7 +163,7 @@ describe('Error Handling Tests', () => {
       const atLeastOne = ['array', ['object', {}], {min: 1}]
       const scraper = defineService({
         '/extract': {
-          output: [['type', ['object', {images: atLeastOne, websites: atLeastOne}]]],
+          output: {images: atLeastOne, websites: atLeastOne},
           async call() {
             return {
               images: [], // Will fail postcheck
@@ -195,7 +195,7 @@ describe('Error Handling Tests', () => {
           // Error message should contain only the innermost service context
           // (outer services don't relabel an error that already has an address)
           assert.match(error.message, /\[\$listings\.@1a1 - \[scraper\]\/extract\]/)
-          assert.match(error.message, /Service Schema Validation postcheck failed/)
+          assert.match(error.message, /Service Defined Validation postcheck failed/)
 
           // Validation details should be present
           assert.match(error.message, /images:.*Too small/)

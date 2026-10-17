@@ -75,7 +75,7 @@ describe('Run State', () => {
     assert.equal(byId[2].error.attempts, 1)
   })
 
-  it('settles the calls a failure left running before the Run reports, and before tearDown', async () => {
+  it('settles the calls a failure left running before the Run reports', async () => {
     const events = []
     const service = defineService({
       async '/fast'() { throw new Error('fast failure') },
@@ -83,15 +83,14 @@ describe('Run State', () => {
         await new Promise(resolve => setTimeout(resolve, 20))
         events.push('slow finished')
         return 'slow'
-      },
-      async tearDown() { events.push('tearDown') }
+      }
     })
     const runState = memoryStore()
     const config = {services: {service}, phases: {a: ['[service]/fast', {}], b: ['[service]/slow', {}]}}
 
     await assert.rejects(query(config, {runState}), /fast failure/)
     events.push('reported')
-    assert.deepEqual(events, ['slow finished', 'tearDown', 'reported'])
+    assert.deepEqual(events, ['slow finished', 'reported'])
 
     const {calls} = plan(config)
     const [entry] = await runState.list(calls.find(c => c.address === '$b.@1').formHash)

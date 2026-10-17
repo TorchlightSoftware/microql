@@ -3,13 +3,15 @@
  *
  * The node runtime logs in colour to stdout, or appends to the file a log
  * names with `to:`, and keeps the Cache in a `.cache` directory. `fileStore` is the same entry store on disk, for a Run State
- * that should survive the process.
+ * that should survive the process. It keeps one instance of each service a
+ * Run uses (see serviceRegistry), and `nodeRuntime.tearDown()` releases them
+ * when their owner is done with them.
  */
 
 import path from 'node:path'
 import {appendFile, mkdir, readFile, readdir, rm, writeFile} from 'node:fs/promises'
 import coreQuery from './query.js'
-import {memoryStore} from './runtime.js'
+import {memoryStore, serviceRegistry} from './runtime.js'
 
 export * from './core.js'
 
@@ -98,9 +100,12 @@ async function log(text, {color, to} = {}) {
   process.stdout.write(`${colorCode}${text}${resetCode}\n`)
 }
 
+// tearDown() releases the service instances it keeps: for a server shutting
+// down, or a test's after(). A script that's done may simply exit instead.
 export const nodeRuntime = {
   log,
-  cache: fileStore('.cache')
+  cache: fileStore('.cache'),
+  ...serviceRegistry()
 }
 
 // A Query run with the node runtime, and a fresh Run State in memory, unless

@@ -108,7 +108,7 @@ describe('Retry Tests', () => {
       const services = {
         aware: defineService({
           '/check': {
-            input: {settings: ['settings']},
+            input: {settings: ['any', 'optional', {tags: ['settings']}]},
             async call(args) {
               return {
                 retryReceived: args.settings?.retry,
@@ -150,14 +150,14 @@ describe('Retry Tests', () => {
       const services = {
         chain: defineService({
           '/step1': {
-            input: {on: ['target']},
+            input: {on: ['any', 'optional', {tags: ['target']}]},
             async call(args) {
               callCounts.step1++
               return {step: 1, data: args.input}
             }
           },
           '/step2': {
-            input: {on: ['target']},
+            input: {on: ['any', 'optional', {tags: ['target']}]},
             async call(args) {
               callCounts.step2++
               if (callCounts.step2 < 2) {
@@ -202,7 +202,7 @@ describe('Retry Tests', () => {
       const services = {
         processor: defineService({
           '/transform': {
-            input: {on: ['target']},
+            input: {on: ['any', 'optional', {tags: ['target']}]},
             call: async ({on, _retry}) => {
               callCount++
               if (callCount < 2) {

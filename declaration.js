@@ -1,183 +1,128 @@
 /**
- * @fileoverview Declarations — what an operation tells core about its fields.
+ * @fileoverview Declarations — what a service call tells core about its fields.
  *
- * An operation (what a service's lookup returns) declares its input as field
- * paths, each with a list of tags, and its output as a list of tags:
+ * A service call's declaration (what a service's lookup returns) holds its
+ * input and its output as zodly documents: `input` an object schema, one field
+ * per argument, and `output` the type of what it returns.
  *
- *   input:  {on: ['target', ['type', ['array']]],
- *            service: [['call', {fromList: 'on'}]]}
- *   output: [['type', {toList: {fromField: 'service'}}]]
+ *   input:  {on: ['array', {tags: ['target']}],
+ *            service: ['call', {input: ['type', {fromList: 'on'}]}]}
+ *   output: ['array', ['type', {fromField: 'service'}]]
  *
- * A tag is a name, or [name, config]:
+ * A field's tags say what core does with it:
  *   target     method syntax fills this field
- *   reserve    configures the call rather than feeding it data
  *   settings   receives the call's merged settings
- *   call       holds a nested call or chain, handed over as a function; its
- *              config is the type of what the nested call receives (`@`)
- *   type       the field's type; on a call field, what the nested call
- *              returns; on the output, what the operation returns
  *
- * A type is a zodly descriptor (['string', 'url'], [{name: ['string']}]), a
- * zod schema, or a source. An object is always a source, so an object schema
- * is boxed: [shape]. A descriptor or schema is read as {fromZod: schema}.
+ * A call field is one typed `call`: it holds a nested call or chain, handed
+ * over as a function of one input. Its `input` is what the nested call
+ * receives (`@`), and its `output` what the nested call returns. `call` is
+ * MicroQL's own type name, which it writes as a zodly `function`; a
+ * declaration can't use `function` itself, whose input is a list of
+ * arguments.
  *
- * A source names a type, by reading one (from*) or building one (to*), or
- * by operating on two (the type operators in types.js):
- *   {fromZod: schema}     a concrete zod schema
- *   {fromField: path}     the type of another field (a call field: its return)
- *   {fromList: path}      one item of a list field
- *   {fromObject: path}    one value of an object field
- *   {fromValue: path}     the literal written in a field, as a type: ['name']
- *                         is the tuple of literal 'name'
- *   {fromZodly: source}   the schema a zodly descriptor describes, given the
- *                         descriptor's literal type
- *   {toList: source}      a list of the source's type
- *   {toObject: source}    an object whose values are the source's type
- *   {union: [a, b]}       a value of either
- *   {difference: [a, b]}  a's members less those that fit b
- *   {pick: [a, keys]}     a with only the fields keys names, as [util]/pick
- *   {merge: [a, b]}       b laid over a, as [util]/merge
+ * `['type', source]` is a dynamic type: one that follows from the call's
+ * fields (see sources.js). Only plan() can resolve it, so it's checked when
+ * the declaration is read, and takes no checks of its own (min, email) since
+ * there's nothing to apply them to until then.
  *
- * Only fromZod types are checked at run time; the rest are resolved by plan().
- * Field paths are dotted, with `..` for a dot inside a field name.
+ * Core reads a declaration's documents in several ways (see READINGS), each
+ * a table of zodly preprocessors.
  */
 
-import {z} from 'zod'
-import {isPlainObject, mapValues, parseFieldPath} from './common.js'
-import {parseSchema} from 'zodly'
+import {parseSchema, tagsOf} from '@tlsft/zodly'
+import {isPlainObject, writeFieldPath} from './common.js'
+import {isAny, unwrap, returnedBy} from './types.js'
+import {checkedAsAny, resolvedIn} from './sources.js'
 
-const FLAGS = ['target', 'reserve', 'settings']
+const TAGS = ['target', 'settings']
 
-// What each kind of source takes: a zod schema, a field path, a source, or a
-// pair of sources.
-const TAKES = {
-  schema: {as: 'a zod schema', fits: (value) => value instanceof z.ZodType},
-  path: {as: 'a field path', fits: (value) => typeof value === 'string'},
-  source: {as: 'a source', fits: (value) => checkSource(value)},
-  pair: {as: '[source, source]', fits: (value) => Array.isArray(value) && value.length === 2 && value.every(checkSource)}
+/**
+ * A call field as a zod function: its nested call receives one value, so its
+ * input is a tuple of that one. A zodly preprocessor for `call`.
+ */
+const asFunction = (form) => typeof form === 'string' ? 'function' : ['function', ...form.slice(1).map(modifier =>
+  isPlainObject(modifier) && Object.hasOwn(modifier, 'input') ? {...modifier, input: ['tuple', modifier.input]} : modifier)]
+
+// A zodly preprocessor for `function`, which a declaration doesn't use.
+const refusedFunction = () => {
+  throw new Error('A service call is typed \'call\', not \'function\'')
 }
 
-const SOURCES = {
-  fromZod: 'schema',
-  fromField: 'path',
-  fromList: 'path',
-  fromObject: 'path',
-  fromValue: 'path',
-  fromZodly: 'source',
-  toList: 'source',
-  toObject: 'source',
-  union: 'pair',
-  difference: 'pair',
-  pick: 'pair',
-  merge: 'pair'
+/**
+ * The ways core reads a declaration's documents, each a table of zodly
+ * preprocessors, by what the reading is for:
+ *   declared     the fields' roles and declared types: dynamic types checked,
+ *                as any; call fields with their input as one argument
+ *   atRunTime    the Service Defined Validations, which check what's fixed:
+ *                dynamic types and call fields as any
+ *   planned      a call's expected input and output, in plan(): dynamic types
+ *                resolved against the call's bindings, call fields as declared
+ *   plannedData  the same, with call fields as any: its data fields only
+ */
+const reading = (type, call) => ({type, call, function: refusedFunction})
+
+export const READINGS = {
+  declared: reading(checkedAsAny, asFunction),
+  atRunTime: reading(() => 'any', () => 'any'),
+  planned: (bindings) => reading(resolvedIn(bindings), asFunction),
+  plannedData: (bindings) => reading(resolvedIn(bindings), () => 'any')
 }
 
-// A source is checked whole, so a malformed one is refused where it's declared.
-function checkSource(source) {
-  const keys = isPlainObject(source) ? Object.keys(source) : []
-  if (keys.length !== 1 || !Object.hasOwn(SOURCES, keys[0])) {
-    throw new Error(`A source has exactly one of ${Object.keys(SOURCES).join(', ')}. Got: ${JSON.stringify(source)}`)
-  }
-  const [kind] = keys
-  const takes = TAKES[SOURCES[kind]]
-  if (!takes.fits(source[kind])) throw new Error(`${kind} takes ${takes.as}`)
-  return source
-}
-
-// A type as a source: an object is one, checked whole; anything else is a
-// zodly descriptor (or a zod schema), read as the zod schema it describes.
-function readType(type, path) {
-  if (isPlainObject(type)) return checkSource(type)
+// One of the declaration's documents as zod, with an error in it reported in
+// the document it is in.
+function readDocument(name, document, preprocess) {
   try {
-    return {fromZod: parseSchema(type)}
+    return parseSchema(document, {preprocess})
   } catch (error) {
-    throw new Error(`${error.message}, on '${path}'`, {cause: error})
+    throw new Error(`${error.message}, in ${name}`, {cause: error})
   }
 }
 
-// A tag as {name, config}, from a name or a [name, config] pair.
-function readTag(tag, path) {
-  const [name, config] = typeof tag === 'string' ? [tag] : Array.isArray(tag) && typeof tag[0] === 'string' && tag.length <= 2 ? tag : []
-  if (name === undefined) throw new Error(`Tags are a name or [name, config]. Got: ${JSON.stringify(tag)} on '${path}'`)
-  if (FLAGS.includes(name) && config !== undefined) throw new Error(`'${name}' takes no config, on '${path}'`)
-  if (name === 'type' && config === undefined) throw new Error(`'type' needs a source or a zodly type, on '${path}'`)
-  if (![...FLAGS, 'call', 'type'].includes(name)) throw new Error(`Unknown tag '${name}' on '${path}'`)
-  return {name, config: config === undefined ? undefined : readType(config, path)}
+// Every field of an input, nested fields after their parents, each with its
+// path, its tags, whether it holds a call, and its declared type (a call
+// field's: what its nested call returns).
+function fieldsIn(schema, segments = []) {
+  const inner = unwrap(schema)
+  if (inner.def.type !== 'object') return []
+  return Object.entries(inner.def.shape).flatMap(([name, type]) => {
+    const at = [...segments, name]
+    const call = unwrap(type).def.type === 'function'
+    const field = {path: writeFieldPath(at), segments: at, tags: tagsOf(type), call, declaredType: call ? returnedBy(unwrap(type)) : type}
+    return [field, ...fieldsIn(type, at)]
+  })
 }
 
-// One input field: its path, and what its tags say about it.
-function readField(path, tags) {
-  const read = tags.map(tag => readTag(tag, path))
-  const named = (name) => read.find(tag => tag.name === name)
-  return {
-    path,
-    segments: parseFieldPath(path),
-    target: Boolean(named('target')),
-    reserve: Boolean(named('reserve')),
-    settings: Boolean(named('settings')),
-    call: Boolean(named('call')),
-    receives: named('call')?.config,
-    type: named('type')?.config
-  }
+function checkTags({path, tags}) {
+  const unknown = tags.find(tag => !TAGS.includes(tag))
+  if (unknown !== undefined) throw new Error(`Unknown tag '${unknown}' on '${path}'`)
 }
 
-const isPrefix = (prefix, segments) => prefix.length < segments.length && prefix.every((s, i) => segments[i] === s)
+const tagged = (fields, tag) => fields.filter(field => field.tags.includes(tag))
 
-// The run-time schema of an input: one object built from the data fields typed
-// fromZod, nested along their paths. A nested object is optional when all its
-// fields are.
-function inputSchemaOf(fields) {
-  const typed = fields.filter(field => !field.call && field.type?.fromZod)
-  for (const outer of typed) {
-    const inner = typed.find(field => isPrefix(outer.segments, field.segments))
-    if (inner) throw new Error(`'${outer.path}' and '${inner.path}' both have a schema; give it to one of them`)
-  }
-  if (!typed.length) return undefined
-
-  const tree = {}
-  for (const {segments, type} of typed) {
-    const parent = segments.slice(0, -1).reduce((node, segment) => (node[segment] ??= {}), tree)
-    parent[segments.at(-1)] = type.fromZod
-  }
-  const toSchema = (node) => {
-    if (node instanceof z.ZodType) return node
-    const shape = mapValues(node, toSchema)
-    const object = z.object(shape)
-    return Object.values(shape).every(schema => schema.safeParse(undefined).success) ? object.optional() : object
-  }
-  return z.object(mapValues(tree, toSchema))
+// The run-time schema of a document: none when it checks nothing.
+function atRunTime(name, document) {
+  const schema = readDocument(name, document, READINGS.atRunTime)
+  return isAny(schema) ? undefined : schema
 }
 
-function readOutput(tags = []) {
-  const read = tags.map(tag => readTag(tag, 'output'))
-  if (read.some(tag => tag.name !== 'type')) throw new Error('The output takes only a type tag')
-  return read[0]?.config
-}
-
-function readDeclaration({input = {}, output}) {
-  const fields = Object.entries(input).map(([path, tags]) => readField(path, tags))
-  const targets = fields.filter(field => field.target)
+/**
+ * A service call's declaration, read and checked: its documents, its fields
+ * by role, and its run-time input and output schemas.
+ */
+export function readDeclaration({input, output}) {
+  const fields = input === undefined ? [] : fieldsIn(readDocument('input', input, READINGS.declared))
+  if (output !== undefined) readDocument('output', output, READINGS.declared)
+  fields.forEach(checkTags)
+  const targets = tagged(fields, 'target')
   if (targets.length > 1) throw new Error(`Only one field can be the target: ${targets.map(f => `'${f.path}'`).join(' and ')}`)
-  const outputType = readOutput(output)
   return {
+    input,
+    output,
     fields,
     target: targets[0],
     calls: fields.filter(field => field.call).sort((a, b) => a.path.localeCompare(b.path)),
-    settings: fields.filter(field => field.settings),
-    inputSchema: inputSchemaOf(fields),
-    outputType,
-    outputSchema: outputType?.fromZod
+    settings: tagged(fields, 'settings'),
+    inputSchema: input === undefined ? undefined : atRunTime('input', input),
+    outputSchema: output === undefined ? undefined : atRunTime('output', output)
   }
-}
-
-// Declarations are read once per operation.
-const declarations = new WeakMap()
-
-/**
- * An operation's declaration, read and checked: its fields by role, its
- * run-time input and output schemas, and its output type's source.
- */
-export function declarationOf(operation) {
-  if (!declarations.has(operation)) declarations.set(operation, readDeclaration(operation))
-  return declarations.get(operation)
 }

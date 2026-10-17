@@ -15,9 +15,10 @@ import compile from './compile.js'
 import {columnsOf} from './graph.js'
 import {formsOf} from './forms.js'
 import {isReference, parseReference, rootScope, enterPosition, scopedRoot} from './reference.js'
-import {any, isAny, schemaOfValue, schemaAtPath, sharedSchema, elementOf, valueOf, compare, describeSchema, literalOf, describedBy, union, difference, pick, merge} from './types.js'
+import {any, isAny, unwrap, widenedTypeOf, schemaAtPath, sharedSchema, compare, describeSchema, union, receivedBy, returnedBy} from './types.js'
 import {isPlainObject, mapValues, getIn, setPaths, parseFieldPath} from './common.js'
-import {errorSchema} from 'zodly'
+import {READINGS} from './declaration.js'
+import {errorSchema, parseSchema} from '@tlsft/zodly'
 
 // The type of an argument: a literal's own type, or what its reference names.
 function typeOfArgument(value, scope, env) {
@@ -28,35 +29,16 @@ function typeOfArgument(value, scope, env) {
   }
   if (Array.isArray(value)) return z.array(sharedSchema(value.map(v => typeOfArgument(v, scope, env))))
   if (isPlainObject(value)) return z.object(mapValues(value, v => typeOfArgument(v, scope, env)))
-  return schemaOfValue(value)
+  return widenedTypeOf(value)
 }
 
-// A type operator over the types of a pair of sources.
-const onPair = (operator) => ([one, other], fields) => operator(resolveSource(one, fields), resolveSource(other, fields))
+// A declaration's document as plan() reads it, by one of its READINGS; any
+// when there is none.
+const plannedDocument = (document, preprocess) => document === undefined ? any : parseSchema(document, {preprocess})
 
-// How each kind of source in a declaration names a type, given the call's
-// fields: their types, and their literal values (see declaration.js).
-const SOURCES = {
-  fromZod: (schema) => schema,
-  fromField: (path, fields) => fields.typeOf(path),
-  fromList: (path, fields) => elementOf(fields.typeOf(path)),
-  fromObject: (path, fields) => valueOf(fields.typeOf(path)),
-  fromValue: (path, fields) => literalOf(fields.valueAt(path), isReference),
-  fromZodly: (source, fields) => describedBy(resolveSource(source, fields)),
-  toList: (source, fields) => z.array(resolveSource(source, fields)),
-  toObject: (source, fields) => z.record(z.string(), resolveSource(source, fields)),
-  union: onPair(union),
-  difference: onPair(difference),
-  pick: onPair(pick),
-  merge: onPair(merge)
-}
-
-// The type a source names; any when there is no source.
-function resolveSource(source, fields) {
-  if (!source) return any
-  const [[kind, value]] = Object.entries(source)
-  return SOURCES[kind](value, fields)
-}
+const expectedData = (call, fields) => plannedDocument(call.declaration.input, READINGS.plannedData(fields))
+const expectedInput = (call, fields) => plannedDocument(call.declaration.input, READINGS.planned(fields))
+const expectedOutput = (call, fields) => plannedDocument(call.declaration.output, READINGS.planned(fields))
 
 // What each kind of issue says, in a plan error's message.
 const MESSAGES = {
@@ -90,35 +72,30 @@ function argumentsType(call, args, scope, env) {
   return precheck?.def.type === 'object' ? z.object({...flowing.shape, ...precheck.shape}) : flowing
 }
 
-// A call's fields, for resolving its declaration's sources. A field's type is
-// what flows into it, or what its precheck says (for a call field, what its
-// nested call returns, or its catch does, once typed), or what the
-// declaration says when nothing known flows in.
+// A call's fields, for resolving its declaration's sources: its bindings. A
+// field's type is what flows into it, or what its precheck says (for a call
+// field, what its nested call returns, or its catch does, once typed), or its
+// declared type when nothing known flows in.
 function fieldsOf(call, scope, env) {
   const args = setPaths(call.args, call.settingsArgs)
   const argsType = argumentsType(call, args, scope, env)
-  const declared = (path) => call.declaration.fields.find(field => field.path === path)
+  const declared = (path) => call.declaration.fields.find(field => field.path === path)?.declaredType
   const returns = {}
   const typeOf = (path) => {
     if (returns[path]) return returns[path]
     const actual = schemaAtPath(argsType, parseFieldPath(path))
-    const fallback = declared(path)?.type?.fromZod
-    return isAny(actual) && fallback ? fallback : actual
+    return isAny(actual) && declared(path) ? declared(path) : actual
   }
   const valueAt = (path) => getIn(args, parseFieldPath(path))
-  const fields = {args, argsType, declared, returns, typeOf, valueAt}
-  fields.expectedOf = (path) => resolveSource(declared(path)?.type, fields)
-  return fields
+  return {args, argsType, returns, typeOf, valueAt}
 }
 
 // Each argument's expected and actual type; every declared data field is
 // checked at its path, and one the call doesn't supply is absent.
 function argumentTypes(call, fields, env) {
-  for (const field of call.declaration.fields.filter(f => !f.call && f.type)) {
-    const actual = getIn(fields.args, field.segments) === undefined ? z.undefined() : schemaAtPath(fields.argsType, field.segments)
-    checkType(fields.expectedOf(field.path), actual, `${call.address}.${field.path}`, env)
-  }
-  return mapValues(fields.argsType.shape, (actual, field) => ({expected: fields.expectedOf(field), actual}))
+  const expected = expectedData(call, fields)
+  checkType(expected, fields.argsType, call.address, env)
+  return mapValues(fields.argsType.shape, (actual, field) => ({expected: schemaAtPath(expected, [field]), actual}))
 }
 
 // The type of the item a call's catch sees: what its call fields receive, one
@@ -139,13 +116,14 @@ const catchType = (handler, scope, item, env) =>
 // field's return, once typed, is its type for the fields typed after it.
 function positionTypes(call, scope, fields, env) {
   const {catch: handler, ...held} = call.positions
-  const inputOf = (path) => resolveSource(fields.declared(path)?.receives, fields)
-  const caught = catchType(handler, scope, itemOf(Object.keys(held).map(inputOf)), env)
+  // the call field's function type, with what's typed so far
+  const signatureOf = (path) => unwrap(schemaAtPath(expectedInput(call, fields), parseFieldPath(path)))
+  const caught = catchType(handler, scope, itemOf(Object.keys(held).map(path => receivedBy(signatureOf(path)))), env)
   const types = mapValues(held, (position, path) => {
-    const input = inputOf(path)
-    const returned = stepsTypes(position.steps, enterPosition(position, scope, input), env)
+    const signature = signatureOf(path)
+    const returned = stepsTypes(position.steps, enterPosition(position, scope, receivedBy(signature)), env)
     const actual = caught ? union(returned, caught) : returned
-    const expected = fields.expectedOf(path)
+    const expected = returnedBy(signature)
     checkType(expected, actual, `${call.address}.${path}`, env)
     fields.returns[path] = actual
     return {expected, actual}
@@ -155,7 +133,7 @@ function positionTypes(call, scope, fields, env) {
 
 // The call's own postcheck, else its declared output, resolved against its fields.
 const returnType = (call, fields) =>
-  call.validators?.postcheck?.call ?? resolveSource(call.declaration.outputType, fields)
+  call.validators?.postcheck?.call ?? expectedOutput(call, fields)
 
 // A call's types: its arguments', its call fields', and its return type.
 function callTypes(call, scope, env) {
@@ -171,12 +149,12 @@ function callTypes(call, scope, env) {
 // $trigger's type: the payload's own when there is one, else the Query's
 // trigger schema, else any.
 const triggerType = (payload, schema) =>
-  payload !== undefined ? schemaOfValue(payload) : schema ?? any
+  payload !== undefined ? widenedTypeOf(payload) : schema ?? any
 
 // Each phase returns its steps' type, or what the Query's catch does.
 function inferTypes(compiled, columns, trigger) {
   const env = {
-    nodes: {given: schemaOfValue(compiled.given), trigger: triggerType(trigger, compiled.triggerSchema)},
+    nodes: {given: widenedTypeOf(compiled.given), trigger: triggerType(trigger, compiled.triggerSchema)},
     phases: {},
     calls: new Map(),
     errors: []

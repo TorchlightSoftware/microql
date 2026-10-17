@@ -7,7 +7,7 @@
  */
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import query, {memoryStore, plan, defineService} from '../index.js'
+import query, {memoryStore, plan, defineService, serviceRegistry} from '../index.js'
 
 const GALLERY_PAGES = {
   'https://museum.example/sculpture': {
@@ -27,7 +27,7 @@ const stubServices = () => {
   const record = (key, value) => { calls.push(key); return value }
 
   // method syntax fills the field tagged target
-  const onTarget = (call) => ({input: {on: ['target']}, call})
+  const onTarget = (call) => ({input: {on: ['any', 'optional', {tags: ['target']}]}, call})
 
   const crawler = defineService({
     async '/extract'({url, queries}) {
@@ -66,7 +66,8 @@ const stubServices = () => {
 const failureLog = []
 const runtime = {
   log: (text, {to} = {}) => { if (to) failureLog.push({to, text}) },
-  cache: memoryStore()
+  cache: memoryStore(),
+  ...serviceRegistry()
 }
 
 // Logs a failure to a destination, keeping it as data in the failed item's place.

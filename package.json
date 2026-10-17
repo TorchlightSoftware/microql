@@ -1,6 +1,6 @@
 {
   "name": "microql",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "A query language for composing microservices.",
   "type": "module",
   "main": "index.js",
@@ -58,9 +58,9 @@
   },
   "dependencies": {
     "@noble/hashes": "^2.4.0",
-    "@tlsft/service-key": "^0.4.0",
+    "@tlsft/service-key": "^0.5.0",
     "zod": "^4.0.5",
-    "@tlsft/zodly": "^0.1.0"
+    "@tlsft/zodly": "^0.3.0"
   },
   "engines": {
     "node": ">=22"

@@ -8,7 +8,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 // another, so the whole call outlasts any one nested call.
 const serial = defineService({
   '/run': {
-    input: {on: ['target'], service: ['call']},
+    input: {on: ['any', 'optional', {tags: ['target']}], service: ['call']},
     async call({on, service}) {
       const results = []
       for (const item of on) results.push(await service(item))

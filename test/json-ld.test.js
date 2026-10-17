@@ -16,8 +16,8 @@ const directory = {'@context': 'https://schema.org', '@graph': [acme, bolt, unre
 
 const services = {
   ld: defineService({
-    '/same': {input: {node: []}, call: async ({node}) => node},
-    '/isType': {input: {node: [], type: []}, call: async ({node, type}) => node['@type'] === type}
+    '/same': {input: {node: ['any', 'optional']}, call: async ({node}) => node},
+    '/isType': {input: {node: ['any', 'optional'], type: ['any', 'optional']}, call: async ({node, type}) => node['@type'] === type}
   })
 }
 

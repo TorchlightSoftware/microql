@@ -111,8 +111,8 @@ const userService = defineService({
   // Optional: declare the input, as a validation contract
   '/updateProfile': {
     input: {
-      id: [['type', ['string', 'uuid']]],
-      updates: [['type', ['object', {name: ['string', 'optional'], email: ['string', 'email', 'optional']}]]]
+      id: ['string', 'uuid'],
+      updates: {name: ['string', 'optional'], email: ['string', 'email', 'optional']}
     },
     call: async ({id, updates}) => db.users.update(id, updates)
   }

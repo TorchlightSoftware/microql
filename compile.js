@@ -11,20 +11,25 @@
  *             one is just a call). `$name` refers to its result.
  *   Call      one service call: a service key, its data arguments, its
  *             settings, and its positions.
- *   Position  a field that holds a call or a chain of calls: one the
- *             operation's declaration tags `call`, or `catch`, which handles
- *             a failure of any of them.
+ *   Position  a field that holds a call or a chain of calls: one the service
+ *             call's declaration types `call`, or `catch`, which handles a
+ *             failure of any of them.
  *   Address   a call's Service Call Address (`$listings.@1a2`): calls are
  *             numbered, positions lettered in sorted key order, alternating;
  *             `e` is kept for catch, so adding one moves no other address.
+ *
+ * We intentionally did not use zod schemas for the Query's grammar: compile
+ * checks it as it walks the Query. A schema would repeat the compiler's
+ * structure and logic, and its errors couldn't carry the compile error codes
+ * and Service Call Addresses that compile reports.
  */
 
 import {parseServiceKey} from '@tlsft/service-key'
 
 import {RESERVE_ARGS, VALIDATION_NAMES, isPlainObject, mapValues, pick, omit, omitIn, getIn, setIn, defaults} from './common.js'
-import {declarationOf} from './declaration.js'
+import {readDeclaration} from './declaration.js'
 import {isReference, parseReference, readOf, readsOutside} from './reference.js'
-import {parseSchema} from 'zodly'
+import {parseSchema} from '@tlsft/zodly'
 import {fieldPathOf} from './addresses.js'
 import util from './services/util.js'
 
@@ -83,36 +88,40 @@ function parseDescriptor(site, descriptor) {
   if (!parts) {
     const retired = descriptor.find(d => typeof d === 'string' && RETIRED_KEY.test(d))?.match(RETIRED_KEY)
     if (retired) fail(site, 'retired-key', `Service key '${retired[0]}' uses the retired service:action form. Use '[${retired[1]}]/${retired[2]}'`)
-    fail(site, 'invalid-descriptor', `Invalid service descriptor. Expected ['[VERB] [service]/resource', {...}] format. Got: ${JSON.stringify(descriptor)}`)
+    fail(site, 'invalid-descriptor', `Invalid service descriptor. Expected ['[METHOD] [service]/resource', {...}] format. Got: ${JSON.stringify(descriptor)}`)
   }
   return {key, parts, args, hasTarget: false}
 }
 
-const isService = (service) => typeof service?.lookup === 'function' && typeof service.operations === 'function'
+const SERVICE_METHODS = ['lookup', 'supportedCalls', 'init']
+const isService = (service) => SERVICE_METHODS.every(method => typeof service?.[method] === 'function')
 
-// The operation answering a key's parts: the service by name, then what its
-// lookup answers. A lookup answers nothing for a resource it lacks, and
-// throws for a key it refuses, such as a verb it doesn't take.
-function lookupOperation(site, services, parts) {
+// The service a key names, by its name in the Query's services.
+function serviceAt(site, services, parts) {
   const service = services[parts.service]
   if (!service) fail(site, 'unknown-service', `Service '${parts.service}' not found`)
   if (!isService(service)) {
-    fail(site, 'not-a-service', `Service '${parts.service}' must provide lookup(parts) and operations(). A service definition gets both from defineService`)
+    fail(site, 'not-a-service', `Service '${parts.service}' must provide lookup(key), supportedCalls() and init(runtime). A service definition gets them from defineService`)
   }
-  let operation
+  return service
+}
+
+// What a service's lookup answers for a key: its declaration, or a refusal
+// for a key it won't take, such as a resource it lacks or a method it doesn't.
+function lookedUp(site, service, parts) {
   try {
-    operation = service.lookup(parts)
+    return service.lookup(parts)
   } catch (error) {
     fail(site, 'refused-key', error.message)
   }
-  if (!operation) fail(site, 'unknown-resource', `Resource '${parts.resource}' not found on service '${parts.service}'`)
-  return {service, operation}
 }
 
-// An operation's declaration, with any error in it reported at the call.
-function declarationAt(site, operation, key) {
+// The declaration of the service call a key names, as its service's lookup
+// answers it, read and checked; any error in it is reported at the call.
+function declarationAt(site, service, {key, parts}) {
+  const declaration = lookedUp(site, service, parts)
   try {
-    return declarationOf(operation)
+    return readDeclaration(declaration)
   } catch (error) {
     fail(site, 'malformed-declaration', `The declaration of ${key} is malformed: ${error.message}`)
   }
@@ -134,7 +143,7 @@ function parseSchemaAt(site, designation, order, schema) {
 }
 
 // A call's Service Call Validations (from its fields) woven with its Service
-// Schema Validations (the operation's declared schemas), parsed, by order.
+// Service Defined Validations (the service call's declared schemas), parsed, by order.
 const compileValidators = (site, args, declaration) => {
   const order = {
     precheck: {call: args.precheck, schema: declaration.inputSchema},
@@ -256,7 +265,7 @@ function compilePosition(owner, field, letter, value, scope, as, query) {
   }
 }
 
-// The fields of a call that hold calls, by path: those its declaration tags
+// The fields of a call that hold calls, by path: those its declaration types
 // call, and catch.
 function positionFields(site, args, declaration, key) {
   const fields = [...declaration.calls, {path: 'catch', segments: ['catch']}]
@@ -274,10 +283,10 @@ function positionFields(site, args, declaration, key) {
 
 // Compiles one service descriptor at a site, in a scope.
 function compileCall(descriptor, site, scope, query) {
-  if (!Array.isArray(descriptor)) fail(site, 'invalid-descriptor', `Invalid service descriptor. Expected ['[VERB] [service]/resource', {...}] format. Got: ${JSON.stringify(descriptor)}`)
+  if (!Array.isArray(descriptor)) fail(site, 'invalid-descriptor', `Invalid service descriptor. Expected ['[METHOD] [service]/resource', {...}] format. Got: ${JSON.stringify(descriptor)}`)
   const parsed = parseDescriptor(site, descriptor)
-  const {service, operation} = lookupOperation(site, query.services, parsed.parts)
-  const declaration = declarationAt(site, operation, parsed.key)
+  const service = serviceAt(site, query.services, parsed.parts)
+  const declaration = declarationAt(site, service, parsed)
   if (!isPlainObject(parsed.args)) fail(site, 'invalid-descriptor', `Arguments for ${parsed.key} must be an object`)
 
   const call = {
@@ -288,7 +297,6 @@ function compileCall(descriptor, site, scope, query) {
     key: parsed.key,
     parts: parsed.parts,
     service,
-    operation,
     declaration,
     ownTimeout: parsed.args.timeout !== undefined
   }

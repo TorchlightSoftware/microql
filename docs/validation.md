@@ -1,29 +1,29 @@
 # MicroQL Validation System
 
-MicroQL validates with [Zod](https://zod.dev/): a call's input fields before it runs (precheck), and its result after (postcheck). Checks are written in [zodly](https://www.npmjs.com/package/zodly), a terse shorthand for zod schemas, or as zod schemas directly.
+MicroQL has two primary validation points: a call's input fields before it runs (precheck), and its result after (postcheck). Checks are written in [zodly](https://www.npmjs.com/package/zodly), a terse shorthand for zod schemas, or as zod schemas directly.
 
 ## Table of Contents
 
-- [Service Call Validations and Service Schema Validations](#service-call-validations-and-service-schema-validations)
+- [Service Call Validations and Service Defined Validations](#service-call-validations-and-service-defined-validations)
 - [Schema Syntax](#schema-syntax)
 - [Error Messages](#error-messages)
 - [Examples](#examples)
 
-## Service Call Validations and Service Schema Validations
+## Service Call Validations and Service Defined Validations
 
 Validation in MicroQL can be defined in two places:
 
 1. **Service Call Validations**: the Query's author adds `precheck` and `postcheck` to one service call, to enforce what that call should receive and return.
-2. **Service Schema Validations**: the service's author declares types for an operation's input fields and its result, in lieu of imperative input checks: the zodly descriptors (or zod schemas) in its declaration ([Service Development Guide](service-guide.md#declarations)).
+2. **Service Defined Validations**: the service's author declares types for a service call's input fields and its result, in lieu of imperative input checks: the zodly descriptors (or zod schemas) in its declaration ([Service Development Guide](service-guide.md#declarations)).
 
-zodly is used for both, and for the trigger's schema; a raw zod schema is accepted anywhere a descriptor is. There is no validation spanning a whole Query. The closest is the schema a Query may declare for its trigger payload (`trigger.schema`), which uses the same syntax; see [Runtime Integration](runtime-integration.md#trigger).
+zodly is used for both.  Queries can also be started by a trigger (see [Runtime Integration](runtime-integration.md#trigger)), and the trigger's schema can also be defined in zodly.  A raw zod schema is accepted anywhere zodly is.
 
 ## Validation Execution Order
 
-- **Precheck**: on the input fields, before the call: [Service Call Validations, Service Schema Validations]
-- **Postcheck**: on the result, after the call: [Service Schema Validations, Service Call Validations]
+- **Precheck**: on the input fields, before the call: [Service Call Validations, Service Defined Validations]
+- **Postcheck**: on the result, after the call: [Service Defined Validations, Service Call Validations]
 
-Service Call Validations wrap Service Schema Validations, which wrap the call itself.
+Service Call Validations wrap Service Defined Validations, which wrap the call itself.
 
 ### Some Examples
 
@@ -49,14 +49,14 @@ const config = {
   }
 }
 
-// Service definition, with its Service Schema Validations: the declared types
+// Service definition, with its Service Defined Validations: the declared types
 // of its input fields (precheck) and of its result (postcheck)
 const userService = defineService({
   '/createUser': {
     input: {
-      userData: [['type', ['object', {name: ['string'], email: ['string', 'email'], age: ['number', 'positive']}]]]
+      userData: {name: ['string'], email: ['string', 'email'], age: ['number', 'positive']}
     },
-    output: [['type', ['object', {id: ['number'], name: ['string'], email: ['string', 'email']}]]],
+    output: {id: ['number'], name: ['string'], email: ['string', 'email']},
     call: async ({userData}) => ({id: 123, ...userData})
   }
 })
@@ -65,15 +65,9 @@ const userService = defineService({
 
 ## Schema Syntax
 
-Schemas are written in [zodly](https://www.npmjs.com/package/zodly): zod schemas as plain data, `['string', 'email', 'optional']`, `{name: ['string']}`, `['array', [{id: ['string']}], {min: 1}]`. Its README has the whole syntax: types, modifiers (any zod method by name), boxed object schemas, and its error messages. A zod schema is accepted anywhere a descriptor is, whole or inside one:
+Schemas are written in [zodly](https://www.npmjs.com/package/zodly): zod schemas as plain data, `['string', 'email', 'optional']`, `{name: ['string']}`, `['array', [{id: ['string']}], {min: 1}]`. Its README has the whole syntax: types, modifiers (any zod method by name), boxed object schemas, and its error messages.
 
-```javascript
-import {z} from 'zod'
-
-['[userService]/create', {username: '$given.username', precheck: {username: z.string().min(8).regex(/^[A-Z]/)}}]
-```
-
-**`error`** is zodly's type for a failure as data, a JSON-LD node of type Error: `{'@type': 'Error', name, message, ...}`, recognised by those three fields whatever else it has. It is what a `catch` receives as `@err`, and what stands in a list where a `catch` put a failure ([Runtime Integration § Errors as data](runtime-integration.md#errors-as-data)). Core exports it as `errorSchema`. `util/each`'s `skip` takes a schema like it to leave failures out of its results:
+**`error`** is zodly's type for a failure as data, a JSON-LD node of type Error: `{'@type': 'Error', name, message, ...}`.  MicroQL ensures that all errors have this form and can therefore be detected by the type.  You can for instance catch errors, and then skip them:
 
 ```javascript
 ['$given.urls', '[util]/each', {
@@ -88,8 +82,8 @@ import {z} from 'zod'
 Validation errors provide clear, detailed messages with full context:
 
 ```
-// [<address> - <service key>] <Service Call Validation | Service Schema Validation> <precheck | postcheck> failed:
-[$newUser.@1 - [userService]/createUser] Service Schema Validation precheck failed:
+// [<address> - <service key>] <Service Call Validation | Service Defined Validation> <precheck | postcheck> failed:
+[$newUser.@1 - [userService]/createUser] Service Defined Validation precheck failed:
 - userData.age: -25 => Too small: expected number to be >0
 - userData.email: 'invalid-email' => Invalid email
 ```
@@ -98,7 +92,7 @@ The error names which validation failed. A schema that can't be parsed fails bef
 
 ## Examples
 
-Each example is a call's own checks. The syntax is the same for `precheck` and `postcheck`, and for the trigger's schema, so any of them can be used anywhere a validator is expected.
+Here are some examples.  You can find more in the [util service](../services/util.js).
 
 ### Basic String Validation
 

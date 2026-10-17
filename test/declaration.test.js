@@ -1,121 +1,110 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
 import {z} from 'zod'
-import {declarationOf} from '../declaration.js'
+import {parseSchema} from '@tlsft/zodly'
+import {readDeclaration, READINGS} from '../declaration.js'
 
-const call = async () => null
-
-describe('declarationOf', () => {
-  it('reads the roles of input fields by path', () => {
-    const declaration = declarationOf({
+describe('readDeclaration', () => {
+  it('reads the roles of input fields from their tags and types, by path', () => {
+    const declaration = readDeclaration({
       input: {
-        on: ['target', ['type', {fromZod: z.array(z.any())}]],
-        service: [['call', {fromList: 'on'}]],
-        'params.fn': ['call'],
-        skip: ['reserve'],
-        settings: ['settings']
-      },
-      call
+        on: ['array', {tags: ['target']}],
+        service: ['call', {input: ['type', {fromList: 'on'}]}],
+        params: {fn: ['call']},
+        settings: ['any', 'optional', {tags: ['settings']}]
+      }
     })
     assert.equal(declaration.target.path, 'on')
     assert.deepEqual(declaration.calls.map(f => f.path), ['params.fn', 'service'])
     assert.deepEqual(declaration.calls.map(f => f.segments), [['params', 'fn'], ['service']])
-    assert.deepEqual(declaration.calls.map(f => f.receives), [undefined, {fromList: 'on'}])
     assert.deepEqual(declaration.settings.map(f => f.path), ['settings'])
   })
 
-  it('declares nothing for an operation without a declaration', () => {
-    const declaration = declarationOf({call})
+  it('writes a dot inside a field\'s name as .. in its path', () => {
+    const {calls} = readDeclaration({input: {'a.b': ['call']}})
+    assert.deepEqual([calls[0].path, calls[0].segments], ['a..b', ['a.b']])
+  })
+
+  it('declares nothing for a service call that declares nothing', () => {
+    const declaration = readDeclaration({})
     assert.equal(declaration.target, undefined)
     assert.deepEqual(declaration.calls, [])
     assert.equal(declaration.inputSchema, undefined)
     assert.equal(declaration.outputSchema, undefined)
   })
 
-  it('builds the input schema from the fields typed fromZod, nesting dotted paths', () => {
-    const {inputSchema} = declarationOf({
+  it('checks fixed types at run time, but not dynamic types or call fields', () => {
+    const {inputSchema} = readDeclaration({
       input: {
-        url: [['type', {fromZod: z.string()}]],
-        'params.count': [['type', {fromZod: z.number()}]],
-        'params.tag': [['type', {fromZod: z.string().optional()}]],
-        'a..b': [['type', {fromZod: z.boolean()}]],
-        loose: [['type', {fromField: 'url'}]]
-      },
-      call
+        url: ['string'],
+        params: {count: ['number'], tag: ['string', 'optional']},
+        'a.b': ['boolean'],
+        loose: ['type', {fromField: 'url'}],
+        service: ['call', {output: ['boolean']}]
+      }
     })
-    assert.equal(inputSchema.safeParse({url: 'u', params: {count: 1}, 'a.b': true}).success, true)
-    assert.equal(inputSchema.safeParse({url: 'u', params: {count: 'x'}, 'a.b': true}).success, false)
-    assert.equal(inputSchema.safeParse({url: 'u', params: {count: 1}}).success, false)
+    const fields = {url: 'u', params: {count: 1}, 'a.b': true, loose: 5, service: 'a literal stays data'}
+    assert.equal(inputSchema.safeParse(fields).success, true)
+    assert.equal(inputSchema.safeParse({...fields, params: {count: 'x'}}).success, false)
+    assert.equal(inputSchema.safeParse({...fields, 'a.b': undefined}).success, false)
   })
 
-  it('leaves out the schema of a call field, which types what the nested call returns', () => {
-    const {inputSchema, calls} = declarationOf({
-      input: {on: [['type', {fromZod: z.array(z.any())}]], service: [['call'], ['type', {fromZod: z.boolean()}]]},
-      call
+  it('reads a zod schema in place of a descriptor', () => {
+    const {inputSchema} = readDeclaration({input: {count: z.number().int()}})
+    assert.deepEqual([{count: 2}, {count: 2.5}].map(fields => inputSchema.safeParse(fields).success), [true, false])
+  })
+
+  it('gives each field its declared type, with dynamic types as any; a call field\'s is what it returns', () => {
+    const {fields} = readDeclaration({
+      input: {on: ['array', ['string']], loose: ['type', {fromField: 'on'}], service: ['call', {output: ['boolean']}]}
     })
-    assert.equal(inputSchema.safeParse({on: [], service: () => true}).success, true)
-    assert.deepEqual(calls[0].type, {fromZod: calls[0].type.fromZod})
+    const declared = Object.fromEntries(fields.map(field => [field.path, field.declaredType.def.type]))
+    assert.deepEqual(declared, {on: 'array', loose: 'any', service: 'boolean'})
   })
 
-  it('makes a nested object optional when all its fields are', () => {
-    const {inputSchema} = declarationOf({input: {'params.tag': [['type', {fromZod: z.string().optional()}]]}, call})
-    assert.equal(inputSchema.safeParse({}).success, true)
+  it('checks a fixed output at run time, and as much of a dynamic one as is fixed', () => {
+    const fits = (output, value) => readDeclaration({output}).outputSchema.safeParse(value).success
+    assert.deepEqual([fits(['array', ['string']], ['a']), fits(['array', ['string']], [1])], [true, false])
+    assert.deepEqual([fits(['array', ['type', {fromField: 'service'}]], [1]), fits(['array', ['type', {fromField: 'service'}]], 'x')], [true, false])
+    assert.equal(readDeclaration({output: ['type', {fromField: 'service'}]}).outputSchema, undefined)
   })
 
-  it('reads the output schema when the output is typed fromZod', () => {
-    const output = z.array(z.string())
-    assert.equal(declarationOf({output: [['type', {fromZod: output}]], call}).outputSchema, output)
-    assert.equal(declarationOf({output: [['type', {toList: {fromField: 'service'}}]], call}).outputSchema, undefined)
+  it('reads a call field as a function of one input', () => {
+    const fn = parseSchema(['call', {input: ['string'], output: ['boolean']}], {preprocess: READINGS.declared})
+    assert.deepEqual([fn.def.type, fn.def.input.def.items.map(item => item.def.type), fn.def.output.def.type], ['function', ['string'], 'boolean'])
   })
 
-  it('reads a zodly type, or a zod schema, as the zod schema it describes', () => {
-    const {inputSchema, outputSchema, calls} = declarationOf({
-      input: {
-        url: [['type', ['string', 'url']]],
-        count: [['type', z.number().int()]],
-        each: [['call', ['number']]]
-      },
-      output: [['type', ['array', ['string']]]],
-      call
-    })
-    assert.equal(inputSchema.safeParse({url: 'https://example.com', count: 2}).success, true)
-    assert.equal(inputSchema.safeParse({url: 'not a url', count: 2}).success, false)
-    assert.equal(inputSchema.safeParse({url: 'https://example.com', count: 2.5}).success, false)
-    assert.equal(outputSchema.safeParse(['a']).success, true)
-    assert.equal(outputSchema.safeParse([1]).success, false)
-    assert.equal(calls[0].receives.fromZod.safeParse(1).success, true)
-  })
-
-  it('is read once per operation', () => {
-    const operation = {input: {on: ['target']}, call}
-    assert.equal(declarationOf(operation), declarationOf(operation))
+  it('reads a bare call as a function', () => {
+    assert.equal(parseSchema('call', {preprocess: READINGS.declared}).def.type, 'function')
   })
 
   // [description, declaration, error]
   const malformed = [
-    ['an unknown tag', {input: {on: ['targte']}}, /Unknown tag 'targte' on 'on'/],
-    ['a tag that is neither a name nor a pair', {input: {on: [7]}}, /Tags are a name or \[name, config\]/],
-    ['two targets', {input: {a: ['target'], b: ['target']}}, /Only one field can be the target: 'a' and 'b'/],
-    ['a flag given config', {input: {on: [['target', {}]]}}, /'target' takes no config/],
-    ['type without a source', {input: {on: ['type']}}, /'type' needs a source/],
-    ['a source with two keys', {input: {on: [['type', {fromField: 'a', fromList: 'b'}]]}}, /A source has exactly one of/],
-    ['an unknown source', {input: {on: [['type', {fromWhere: 'a'}]]}}, /A source has exactly one of/],
-    ['an operator without a pair of sources', {output: [['type', {union: [{fromField: 'a'}]}]]}, /union takes \[source, source\]/],
-    ['an operator with a malformed source in its pair', {output: [['type', {merge: [{fromField: 'a'}, 'b']}]]}, /A source has exactly one of/],
-    ['fromZodly without a source', {input: {on: [['type', {fromZodly: 'skip'}]]}}, /A source has exactly one of/],
-    ['fromZod without a zod schema', {input: {on: [['type', {fromZod: ['string']}]]}}, /fromZod takes a zod schema/],
-    ['a malformed zodly type', {input: {on: [['type', ['strng']]]}}, /Unknown type name 'strng' on \["strng"\], on 'on'/],
-    ['an unknown zodly modifier', {output: [['type', ['string', 'optinal']]]}, /'string' has an unknown modifier 'optinal' on \["string","optinal"\], on 'output'/],
-    ['fromList without a path', {input: {on: [['type', {fromList: {fromField: 'a'}}]]}}, /fromList takes a field path/],
-    ['toList without a source', {input: {on: [['type', {toList: 'a'}]]}}, /A source has exactly one of/],
-    ['a schema on a path and its parent', {input: {params: [['type', {fromZod: z.object({})}]], 'params.a': [['type', {fromZod: z.string()}]]}}, /'params' and 'params.a' both have a schema/],
-    ['an output tag other than type', {output: ['target']}, /The output takes only a type tag/],
-    ['a malformed path', {input: {'a.': ['target']}}, /names an empty field/]
+    ['an unknown tag', {input: {on: ['any', 'optional', {tags: ['targte']}]}}, /Unknown tag 'targte' on 'on'/],
+    ['the retired reserve tag', {input: {skip: ['any', {tags: ['reserve']}]}}, /Unknown tag 'reserve' on 'skip'/],
+    ['two targets', {input: {a: ['any', 'optional', {tags: ['target']}], b: ['any', 'optional', {tags: ['target']}]}}, /Only one field can be the target: 'a' and 'b'/],
+    ['the retired tag lists', {input: {on: ['target']}}, /Unknown type name 'target' on \["target"\], at on, in input/],
+    ['type without a source', {input: {on: ['type']}}, /A source has exactly one of/],
+    ['a source with two keys', {input: {on: ['type', {fromField: 'a', fromList: 'b'}]}}, /A source has exactly one of/],
+    ['an unknown source', {input: {on: ['type', {fromWhere: 'a'}]}}, /A source has exactly one of/],
+    ['a retired source', {output: ['type', {toList: {fromField: 'a'}}]}, /A source has exactly one of/],
+    ['an operator without a pair of sources', {output: ['type', {without: [{fromField: 'a'}]}]}, /without takes \[source, source\]/],
+    ['an operator with a malformed source in its pair', {output: ['type', {merged: [{fromField: 'a'}, 'b']}]}, /A source has exactly one of/],
+    ['fromZodly with a malformed descriptor', {output: ['type', {fromZodly: ['strng']}]}, /Unknown type name 'strng' on \["strng"\], in output/],
+    ['fromZodly with a malformed source', {output: ['type', {fromZodly: {fromWhere: 'a'}}]}, /A source has exactly one of/],
+    ['fromList without a path', {input: {on: ['type', {fromList: {fromField: 'a'}}]}}, /fromList takes a field path/],
+    ['a check on a dynamic type', {input: {on: ['type', {fromField: 'a'}, {min: 1}]}}, /unknown modifier 'min'/],
+    ['a malformed source in a call field\'s input', {input: {service: ['call', {input: ['type', {fromWhere: 'a'}]}]}}, /A source has exactly one of/],
+    ['a field typed function', {input: {service: ['function', {input: ['string']}]}}, /A service call is typed 'call', not 'function' on \["function",\{"input":\["string"\]\}\], at service, in input/],
+    ['a bare function', {input: {service: 'function'}}, /A service call is typed 'call', not 'function'/],
+    ['a function in the output', {output: ['array', ['function']]}, /A service call is typed 'call', not 'function'.*in output/],
+    ['a malformed zodly type', {input: {on: ['strng']}}, /Unknown type name 'strng' on \["strng"\], at on, in input/],
+    ['an unknown zodly modifier', {output: ['string', 'optinal']}, /'string' has an unknown modifier 'optinal' on \["string","optinal"\], in output/]
   ]
 
   for (const [description, declaration, error] of malformed) {
     it(`refuses ${description}`, () => {
-      assert.throws(() => declarationOf({...declaration, call}), error)
+      assert.throws(() => readDeclaration(declaration), error)
     })
   }
 })

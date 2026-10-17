@@ -1,24 +1,35 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
 import {plan, addressToPath, pathToAddress, defineService} from '../core.js'
-import {describeSchema} from '../types.js'
+import {describeSchema, receivedBy} from '../types.js'
 
 // A service whose resource takes two calls, to exercise field lettering.
 const branch = defineService({
   '/choose': {
-    input: {on: ['target'], pass: [['call', {fromField: 'on'}]], fail: [['call', {fromField: 'on'}]]},
+    input: {on: ['any', 'optional', {tags: ['target']}], pass: ['call', {input: ['type', {fromField: 'on'}]}], fail: ['call', {input: ['type', {fromField: 'on'}]}]},
     call: async ({on, pass, fail}) => on ? pass(on) : fail(on)
   },
   '/extract': {
-    input: {url: [['type', ['string']]]},
-    output: [['type', ['object', {url: ['string'], images: ['array', [{src: ['string']}], 'optional']}]]],
+    input: {url: ['string']},
+    output: {url: ['string'], images: ['array', [{src: ['string']}], 'optional']},
     call: async ({url}) => ({url})
   },
   // A list with gaps, for skip to leave out.
   '/words': {
-    input: {url: [['type', ['string']]]},
-    output: [['type', ['array', ['union', ['string'], ['null']]]]],
+    input: {url: ['string']},
+    output: ['array', ['union', ['string'], ['null']]],
     call: async () => ['a', null]
+  },
+  // A list less its nulls, whatever its items are.
+  '/compact': {
+    input: {on: ['array', {tags: ['target']}]},
+    output: ['array', ['type', {without: [{fromList: 'on'}, {fromZodly: ['null']}]}]],
+    call: async ({on}) => on.filter(item => item !== null)
+  },
+  // Returns a handler, a call field's type as an operand.
+  '/handler': {
+    output: ['type', {fromZodly: ['call', {input: ['string']}]}],
+    call: async () => (text) => text
   },
   // Declares nothing, so the plan can't know what it returns.
   '/fetch': {call: async () => ({name: 'x', age: 1})}
@@ -164,7 +175,7 @@ describe('type inference', () => {
   })
 
   it('types @ as any inside a call field that declares nothing it receives', () => {
-    const tally = defineService({'/reduce': {input: {on: ['target'], service: ['call']}, call: async () => 0}})
+    const tally = defineService({'/reduce': {input: {on: ['any', 'optional', {tags: ['target']}], service: ['call']}, call: async () => 0}})
     const {calls} = plan({
       given: {xs: [1, 2]},
       services: {branch, tally},
@@ -243,6 +254,12 @@ describe('type inference', () => {
     ['when returns either branch (union)',
       ['[util]/when', {test: true, then: 1, otherwise: 'none'}],
       'number | string'],
+    ['when returns one type once, when both branches have it',
+      ['[util]/when', {test: true, then: 'some', otherwise: 'none'}],
+      'string'],
+    ['an operator\'s fixed operand, written in zodly (fromZodly)',
+      [['[branch]/words', {url: '$given.u'}], ['@', '[branch]/compact']],
+      'array of string'],
     ['pick keeps the fields named in a written-out list (pick, fromValue)',
       ['$given.person', '[util]/pick', {fields: ['name', 'tags']}],
       '{name: string, tags: array of string}'],
@@ -268,6 +285,11 @@ describe('type inference', () => {
     })
   }
 
+  it('reads a call field\'s type in a fromZodly operand as it does in a declaration', () => {
+    const {phases} = plan({services: {branch}, phases: {a: ['[branch]/handler', {}]}})
+    assert.equal(describeSchema(receivedBy(phases[0].returns)), 'string')
+  })
+
   it('types the as: name inside a catch as the item whose call failed', () => {
     const {calls} = plan({
       given: {urls: ['a']},
@@ -282,15 +304,21 @@ describe('type inference', () => {
     assert.equal(describeSchema(phases[0].returns), '{url: string, images?: array of {src: string}} | error')
   })
 
+  it('knows when returns the other branch when one always throws (never)', () => {
+    const {phases, errors} = plan({given: {x: 1}, phases: {failed: ['$given.x', '[util]/throw'], a: ['[util]/when', {test: true, then: '$failed', otherwise: 'none'}]}})
+    assert.deepEqual(errors, [])
+    assert.equal(describeSchema(phases.find(phase => phase.name === 'a').returns), 'string')
+  })
+
   it('requires the calls flattenEach holds to return lists', () => {
     const {errors} = plan({given: {urls: ['a']}, services: {branch}, phases: {a: ['$given.urls', '[util]/flattenEach', {service: ['[branch]/extract', {url: '@'}]}]}})
     assert.deepEqual(errors.map(e => e.address), ['$a.@1.service'])
     assert.match(errors[0].message, /expects array of any but receives \{url: string/)
   })
 
-  it('composes sources: an object of the items of a list (toObject of fromList)', () => {
+  it('composes zodly with sources: a record of the items of a list', () => {
     const index = defineService({
-      '/byId': {input: {on: ['target']}, output: [['type', {toObject: {fromList: 'on'}}]], call: async () => ({})}
+      '/byId': {input: {on: ['any', 'optional', {tags: ['target']}]}, output: ['record', ['type', {fromList: 'on'}]], call: async () => ({})}
     })
     const {phases} = plan({given: {rows: [{id: 'a'}]}, services: {index}, phases: {a: ['$given.rows', '[index]/byId']}})
     assert.equal(describeSchema(phases[0].returns), 'record of {id: string}')
@@ -298,7 +326,7 @@ describe('type inference', () => {
 
   it('reads a value of an object field (fromObject)', () => {
     const first = defineService({
-      '/any': {input: {on: ['target']}, output: [['type', {fromObject: 'on'}]], call: async ({on}) => Object.values(on)[0]}
+      '/any': {input: {on: ['any', 'optional', {tags: ['target']}]}, output: ['type', {fromObject: 'on'}], call: async ({on}) => Object.values(on)[0]}
     })
     const {phases} = plan({given: {prices: {tea: 2, cake: 3}}, services: {first}, phases: {a: ['$given.prices', '[first]/any']}})
     assert.equal(describeSchema(phases[0].returns), 'number')
@@ -307,7 +335,7 @@ describe('type inference', () => {
   it('falls back to a field\'s declared type when nothing known flows in', () => {
     const names = defineService({
       '/each': {
-        input: {on: ['target', ['type', ['array', ['string']]]], service: [['call', {fromList: 'on'}]]},
+        input: {on: ['array', ['string'], {tags: ['target']}], service: ['call', {input: ['type', {fromList: 'on'}]}]},
         call: async ({on, service}) => Promise.all(on.map(service))
       }
     })

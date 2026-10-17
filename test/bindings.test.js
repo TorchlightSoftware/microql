@@ -9,11 +9,11 @@ describe('Scope: @ and named bindings', () => {
     }
   })
 
-  const onTarget = (call) => ({input: {on: ['target']}, call})
+  const onTarget = (call) => ({input: {on: ['any', 'optional', {tags: ['target']}]}, call})
   const math = defineService({
     '/add1': onTarget(async ({on}) => on + 1),
     '/times10': onTarget(async ({on}) => on * 10),
-    '/reduce': {input: {on: ['target'], service: ['call']}, call: async ({on, service}) => on.reduce(async (l, r) => service([await l, r]))},
+    '/reduce': {input: {on: ['any', 'optional', {tags: ['target']}], service: ['call']}, call: async ({on, service}) => on.reduce(async (l, r) => service([await l, r]))},
     '/sequence': onTarget(async ({on}) => Array.from({length: on}, (v, k) => k + 1)),
     '/sum': onTarget(async ({on}) => on.reduce((l, r) => l + r))
   })
@@ -57,8 +57,8 @@ describe('Scope: @ and named bindings', () => {
 
   it('flows each chain step into the next', async () => {
     const chain = defineService({
-      '/step1': {input: {on: ['target']}, call: ({on}) => `${on}-step1`},
-      '/step2': {input: {on: ['target']}, call: ({on}) => `${on}-step2`}
+      '/step1': {input: {on: ['any', 'optional', {tags: ['target']}]}, call: ({on}) => `${on}-step1`},
+      '/step2': {input: {on: ['any', 'optional', {tags: ['target']}]}, call: ({on}) => `${on}-step2`}
     })
 
     const result = await query({

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import {isPlainObject, mapValues, pick, omit, filterObject, getIn, setIn, omitIn, setPaths, defaults, parseFieldPath} from '../common.js'
+import {isPlainObject, mapValues, pick, omit, filterObject, getIn, setIn, omitIn, setPaths, defaults, parseFieldPath, writeFieldPath} from '../common.js'
 
 describe('isPlainObject', () => {
   // [value, is plain]
@@ -68,7 +68,7 @@ describe('object helpers', () => {
   })
 })
 
-// A field path as written in a declaration's tags: dots separate fields, and
+// A field path as a declaration's sources write it: dots separate fields, and
 // two dots stand for a dot inside a field name.
 describe('parseFieldPath', () => {
   // [path, fields]
@@ -82,8 +82,9 @@ describe('parseFieldPath', () => {
   ]
 
   for (const [path, fields] of cases) {
-    it(`reads '${path}'`, () => {
+    it(`reads '${path}', and writes it back`, () => {
       assert.deepEqual(parseFieldPath(path), fields)
+      assert.equal(writeFieldPath(fields), path)
     })
   }
 

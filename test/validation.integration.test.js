@@ -8,16 +8,12 @@ import {describe, it} from 'node:test'
 import {z} from 'zod'
 import query, {defineService} from '../index.js'
 
-// A declaration's input: each field typed by its zod schema.
-const typedInput = (schemas) => Object.fromEntries(Object.entries(schemas).map(([field, schema]) => [field, [['type', schema]]]))
-const typedOutput = (schema) => [['type', schema]]
-
-// A service with one operation, '/process', with an optional declaration.
+// A service with one service call, '/process', with an optional declaration.
 const processor = (call, declaration = {}) => defineService({'/process': {...declaration, call}})
 
 describe('Validation Integration Tests', () => {
-  // Reusable operations
-  const operations = {
+  // Reusable service calls
+  const serviceCalls = {
     echo: async (args) => args.value,
     double: async (args) => args.value * 2,
     divide: async (args) => args.numerator / args.denominator,
@@ -49,7 +45,7 @@ describe('Validation Integration Tests', () => {
     const serviceValidationTests = [
       {
         name: 'service-level precheck validation',
-        service: processor(operations.double, {input: typedInput({value: z.number().positive()})}),
+        service: processor(serviceCalls.double, {input: {value: z.number().positive()}}),
         validInput: {value: 10},
         expectedResult: 20,
         invalidInput: {value: -5},
@@ -57,9 +53,9 @@ describe('Validation Integration Tests', () => {
       },
       {
         name: 'service-level postcheck validation',
-        service: processor(operations.divide, {
-          input: typedInput({numerator: z.number(), denominator: z.number()}),
-          output: typedOutput(z.number().positive())
+        service: processor(serviceCalls.divide, {
+          input: {numerator: z.number(), denominator: z.number()},
+          output: z.number().positive()
         }),
         validInput: {numerator: 10, denominator: 2},
         expectedResult: 5,
@@ -68,7 +64,7 @@ describe('Validation Integration Tests', () => {
       },
       {
         name: 'enum validation',
-        service: processor(operations.updateTheme, {input: typedInput({theme: z.enum(['light', 'dark', 'auto'])})}),
+        service: processor(serviceCalls.updateTheme, {input: {theme: z.enum(['light', 'dark', 'auto'])}}),
         validInput: {theme: 'dark'},
         expectedResult: {theme: 'dark', updated: true},
         invalidInput: {theme: 'blue'},
@@ -76,7 +72,7 @@ describe('Validation Integration Tests', () => {
       },
       {
         name: 'regex pattern validation',
-        service: processor(operations.validateUsername, {input: typedInput({username: z.string().regex(/^[a-zA-Z0-9_]{3,20}$/)})}),
+        service: processor(serviceCalls.validateUsername, {input: {username: z.string().regex(/^[a-zA-Z0-9_]{3,20}$/)}}),
         validInput: {username: 'valid_user123'},
         expectedResult: 'Valid: valid_user123',
         invalidInput: {username: 'no-dashes'},
@@ -84,14 +80,14 @@ describe('Validation Integration Tests', () => {
       },
       {
         name: 'optional fields validation',
-        service: processor(operations.createProfile, {input: typedInput({name: z.string(), bio: z.string().optional()})}),
+        service: processor(serviceCalls.createProfile, {input: {name: z.string(), bio: z.string().optional()}}),
         validInput: {name: 'John'},
         expectedResult: {name: 'John', bio: 'No bio'},
         invalidInput: null // No invalid case for this test
       },
       {
         name: 'URL validation',
-        service: processor(operations.extract, {input: typedInput({url: z.string().url()})}),
+        service: processor(serviceCalls.extract, {input: {url: z.string().url()}}),
         validInput: {url: 'https://example.com'},
         expectedResult: 'https://example.com',
         invalidInput: {url: 'not a url'},
@@ -114,7 +110,7 @@ describe('Validation Integration Tests', () => {
     })
 
     it('should allow user-level validation to override service validation', async () => {
-      const service = processor(operations.double, {input: typedInput({value: z.number()})})
+      const service = processor(serviceCalls.double, {input: {value: z.number()}})
 
       const config = {
         services: {testService: service},
@@ -132,7 +128,7 @@ describe('Validation Integration Tests', () => {
 
     it('should handle validation in chains', async () => {
       const step1 = processor(async (args) => args.value + 10)
-      const step2 = processor(async (args) => args.value * 2, {input: typedInput({value: z.number().max(50)})})
+      const step2 = processor(async (args) => args.value * 2, {input: {value: z.number().max(50)}})
 
       const config = {
         services: {step1, step2},
@@ -149,7 +145,7 @@ describe('Validation Integration Tests', () => {
 
     it('should validate arrays with service validation', async () => {
       const service = processor(async (args) => args.items.map(i => i.toUpperCase()), {
-        input: typedInput({items: z.array(z.string()).min(2).max(5)})
+        input: {items: z.array(z.string()).min(2).max(5)}
       })
 
       const config = {
@@ -173,8 +169,8 @@ describe('Validation Integration Tests', () => {
     })
 
     it('should handle complex nested validation', async () => {
-      const service = processor(operations.createUser, {
-        input: typedInput({
+      const service = processor(serviceCalls.createUser, {
+        input: {
           userData: z.object({
             name: z.string(),
             age: z.number().positive(),
@@ -185,7 +181,7 @@ describe('Validation Integration Tests', () => {
             }),
             tags: z.array(z.string()).max(5)
           })
-        })
+        }
       })
 
       const validData = {
@@ -214,8 +210,8 @@ describe('Validation Integration Tests', () => {
     it('should validate both precheck and postcheck in sequence', async () => {
       // Transform data that may fail postcheck
       const service = processor(async (args) => ({value: args.value, doubled: args.value * 2}), {
-        input: typedInput({value: z.number().min(1).max(10)}),
-        output: typedOutput(z.object({doubled: z.number().max(15)}))
+        input: {value: z.number().min(1).max(10)},
+        output: z.object({doubled: z.number().max(15)})
       })
 
       const config1 = {
@@ -234,7 +230,7 @@ describe('Validation Integration Tests', () => {
     })
 
     it('should accept date with constraints', async () => {
-      const service = processor(operations.echo, {input: typedInput({value: z.date().min(new Date('2020-01-01'))})})
+      const service = processor(serviceCalls.echo, {input: {value: z.date().min(new Date('2020-01-01'))}})
 
       const config = {
         services: {testService: service},
@@ -246,12 +242,12 @@ describe('Validation Integration Tests', () => {
     })
 
     it('should accept URL string modifier', async () => {
-      const service = processor(operations.scrape, {
-        input: typedInput({
+      const service = processor(serviceCalls.scrape, {
+        input: {
           url: z.string().url(),
           queries: z.object({}).optional(),
           validate: z.boolean().optional()
-        })
+        }
       })
 
       const config = {
@@ -271,7 +267,7 @@ describe('Validation Integration Tests', () => {
 
     it('should accept object with optional modifier', async () => {
       const service = processor(async (args) => ({required: args.required, optional: args.optional || 'default'}), {
-        input: typedInput({required: z.string(), optional: z.object({}).optional()})
+        input: {required: z.string(), optional: z.object({}).optional()}
       })
 
       const config = {
@@ -287,7 +283,7 @@ describe('Validation Integration Tests', () => {
     })
 
     it('should accept array with constraints', async () => {
-      const service = processor(async (args) => args.values, {input: typedInput({values: z.array(z.string()).min(1).max(3)})})
+      const service = processor(async (args) => args.values, {input: {values: z.array(z.string()).min(1).max(3)}})
 
       const config = {
         services: {testService: service},
@@ -341,11 +337,10 @@ describe('Validation Integration Tests', () => {
   describe('Invalid declarations in service definitions', () => {
     // [description, input declaration]
     const malformed = [
-      ['a schema that is not zod', {value: [['type', {fromZod: ['notARealType']}]]}],
-      ['an unknown zodly type', {value: [['type', ['notARealType']]]}],
-      ['an unknown zodly modifier', {value: [['type', ['string', 'optinal']]]}],
+      ['an unknown zodly type', {value: ['notARealType']}],
+      ['an unknown zodly modifier', {value: ['string', 'optinal']}],
       ['a type with no source', {value: ['type']}],
-      ['an unknown tag', {value: ['notARealTag']}]
+      ['an unknown tag', {value: ['string', {tags: ['notARealTag']}]}]
     ]
 
     for (const [description, input] of malformed) {
@@ -360,8 +355,8 @@ describe('Validation Integration Tests', () => {
   })
 
   describe('Edge cases in validation compilation', () => {
-    it('should handle deeply nested validation schemas, declared by dotted path', async () => {
-      const service = processor(async (args) => args, {input: typedInput({'level1.level2.level3.level4.value': z.string()})})
+    it('should handle deeply nested validation schemas', async () => {
+      const service = processor(async (args) => args, {input: {level1: {level2: {level3: {level4: {value: z.string()}}}}}})
       const deep = (value) => ({level1: {level2: {level3: {level4: {value}}}}})
 
       const config = {
@@ -380,14 +375,14 @@ describe('Validation Integration Tests', () => {
 
     it('should handle validation with all modifier types', async () => {
       const service = processor(async (args) => args, {
-        input: typedInput({
+        input: {
           email: z.string().email(),
           url: z.string().url(),
           positive: z.number().positive(),
           integer: z.number().int(),
           finite: z.number().finite(),
           safe: z.number().safe()
-        })
+        }
       })
 
       const config = {
@@ -409,7 +404,7 @@ describe('Validation Integration Tests', () => {
     })
 
     it('should handle validation with complex union types', async () => {
-      const service = processor(operations.echo, {input: typedInput({value: z.union([z.string(), z.number(), z.boolean()])})})
+      const service = processor(serviceCalls.echo, {input: {value: z.union([z.string(), z.number(), z.boolean()])}})
       const run = (value) => query({services: {testService: service}, phases: {result: ['[testService]/process', {value}]}})
 
       assert.strictEqual((await run('hello')).result, 'hello')
@@ -421,7 +416,7 @@ describe('Validation Integration Tests', () => {
   describe('Validation sequencing (service-level + user-level)', () => {
     it('should apply service validation before user validation on precheck', async () => {
       // Service requires a number
-      const service = processor(operations.echo, {input: typedInput({value: z.number()})})
+      const service = processor(serviceCalls.echo, {input: {value: z.number()}})
 
       const config = {
         services: {testService: service},
@@ -444,7 +439,7 @@ describe('Validation Integration Tests', () => {
     it('should apply user validation after service validation on postcheck', async () => {
       // Service validates output is positive
       const service = processor(async (args) => ({result: args.value * 2}), {
-        output: typedOutput(z.object({result: z.number().positive()}))
+        output: z.object({result: z.number().positive()})
       })
 
       const config = {
@@ -466,7 +461,7 @@ describe('Validation Integration Tests', () => {
     })
 
     it('should handle errors in nested service validation gracefully', async () => {
-      const service = processor(async (args) => args, {input: typedInput({data: z.object({nested: z.object({value: z.string().email()})})})})
+      const service = processor(async (args) => args, {input: {data: z.object({nested: z.object({value: z.string().email()})})}})
 
       const config = {
         services: {testService: service},

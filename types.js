@@ -14,19 +14,21 @@
  *                    for an enum) goes into a narrower field
  *
  * Refinements (email, min) are carried but not compared: they're checked at
- * run time.
+ * run time. A union is read without its never members and with each type
+ * once (see union), and never, what a call that always throws returns, fits
+ * any field.
  */
 
 import {z} from 'zod'
 import {isPlainObject, mapValues} from './common.js'
-import {errorSchema, parseSchema} from 'zodly'
+import {errorSchema, parseSchema} from '@tlsft/zodly'
 
 export const any = z.any()
 
 const WRAPPERS = ['optional', 'nullable', 'default', 'prefault', 'readonly', 'catch', 'nonoptional']
 
 // The schema inside optional, nullable and default wrappers.
-const unwrap = (schema) => WRAPPERS.includes(schema.def.type) ? unwrap(schema.def.innerType) : schema
+export const unwrap = (schema) => WRAPPERS.includes(schema.def.type) ? unwrap(schema.def.innerType) : schema
 
 const typeOf = (schema) => unwrap(schema).def.type
 
@@ -62,6 +64,7 @@ const isAbsent = (schema) => ['undefined', 'null'].includes(typeOf(schema))
  */
 export function describeSchema(schema) {
   if (schema === errorSchema) return 'error'
+  if (schema.def.type === 'union') return describeUnion(simplified(schema))
   const {type} = schema.def
   if (type === 'optional') return `${describeSchema(schema.def.innerType)} (optional)`
   if (type === 'nullable') return `${describeSchema(schema.def.innerType)} (nullable)`
@@ -71,7 +74,6 @@ export function describeSchema(schema) {
   if (type === 'record') return `record of ${describeSchema(schema.def.valueType)}`
   if (type === 'enum') return `enum (${enumValues(schema).join(' | ')})`
   if (type === 'literal') return `literal ${JSON.stringify(schema.def.values[0])}`
-  if (type === 'union') return schema.def.options.map(describeSchema).join(' | ')
   if (type === 'object') {
     const fields = Object.entries(schema.def.shape).map(([name, field]) =>
       field.def.type === 'optional' ? `${name}?: ${describeSchema(field.def.innerType)}` : `${name}: ${describeSchema(field)}`)
@@ -80,6 +82,10 @@ export function describeSchema(schema) {
   }
   return type
 }
+
+// A union as text, member by member; a schema it simplified to, as itself.
+const describeUnion = (schema) =>
+  schema.def.type === 'union' ? schema.def.options.map(describeSchema).join(' | ') : describeSchema(schema)
 
 // A list's item as text: a union in parentheses, so it reads as one item.
 const described = (schema) => unwrap(schema).def.type === 'union' ? `(${describeSchema(schema)})` : describeSchema(schema)
@@ -90,14 +96,15 @@ export function sharedSchema(schemas) {
   return first && rest.every(schema => describeSchema(schema) === describeSchema(first)) ? first : any
 }
 
-// The schema of a literal value.
-export function schemaOfValue(value) {
+// The type of a value, widened to its kind: 'a' is a string (see
+// literalTypeOf for its literal type).
+export function widenedTypeOf(value) {
   if (typeof value === 'string') return z.string()
   if (typeof value === 'number') return z.number()
   if (typeof value === 'boolean') return z.boolean()
   if (value instanceof Date) return z.date()
-  if (Array.isArray(value)) return z.array(sharedSchema(value.map(schemaOfValue)))
-  if (isPlainObject(value)) return z.object(mapValues(value, schemaOfValue))
+  if (Array.isArray(value)) return z.array(sharedSchema(value.map(widenedTypeOf)))
+  if (isPlainObject(value)) return z.object(mapValues(value, widenedTypeOf))
   return any
 }
 
@@ -109,7 +116,7 @@ export function elementOf(schema) {
 
 // One value of an object's schema: a record's value type, the type all of an
 // object's fields share, or any of them.
-export function valueOf(schema) {
+export function fieldValueOf(schema) {
   const inner = unwrap(schema)
   if (inner.def.type === 'record') return inner.def.valueType
   if (inner.def.type !== 'object') return any
@@ -193,10 +200,11 @@ function compareToUnion(expected, actual, path) {
 export function compare(expected, actual, path = []) {
   if (isAny(expected)) return []
   if (isAny(actual)) return issue('type-narrowing', path, expected, actual)
+  if (typeOf(simplified(unwrap(actual))) === 'never') return []
   if (isAbsent(actual)) return mayBeMissing(expected) ? [] : issue('type-mismatch', path, expected, actual)
   const absent = mayBeMissing(actual) && !mayBeMissing(expected) ? issue('maybe-missing', path, expected, actual) : []
 
-  const [want, have] = [unwrap(expected), unwrap(actual)]
+  const [want, have] = [unwrap(expected), unwrap(simplified(unwrap(actual)))]
   if (have.def.type === 'union') return [...absent, ...have.def.options.flatMap(option => compare(want, option, path))]
   if (want.def.type === 'union') return [...absent, ...compareToUnion(want, have, path)]
   const fits = FITS[want.def.type]
@@ -212,6 +220,16 @@ function unionOf(members) {
   const named = [...new Map(members.map(member => [describeSchema(member), member])).values()]
   return named.length === 1 ? named[0] : z.union(named)
 }
+
+// A union without its never members, each type once; any other schema as it is.
+const simplified = (schema) => schema.def.type === 'union' ? schema.def.options.reduce(union) : schema
+
+// What a function receives, when its input is a tuple of one (a call field's,
+// see declaration.js); any otherwise, and for what isn't a function.
+export const receivedBy = (fn) => fn.def.type === 'function' && fn.def.input.def.type === 'tuple' ? fn.def.input.def.items[0] ?? any : any
+
+// What a function returns; any for what isn't a function.
+export const returnedBy = (fn) => fn.def.type === 'function' ? fn.def.output : any
 
 /*
  * Type operators: what a declaration's sources compute (see declaration.js),
@@ -250,12 +268,12 @@ const isScalar = (value) => ['string', 'number', 'boolean'].includes(typeof valu
  * that isn't known (a reference, to plan()) or has no literal type (a RegExp,
  * a zod schema) is any.
  */
-export function literalOf(value, isUnknown = () => false) {
+export function literalTypeOf(value, isUnknown = () => false) {
   if (isUnknown(value)) return any
   if (isScalar(value)) return z.literal(value)
   if (value === undefined) return z.undefined()
-  if (Array.isArray(value)) return z.tuple(value.map(item => literalOf(item, isUnknown)))
-  if (isPlainObject(value)) return z.object(mapValues(value, item => literalOf(item, isUnknown)))
+  if (Array.isArray(value)) return z.tuple(value.map(item => literalTypeOf(item, isUnknown)))
+  if (isPlainObject(value)) return z.object(mapValues(value, item => literalTypeOf(item, isUnknown)))
   return any
 }
 
@@ -273,7 +291,7 @@ export const isLiteral = (schema) => {
   return Boolean(parts) && parts(schema).every(isLiteral)
 }
 
-// The value a literal type was read from (see literalOf).
+// The value a literal type was read from (see literalTypeOf).
 export function valueOfLiteral(schema) {
   const {def} = schema
   if (def.type === 'literal') return def.values[0]
@@ -287,7 +305,7 @@ export function valueOfLiteral(schema) {
  * type: never for no descriptor, so there's nothing it describes; any when the
  * descriptor isn't known before the Run.
  */
-export function describedBy(type) {
+export function schemaOfDescriptor(type) {
   if (typeOf(type) === 'undefined') return z.never()
   return isLiteral(type) ? parseSchema(valueOfLiteral(type)) : any
 }

@@ -4,8 +4,11 @@ import query, {plan, defineService} from '../index.js'
 import util from '../services/util.js'
 import {ANSI_COLORS} from '../index.js'
 
-// Calls one of util's operations directly, as core would after lookup.
-const callUtil = (resource, args) => util.lookup({service: 'util', resource, method: null}).call(args)
+// A key to util, as core hands it to the service.
+const utilKey = (resource, {method = null, confined = false} = {}) => ({method, service: 'util', resource, confined})
+
+// Makes one of util's service calls directly, as core does: through an instance.
+const callUtil = async (resource, fields) => (await util.init({})).call({...utilKey(resource), fields})
 
 describe('Util Service Tests', () => {
   // Test data
@@ -218,25 +221,34 @@ describe('Util Service Tests', () => {
   })
 
   describe('Declarations', () => {
-    it('lists every operation, verbless and described', () => {
-      const operations = util.operations()
+    it('lists every supported call, each with no method, and described', () => {
+      const supported = util.supportedCalls()
       const resources = ['/concat', '/each', '/eq', '/exists', '/filter', '/flattenEach', '/format', '/gt', '/inspect', '/length', '/log', '/lt', '/merge', '/partitionErrors', '/pick', '/template', '/throw', '/try', '/when']
-      assert.deepStrictEqual(operations.map(op => op.resource).sort(), resources)
-      for (const op of operations) {
-        assert.strictEqual(op.method, null, `${op.resource} takes no verb`)
-        assert.ok(op.description, `${op.resource} has a description`)
+      assert.deepStrictEqual(supported.map(({resource}) => resource).sort(), resources)
+      for (const {resource, method, description} of supported) {
+        assert.strictEqual(method, null, `${resource} takes no method`)
+        assert.ok(description, `${resource} has a description`)
       }
     })
 
     it('declares each\'s target, and a call that receives one item of on', () => {
-      const {input, output} = util.lookup({service: 'util', resource: '/each', method: null})
-      assert.ok(input.on.includes('target'))
-      assert.deepStrictEqual(input.service, [['call', {fromList: 'on'}]])
-      assert.deepStrictEqual(output, [['type', {toList: {difference: [{fromField: 'service'}, {fromZodly: {fromValue: 'skip'}}]}}]])
+      const {input, output} = util.lookup(utilKey('/each'))
+      assert.deepStrictEqual(input.on, ['array', {tags: ['target']}])
+      assert.deepStrictEqual(input.service, ['call', {input: ['type', {fromList: 'on'}]}])
+      assert.deepStrictEqual(output, ['array', ['type', {without: [{fromField: 'service'}, {fromZodly: {fromValue: 'skip'}}]}]])
     })
 
-    it('refuses a verb', () => {
-      assert.throws(() => util.lookup({service: 'util', resource: '/each', method: 'GET'}), /\[util\]\/each takes no verb; got GET/)
+    it('refuses to look up a method', () => {
+      assert.throws(() => util.lookup(utilKey('/each', {method: 'GET'})), /\[util\]\/each takes no method; got GET/)
+    })
+
+    it('refuses to call with a method', async () => {
+      const instance = await util.init({})
+      await assert.rejects(instance.call({...utilKey('/each', {method: 'GET'}), fields: {}}), /\[util\]\/each takes no method; got GET/)
+    })
+
+    it('refuses a confined key: util is no service of the caller\'s own custody', () => {
+      assert.throws(() => util.lookup(utilKey('/each', {confined: true})), /\[@util\]\/each is confined, and this service answers no confined calls/)
     })
   })
 
@@ -566,13 +578,13 @@ describe('Util Service Tests', () => {
         /\[\$result\.@1a1 - \[items\]\/process\] Failed 2/],
       ['a catch doesn\'t handle the failure of the call it sits on',
         ['[util]/each', {on: 'not a list', service: ['[items]/process', {item: '@'}], catch: keepError}],
-        /\[\$result\.@1 - \[util\]\/each\] Service Schema Validation precheck failed/],
+        /\[\$result\.@1 - \[util\]\/each\] Service Defined Validation precheck failed/],
       ['throw fails with the error it is given, as it was raised',
         ['$given.items', '[util]/each', {service: ['[items]/process', {item: '@'}], catch: ['@err', '[util]/throw']}],
         /^Error: \[\$result\.@1a1 - \[items\]\/process\] Failed 2$/],
       ['a catch that fails fails the call holding it',
         ['$given.items', '[util]/each', {service: ['[items]/process', {item: '@'}], catch: ['[util]/gt', {l: 'not a number', r: 1}]}],
-        /\[\$result\.@1e1 - \[util\]\/gt\] Service Schema Validation precheck failed/]
+        /\[\$result\.@1e1 - \[util\]\/gt\] Service Defined Validation precheck failed/]
     ]
 
     for (const [description, phase, error] of failures) {
@@ -635,7 +647,7 @@ describe('Util Service Tests', () => {
 
     for (const [resource, replacement] of retired) {
       it(`refuses ${resource}, naming its replacement`, () => {
-        assert.throws(() => util.lookup({service: 'util', resource, method: null}), replacement)
+        assert.throws(() => util.lookup(utilKey(resource)), replacement)
       })
     }
   })

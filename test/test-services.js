@@ -5,10 +5,10 @@
 import {defineService} from '../define-service.js'
 import {mapValues} from '../common.js'
 
-// Services by name, each written as a table of operations.
+// Services by name, each written as a table of service calls.
 export const servicesFromTables = (tables) => mapValues(tables, defineService)
 
-const onTarget = {on: ['target']}
+const onTarget = {on: ['any', 'optional', {tags: ['target']}]}
 const withTarget = (call) => ({input: onTarget, call})
 
 // Math service with common mathematical operations
@@ -26,7 +26,7 @@ export const math = defineService({
 
 // Simple test service for basic operations
 export const test = defineService({
-  '/identity': {input: {value: ['target']}, call: async ({value}) => value},
+  '/identity': {input: {value: ['any', 'optional', {tags: ['target']}]}, call: async ({value}) => value},
   async '/increment'({value}) { return value + 1 },
   async '/double'({value}) { return value * 2 },
   async '/combine'({a, b}) { return `${a}-${b}` }

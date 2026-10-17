@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
 import {z} from 'zod'
-import {any, isAny, schemaOfValue, schemaAtPath, elementOf, valueOf, compare, describeSchema, union, difference, literalOf, isLiteral, valueOfLiteral, describedBy, pick, merge} from '../types.js'
+import {any, isAny, widenedTypeOf, schemaAtPath, elementOf, fieldValueOf, compare, describeSchema, union, difference, literalTypeOf, isLiteral, valueOfLiteral, schemaOfDescriptor, pick, merge} from '../types.js'
 import {errorSchema} from '../errors.js'
 
 describe('describeSchema', () => {
@@ -25,7 +25,9 @@ describe('describeSchema', () => {
     [z.string().nullable(), 'string (nullable)'],
     [z.string().default('x'), 'string'],
     [z.tuple([z.literal('a'), z.number()]), '[literal "a", number]'],
-    [z.array(z.union([z.string(), z.number()])), 'array of (string | number)']
+    [z.array(z.union([z.string(), z.number()])), 'array of (string | number)'],
+    [z.union([z.never(), z.string()]), 'string'],
+    [z.union([z.string(), z.number(), z.string()]), 'string | number']
   ]
 
   for (const [schema, description] of cases) {
@@ -35,7 +37,7 @@ describe('describeSchema', () => {
   }
 })
 
-describe('schemaOfValue', () => {
+describe('widenedTypeOf', () => {
   // [value, description of its schema]
   const cases = [
     ['hi', 'string'],
@@ -53,13 +55,13 @@ describe('schemaOfValue', () => {
 
   for (const [value, description] of cases) {
     it(`${JSON.stringify(value)} → ${description}`, () => {
-      assert.equal(describeSchema(schemaOfValue(value)), description)
+      assert.equal(describeSchema(widenedTypeOf(value)), description)
     })
   }
 
   it('checks what it describes', () => {
-    assert.equal(schemaOfValue({a: [1]}).safeParse({a: [2]}).success, true)
-    assert.equal(schemaOfValue({a: [1]}).safeParse({a: ['x']}).success, false)
+    assert.equal(widenedTypeOf({a: [1]}).safeParse({a: [2]}).success, true)
+    assert.equal(widenedTypeOf({a: [1]}).safeParse({a: ['x']}).success, false)
   })
 })
 
@@ -75,7 +77,7 @@ describe('walking into schemas', () => {
     ['into a scalar', () => schemaAtPath(z.string(), ['length']), any],
     ['a list\'s item', () => elementOf(listing.shape.images), listing.shape.images.unwrap().element],
     ['the item of something that isn\'t a list', () => elementOf(z.string()), any],
-    ['a record\'s value', () => valueOf(listing.shape.tags), listing.shape.tags.def.valueType]
+    ['a record\'s value', () => fieldValueOf(listing.shape.tags), listing.shape.tags.def.valueType]
   ]
 
   for (const [description, walk, expected] of cases) {
@@ -85,7 +87,7 @@ describe('walking into schemas', () => {
   }
 
   it('takes an object\'s value as the type all its fields share', () => {
-    assert.equal(describeSchema(valueOf(z.object({a: z.number(), b: z.number()}))), 'number')
+    assert.equal(describeSchema(fieldValueOf(z.object({a: z.number(), b: z.number()}))), 'number')
   })
 
   it('takes a union\'s path as any', () => {
@@ -93,7 +95,7 @@ describe('walking into schemas', () => {
   })
 
   it('takes an object\'s value as any of its fields\' types when they differ', () => {
-    const value = valueOf(z.object({a: z.number(), b: z.string()}))
+    const value = fieldValueOf(z.object({a: z.number(), b: z.string()}))
     assert.equal(value.safeParse(1).success && value.safeParse('x').success && !value.safeParse(true).success, true)
   })
 })
@@ -152,7 +154,10 @@ describe('compare', () => {
     ['a union with a member that doesn\'t fit', z.string(), z.union([z.string(), z.number()]), at('type-mismatch')],
     ['dates', z.date(), z.date(), fits],
     ['nothing, into an optional field', z.string().optional(), z.undefined(), fits],
-    ['nothing, into a required field', z.string(), z.undefined(), at('type-mismatch')]
+    ['nothing, into a required field', z.string(), z.undefined(), at('type-mismatch')],
+    ['never, into any field', z.string(), z.never(), fits],
+    ['a union with never, as its other members', z.string(), z.union([z.never(), z.string()]), fits],
+    ['a union repeating a type, as one of it', z.number(), z.union([z.string(), z.string()]), at('type-mismatch')]
   ]
 
   for (const [description, expected, actual, issues] of cases) {
@@ -218,7 +223,7 @@ describe('literals', () => {
 
   for (const [description, value, described] of cases) {
     it(`types ${description}`, () => {
-      assert.equal(describeSchema(literalOf(value)), described)
+      assert.equal(describeSchema(literalTypeOf(value)), described)
     })
   }
 
@@ -231,7 +236,7 @@ describe('literals', () => {
 
   for (const [description, value] of roundTrips) {
     it(`reads back ${description} from its literal type`, () => {
-      assert.deepEqual(valueOfLiteral(literalOf(value)), value)
+      assert.deepEqual(valueOfLiteral(literalTypeOf(value)), value)
     })
   }
 
@@ -240,17 +245,17 @@ describe('literals', () => {
   })
 })
 
-describe('describedBy', () => {
+describe('schemaOfDescriptor', () => {
   // [description, literal type, the schema it describes]
   const cases = [
-    ['a zodly descriptor\'s schema', literalOf(['error']), 'error'],
-    ['nothing, for no descriptor', literalOf(undefined), 'never'],
+    ['a zodly descriptor\'s schema', literalTypeOf(['error']), 'error'],
+    ['nothing, for no descriptor', literalTypeOf(undefined), 'never'],
     ['any, for a descriptor not known before the Run', any, 'any']
   ]
 
   for (const [description, type, described] of cases) {
     it(`is ${description}`, () => {
-      assert.equal(describeSchema(describedBy(type)), described)
+      assert.equal(describeSchema(schemaOfDescriptor(type)), described)
     })
   }
 })
@@ -259,13 +264,13 @@ describe('pick', () => {
   const person = z.object({name: z.string(), age: z.number().optional(), url: z.string()})
   // [description, schema, keys, what's picked]
   const cases = [
-    ['keeps the named fields', person, literalOf(['name', 'age']), '{name: string, age?: number}'],
-    ['leaves out names the object doesn\'t have', person, literalOf(['name', 'nope']), '{name: string}'],
+    ['keeps the named fields', person, literalTypeOf(['name', 'age']), '{name: string, age?: number}'],
+    ['leaves out names the object doesn\'t have', person, literalTypeOf(['name', 'nope']), '{name: string}'],
     ['takes keys as a union of literals, as TypeScript\'s Pick does', person, z.union([z.literal('url'), z.literal('name')]), '{url: string, name: string}'],
-    ['picks from each member of a union', z.union([person, z.object({name: z.number()})]), literalOf(['name']), '{name: string} | {name: number}'],
+    ['picks from each member of a union', z.union([person, z.object({name: z.number()})]), literalTypeOf(['name']), '{name: string} | {name: number}'],
     ['keeps the schema when the keys aren\'t known before the Run', person, z.array(z.string()), '{name: string, age?: number, url: string}'],
-    ['keeps any', any, literalOf(['name']), 'any'],
-    ['takes a name a loose object may have as unknown, and maybe absent', z.looseObject({name: z.string()}), literalOf(['name', 'href']), '{name: string, href?: unknown}']
+    ['keeps any', any, literalTypeOf(['name']), 'any'],
+    ['takes a name a loose object may have as unknown, and maybe absent', z.looseObject({name: z.string()}), literalTypeOf(['name', 'href']), '{name: string, href?: unknown}']
   ]
 
   for (const [description, schema, keys, picked] of cases) {

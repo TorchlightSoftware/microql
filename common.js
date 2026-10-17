@@ -4,7 +4,7 @@ const RESERVE_ARGS = ['timeout', 'retry', 'catch', 'precheck', 'postcheck', 'deb
 // The two kinds of validation a call runs, by the key they are filed under,
 // with the names the docs and error messages use: the Query author's checks
 // on one call, and the service's own schemas.
-const VALIDATION_NAMES = {call: 'Service Call Validation', schema: 'Service Schema Validation'}
+const VALIDATION_NAMES = {call: 'Service Call Validation', schema: 'Service Defined Validation'}
 
 // Colour names assigned to services for debug output; the runtime decides how
 // a colour is shown.
@@ -62,14 +62,18 @@ const omitIn = (object, [key, ...rest]) => {
   return isPlainObject(object[key]) ? {...object, [key]: omitIn(object[key], rest)} : object
 }
 
-// The fields of a path as a declaration writes it: dots separate fields, and
-// two dots stand for a dot inside a field name ('a..b.c' → ['a.b', 'c']).
+// The fields of a path as a declaration's sources write it: dots separate
+// fields, and two dots stand for a dot inside a field name ('a..b.c' →
+// ['a.b', 'c']).
 const ESCAPED_DOT = '\u0000'
 const parseFieldPath = (path) => {
   const fields = path.replaceAll('..', ESCAPED_DOT).split('.').map(field => field.replaceAll(ESCAPED_DOT, '.'))
   if (fields.includes('')) throw new Error(`Field path '${path}' names an empty field`)
   return fields
 }
+
+// The path of these fields, as parseFieldPath reads it.
+const writeFieldPath = (fields) => fields.map(field => field.replaceAll('.', '..')).join('.')
 
 // The object with values set by field path ({'params.fn': value}).
 const setPaths = (object, valuesByPath) =>
@@ -86,4 +90,4 @@ const defaults = (...sources) => {
   return result
 }
 
-export {RESERVE_ARGS, VALIDATION_NAMES, COLOR_NAMES, getServiceColorName, isPlainObject, mapValues, filterObject, pick, omit, getIn, setIn, omitIn, setPaths, parseFieldPath, defaults}
+export {RESERVE_ARGS, VALIDATION_NAMES, COLOR_NAMES, getServiceColorName, isPlainObject, mapValues, filterObject, pick, omit, getIn, setIn, omitIn, setPaths, parseFieldPath, writeFieldPath, defaults}

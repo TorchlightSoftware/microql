@@ -22,36 +22,11 @@ import {rootScope, enterPosition} from './reference.js'
 import RateLimitedQueue from './ratelimit.js'
 import {concurrencyLimit} from './concurrency.js'
 import {mapValues, pick} from './common.js'
-import {validate} from 'zodly'
+import {validate, parseSchema} from '@tlsft/zodly'
 import {format} from './format.js'
 
-// The runtime each service last received at init. A service is initialized
-// at most once per runtime; a service shared between runtimes is initialized
-// again when the runtime it is used with changes.
-const initializedWith = new WeakMap()
-
-async function initServices(services, runtime) {
-  for (const service of services) {
-    if (typeof service.init === 'function' && initializedWith.get(service) !== runtime) {
-      await service.init(runtime)
-      initializedWith.set(service, runtime)
-    }
-  }
-}
-
-// Call tearDown on the services a Run used
-async function callTearDown(services) {
-  for (const [serviceName, service] of services) {
-    if (typeof service.tearDown === 'function') {
-      try {
-        await service.tearDown()
-      } catch (error) {
-        // Log tearDown errors but don't throw them
-        console.error(`Error in ${serviceName}.tearDown():`, error.message)
-      }
-    }
-  }
-}
+// The services a Run's calls use, by their names in the Query.
+const servicesUsed = (calls) => Object.fromEntries(calls.map(call => [call.parts.service, call.service]))
 
 // Runs a phase or position's steps in order: each step's result flows into the next.
 async function runSteps(steps, scope, run) {
@@ -71,7 +46,6 @@ function runPosition(position, scope, input, item, run) {
 // until it settles.
 function invoke(call, scope, run) {
   if (run.signal?.aborted) return Promise.reject(run.signal.reason)
-  run.usedServices.set(call.parts.service, call.service)
   const pending = run.pipelines.get(call)(call.args, {call, scope, run})
   run.pending.set(pending, call.address)
   return pending.finally(() => run.pending.delete(pending))
@@ -167,23 +141,61 @@ function scopeOfRun(compiled, target) {
   }
 }
 
-// The first call whose service requires a runtime key the runtime lacks.
-function checkCapabilities({calls, runtime}) {
-  for (const call of calls) {
-    const missing = (call.service.requires ?? []).find(key => !(key in runtime))
-    if (missing) {
-      const message = `[${call.address}] Service '${call.parts.service}' requires runtime.${missing}, which this runtime doesn't provide`
-      throw Object.assign(new Error(message), {address: call.address, code: 'missing-capability'})
-    }
+// A Run error at the call that raised it.
+const runError = (call, code, message) =>
+  Object.assign(new Error(`[${call.address}] ${message}`), {address: call.address, code})
+
+// The runtime keys a service needs: those it requires, and config when it
+// declares one.
+const requirementsOf = (service) => [...(service.requires ?? []), ...(service.config ? ['config'] : [])]
+
+// What a service's config declaration refuses in the config filed under its
+// name, if anything.
+function configRefusal(service, name, runtime) {
+  let schema
+  try {
+    schema = parseSchema(service.config)
+  } catch (error) {
+    return {code: 'invalid-config', message: `Service '${name}' has a malformed config declaration: ${error.message}`}
   }
+  try {
+    validate(schema, runtime.config[name], format)
+  } catch (error) {
+    return {code: 'invalid-config', message: `Service '${name}' can't use this runtime's config:\n${error.message}`}
+  }
+}
+
+/**
+ * Why a runtime can't run a service, by the name a Query gives it, if it
+ * can't: a key the service requires that the runtime lacks, or config filed
+ * under its name that its config declaration doesn't accept. {code, message}.
+ */
+export function runtimeRefusal(service, name, runtime) {
+  const missing = requirementsOf(service).find(key => !(key in runtime))
+  if (missing) return {code: 'missing-capability', message: `Service '${name}' requires runtime.${missing}, which this runtime doesn't provide`}
+  if (service.config) return configRefusal(service, name, runtime)
+}
+
+// Refuses a service the runtime can't run, at the first call to it.
+function checkService(call, runtime) {
+  const refusal = runtimeRefusal(call.service, call.parts.service, runtime)
+  if (refusal) throw runError(call, refusal.code, refusal.message)
+}
+
+// Checks each service a Run uses, once, at its first call.
+function checkServices({calls, runtime}) {
+  const firstCalls = new Map()
+  for (const call of calls) if (!firstCalls.has(call.service)) firstCalls.set(call.service, call)
+  for (const call of firstCalls.values()) checkService(call, runtime)
 }
 
 // What a Run needs from its caller, which core never supplies itself, and a
 // trigger payload that fits the Query's trigger schema, if it declares one.
 function checkRunInputs(compiled, {runState, trigger}) {
   if (!compiled.runtime) throw new Error('execute needs a runtime: pass config.runtime (microql/core has none of its own)')
+  if (typeof compiled.runtime.init !== 'function') throw new Error('execute needs a runtime with init(services), which makes the instances of the services a Run uses, such as serviceRegistry() gives')
   if (!runState) throw new Error('execute needs a runState: the entry store for this Run, such as memoryStore()')
-  checkCapabilities(compiled)
+  checkServices(compiled)
   try {
     validate(compiled.triggerSchema, trigger, format)
   } catch (error) {
@@ -217,17 +229,16 @@ export async function execute(compiled, {runState, trigger, target, signal, onUp
     pending: new Map(),
     signal,
     aborted: abortion(signal),
-    usedServices: new Map(),
     rateLimiters: mapValues(settings.rateLimit ?? {}, interval => new RateLimitedQueue(interval)),
     limit: settings.concurrency ? concurrencyLimit(settings.concurrency) : undefined,
     rerun,
     onUpdate,
     runPosition: (position, scope, input, item) => runPosition(position, scope, input, item, run)
   }
+  // the runtime makes (or keeps) the instances that answer the Run's calls
+  run.instances = await runtime.init(servicesUsed(compiled.calls))
   // each call's wrappers depend only on the call and the Run, so they're built once
   run.pipelines = new Map(compiled.calls.map(call => [call, wrap(call, run)]))
-
-  await initServices(new Set(compiled.calls.map(call => call.service)), runtime)
 
   try {
     for (const column of columnsOf(pick(compiled.phases, phases))) {
@@ -238,7 +249,6 @@ export async function execute(compiled, {runState, trigger, target, signal, onUp
   } finally {
     // an abort discards work in progress: nothing waits for it
     if (!signal?.aborted) await settle(run)
-    await callTearDown(run.usedServices)
   }
 
   return pick(run.nodes, phases)
