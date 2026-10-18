@@ -2,9 +2,9 @@ import {builtinModules} from 'node:module'
 import stylistic from '@stylistic/eslint-plugin'
 import js from '@eslint/js'
 
-// Files that may use node: the node entry point (core plus the node runtime),
+// Files that may use node: the node entry point (core plus the node runtime) and its stores,
 // the tests, and tooling. Everything else is core, and must run on any platform.
-const NODE_FILES = ['index.js', 'test/**', 'scripts/**', 'eslint.config.js']
+const NODE_FILES = ['index.js', 'src/runtime/file-stores.js', 'test/**', 'scripts/**', 'eslint.config.js']
 
 const nodeGlobals = {
   process: 'readonly',

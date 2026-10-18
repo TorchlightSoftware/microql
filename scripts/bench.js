@@ -1,10 +1,11 @@
 // Engine overhead benchmark: services answer instantly, so time is MicroQL's own.
 // Usage: npm run bench                          (this checkout)
 //        node scripts/bench.js old <query.js>   (0.6.6, extracted per performance.md)
+//        node scripts/bench.js new index.js chain   (only the workloads whose name has 'chain')
 import {pathToFileURL} from 'node:url'
 import path from 'node:path'
 
-const [version = 'new', modulePath = 'index.js'] = process.argv.slice(2)
+const [version = 'new', modulePath = 'index.js', only = ''] = process.argv.slice(2)
 const microql = await import(pathToFileURL(path.resolve(modulePath)).href)
 const query = microql.default
 const old = version === 'old'
@@ -14,7 +15,7 @@ const get = async ({id}) => ({id})
 const add1 = async ({on}) => on + 1
 const echo = old
   ? Object.assign({get, add1}, {add1: Object.assign(add1, {_argtypes: {on: {argOrder: 0}}})})
-  : microql.defineService({'/get': get, '/add1': {input: {on: ['target']}, call: add1}})
+  : microql.defineService({'/get': get, '/add1': {input: {on: ['number', {tags: ['target']}]}, call: add1}})
 
 const key = (action) => old ? `echo:${action}` : `[echo]/${action}`
 const ref = (name) => old ? `$.${name}` : `$${name}`
@@ -43,7 +44,7 @@ async function time(fn) {
 }
 
 const results = {version}
-for (const [name, calls, config] of workloads) {
+for (const [name, calls, config] of workloads.filter(([name]) => name.includes(only))) {
   const ms = await time(() => query({services: {echo}, ...config()}))
   results[name] = {ms: +ms.toFixed(1), usPerCall: +((ms * 1000) / calls).toFixed(0), calls}
 }

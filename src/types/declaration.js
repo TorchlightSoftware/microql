@@ -105,11 +105,8 @@ function atRunTime(name, document) {
   return isAny(schema) ? undefined : schema
 }
 
-/**
- * A service call's declaration, read and checked: its documents, its fields
- * by role, and its run-time input and output schemas.
- */
-export function readDeclaration({input, output}) {
+// A declaration, read and checked afresh.
+function read({input, output}) {
   const fields = input === undefined ? [] : fieldsIn(readDocument('input', input, READINGS.declared))
   if (output !== undefined) readDocument('output', output, READINGS.declared)
   fields.forEach(checkTags)
@@ -125,4 +122,18 @@ export function readDeclaration({input, output}) {
     inputSchema: input === undefined ? undefined : atRunTime('input', input),
     outputSchema: output === undefined ? undefined : atRunTime('output', output)
   }
+}
+
+// Declarations read so far, by the declaration a service's lookup answered.
+const readings = new WeakMap()
+
+/**
+ * A service call's declaration, read and checked: its documents, its fields
+ * by role, and its run-time input and output schemas. A service answers the
+ * same declaration for every call of a key, so those calls share one
+ * reading, read-only, and one run-time schema, which zod compiles once.
+ */
+export function readDeclaration(declaration) {
+  if (!readings.has(declaration)) readings.set(declaration, read(declaration))
+  return readings.get(declaration)
 }

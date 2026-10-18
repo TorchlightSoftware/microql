@@ -3,6 +3,7 @@ import {describe, it} from 'node:test'
 import {z} from 'zod'
 import {parseSchema} from '@tlsft/zodly'
 import {readDeclaration, READINGS} from '../src/types/declaration.js'
+import {compile, defineService} from '../index.js'
 
 describe('readDeclaration', () => {
   it('reads the roles of input fields from their tags and types, by path', () => {
@@ -107,4 +108,14 @@ describe('readDeclaration', () => {
       assert.throws(() => readDeclaration(declaration), error)
     })
   }
+})
+
+describe('a declaration many calls name', () => {
+  const add1 = defineService({'/add1': {input: {on: ['number', {tags: ['target']}]}, call: async ({on}) => on + 1}})
+
+  // zod compiles a schema on its first check, so calls that share one schema compile it once
+  it('is read once, so its calls check their input with one schema', () => {
+    const {calls} = compile({services: {add1}, given: {n: 0}, phases: {chain: [['$given.n', '[add1]/add1'], ['@', '[add1]/add1'], ['@', '[add1]/add1']]}})
+    assert.equal(new Set(calls.map(call => call.validators.precheck.schema)).size, 1)
+  })
 })

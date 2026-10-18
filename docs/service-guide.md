@@ -371,7 +371,7 @@ await query({runtime, services: {orders}, phases: {...}})
 
 ## Best practices
 
-1. **One responsibility per service call.** Compose in the Query, where MicroQL can see the dependencies and run independent calls in parallel, rather than calling one service from another.
+1. **One responsibility per service call.** Keep services small - lean on service composition in the Query.
 2. **Clear field names.** `{to, subject, body}`, not `{a, b, c}`.
 3. **Declare what you can.** A concrete type on each input field and on the output catches bad calls at their first run, and lets `plan()` type everything downstream.
 4. **Stateless calls.** MicroQL runs identical calls once and reuses results from the Run State and the Cache, so a call's result should depend only on its fields. What `init` gives an instance isn't call state.

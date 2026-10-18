@@ -8,22 +8,25 @@
  * config in one, all scoped the same way.
  */
 
-import {validate} from '@tlsft/zodly'
+import {parseSchema, validate} from '@tlsft/zodly'
 import {canonical} from '../query/forms.js'
 import {format} from '../common/format.js'
 
 export class ScopedTable {
   #scopes = new Map()
+  // the scope schema, read once: each access checks its scope against it
+  #scope
 
   constructor(scopeSchema = {}) {
     this.scopeSchema = scopeSchema
+    this.#scope = parseSchema(scopeSchema)
   }
 
   // The scope as a key, once it's known to fit the scope schema; the same
   // however its fields are ordered.
   #keyOf(scope) {
     try {
-      validate(this.scopeSchema, scope, format)
+      validate(this.#scope, scope, format)
     } catch (error) {
       throw new Error(`Invalid scope:\n${error.message}`)
     }

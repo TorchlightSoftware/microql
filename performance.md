@@ -12,13 +12,13 @@
 ## Current results
 
 <!-- generated:bench-results -->
-Measured 2026-10-09: node v22.13.0, 8 cores, Linux 6.18.49-1-MANJARO. Range of 5 runs, each the median of 7 warm runs after one warm-up, in µs per call.
+Measured 2026-10-18: node v22.13.0, 8 cores, Linux 6.18.49-1-MANJARO. Range of 5 runs, each the median of 7 warm runs after one warm-up, in µs per call.
 
 | Workload | Calls | 0.6.6 | this checkout |
 |---|---|---|---|
-| 200 independent phases | 200 | 25–30 | 55–69 |
-| each over 1000 items | 1000 | 3–4 | 15–18 |
-| chain of 100 steps | 100 | 21–31 | 38–42 |
+| 200 independent phases | 200 | 24–31 | 72–81 |
+| each over 1000 items | 1000 | 3 | 17–23 |
+| chain of 100 steps | 100 | 20–26 | 49–70 |
 <!-- /generated:bench-results -->
 
 ## History
@@ -30,6 +30,18 @@ Measured on 2026-10-09 (node v22.13.0, 8 cores, Linux 6.18), in µs per call, ea
 | 200 independent phases | 200 | 25–30 | 118–137 | 63–81 | 61–66 |
 | `each` over 1000 items | 1000 | 3 | 30–37 | 12–16 | 15–19 |
 | chain of 100 steps | 100 | 20–27 | 148–180 | 48–50 | 37–51 |
+
+Measured on 2026-10-18 (same machine), 5 runs each. By then the benchmark's `add1` declared its target as `['number', {tags: ['target']}]`, since `target` had become a tag, not a type. "Scope schema read once" is the change that made each scoped table parse its scope schema once, not on every access. "Declaration read once" is the change that made compile read each service call's declaration once, however many calls name it.
+
+| Workload | Calls | 1.2.0 | 1.3.0 | scope schema read once | declaration read once |
+|---|---|---|---|---|---|
+| 200 independent phases | 200 | 58–71 | 156–188 | 69–79 | 72–81 |
+| `each` over 1000 items | 1000 | 13–18 | 51–58 | 18–20 | 17–23 |
+| chain of 100 steps | 100 | 154–165 | 208–258 | 163–183 | 49–70 |
+
+**1.3.0 tripled per-call overhead, by reading the scope schema on every service call.** Each scoped table checked its scope with zodly's `validate`, which parses the schema into a fresh zod schema each time, and zod compiles each new schema before its first parse. That was about 40% of the profile. Reading it once per table brings 1.3.0 back to about 1.2.0's numbers: within 15%, the benchmark's noise. What's left of the scope's cost is canonicalizing it, to key the tables and Run States, on each access.
+
+**The chain of 100 steps had been 3–4× slower since 2026-10-09, because each call read its declaration afresh.** Every call site built its own zod schemas from its service's declaration while compiling, and zod compiled each run-time schema on its first and only check. A chain is 100 call sites of one declaration, so it paid that 100 times per Query; the other workloads call a service that declares nothing. Reading a declaration once, shared by every call that names it, brings the chain back to its 2026-10-09 numbers.
 
 **Dropping lodash was about neutral for speed.** lodash's own CPU time was 11.7% of the profile; the helpers that replace it take 4.6%. That saving is within the benchmark's ±15% noise. What it buys is one less dependency, about 70KB less in a Workers bundle, and helpers that do only what core needs.
 
@@ -47,6 +59,7 @@ CPU profile of `npm run bench`, sampled every 50µs. Shares are inclusive (inclu
 
 ## Candidates not yet taken
 
+- **Key the scope once per Query.** Run State and table accesses each canonicalize their scope to key it, about 8% of the `each` profile. Keying by the scope object's identity would skip that, but would go wrong if a platform changed a scope object after using it.
 - **Let `execute` accept the forms `plan()` already computed.** Less pressing now that forms are synchronous and cheap.
 
 Rejected:

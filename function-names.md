@@ -13,28 +13,13 @@ The tables below are generated. Regenerate them with `npm run docs:functions` af
 
 | line | name | kind | lines | refs | 0.6 |
 |---|---|---|---|---|---|
-| 35 | `readJson` | const | 8 | 3 |  |
-| 45 | `filesIn` | const | 8 | 3 |  |
-| 54 | `isExpired` | const | 1 | 1 |  |
-| 57 | `sweep` | function | 8 | 1 |  |
-| 68 | `fileStore` | function | 27 | 2 |  |
-| 69 | `fileOf` | const | 1 | 2 |  |
-| 71 | `ready` | const | 1 | 4 |  |
-| 75 | `get` | property | 4 | — | ✓ |
-| 79 | `set` | property | 5 | — |  |
-| 84 | `list` | property | 5 | — |  |
-| 90 | `clear` | property | 3 | — |  |
-| 98 | `clearingDir` | const | 4 | 2 |  |
-| 100 | `clear` | property | 1 | — |  |
-| 105 | `fileCache` | const | 1 | 1 |  |
-| 109 | `fileRunStates` | const | 1 | 0 |  |
-| 113 | `log` | function | 10 | 1 |  |
-| 129 | `constructor` | method | 6 | — | ✓ |
-| 142 | `withServices` | function | 9 | 3 |  |
-| 154 | `fileConfig` | function | 6 | 1 |  |
-| 161 | `compile` | const | 1 | 0 | ✓ |
-| 163 | `plan` | const | 1 | 0 |  |
-| 169 | `query` | function | 11 | 6 | ✓ |
+| 38 | `log` | function | 10 | 1 |  |
+| 54 | `constructor` | method | 6 | — | ✓ |
+| 67 | `withServices` | function | 9 | 3 |  |
+| 79 | `fileConfig` | function | 6 | 1 |  |
+| 86 | `compile` | const | 1 | 0 | ✓ |
+| 88 | `plan` | const | 1 | 0 |  |
+| 94 | `query` | function | 11 | 6 | ✓ |
 
 ## src/common/common.js
 
@@ -253,6 +238,26 @@ The tables below are generated. Regenerate them with `npm run docs:functions` af
 | 107 | `write` | method | 3 | — |  |
 | 111 | `erase` | method | 3 | — |  |
 
+## src/runtime/file-stores.js
+
+| line | name | kind | lines | refs | 0.6 |
+|---|---|---|---|---|---|
+| 12 | `readJson` | const | 8 | 3 |  |
+| 22 | `filesIn` | const | 8 | 3 |  |
+| 31 | `isExpired` | const | 1 | 1 |  |
+| 34 | `sweep` | function | 8 | 1 |  |
+| 45 | `fileStore` | function | 27 | 2 |  |
+| 46 | `fileOf` | const | 1 | 2 |  |
+| 48 | `ready` | const | 1 | 4 |  |
+| 52 | `get` | property | 4 | — | ✓ |
+| 56 | `set` | property | 5 | — |  |
+| 61 | `list` | property | 5 | — |  |
+| 67 | `clear` | property | 3 | — |  |
+| 75 | `clearingDir` | const | 4 | 2 |  |
+| 77 | `clear` | property | 1 | — |  |
+| 82 | `fileCache` | const | 1 | 1 |  |
+| 86 | `fileRunStates` | const | 1 | 0 |  |
+
 ## src/runtime/runtime.js
 
 | line | name | kind | lines | refs | 0.6 |
@@ -313,13 +318,13 @@ The tables below are generated. Regenerate them with `npm run docs:functions` af
 
 | line | name | kind | lines | refs | 0.6 |
 |---|---|---|---|---|---|
-| 18 | `constructor` | method | 3 | — | ✓ |
-| 24 | `undefined` | method | 8 | — |  |
-| 33 | `get` | method | 3 | — | ✓ |
-| 37 | `set` | method | 5 | — |  |
-| 44 | `list` | method | 3 | — |  |
-| 50 | `remove` | method | 4 | — |  |
-| 57 | `undefined` | method | 11 | — |  |
+| 20 | `constructor` | method | 4 | — | ✓ |
+| 27 | `undefined` | method | 8 | — |  |
+| 36 | `get` | method | 3 | — | ✓ |
+| 40 | `set` | method | 5 | — |  |
+| 47 | `list` | method | 3 | — |  |
+| 53 | `remove` | method | 4 | — |  |
+| 60 | `undefined` | method | 11 | — |  |
 
 ## src/service/define-service.js
 
@@ -401,7 +406,8 @@ The tables below are generated. Regenerate them with `npm run docs:functions` af
 | 95 | `checkTags` | function | 4 | 1 |  |
 | 100 | `tagged` | const | 1 | 2 |  |
 | 103 | `atRunTime` | function | 4 | 2 |  |
-| 112 | `readDeclaration` | function | 17 | 2 |  |
+| 109 | `read` | function | 17 | 1 |  |
+| 136 | `readDeclaration` | function | 4 | 2 |  |
 
 ## src/types/plan.js
 
