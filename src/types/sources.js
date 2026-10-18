@@ -25,8 +25,8 @@
  * zodly's `parse`, for an operand written in zodly.
  */
 
-import {isPlainObject} from './common.js'
-import {isReference} from './reference.js'
+import {isPlainObject} from '../common/common.js'
+import {isReference} from '../query/reference.js'
 import {any, elementOf, fieldValueOf, literalTypeOf, schemaOfDescriptor, pick, merge, difference} from './types.js'
 
 const refuse = (kind, takes) => {

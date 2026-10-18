@@ -1,8 +1,8 @@
 # MicroQL Service Development Guide
 
-This guide is the spec for MicroQL services: what core asks of a service, how a service declares the calls it supports, and how to write one. `util`, MicroQL's builtin service, is the reference implementation ([services/util.js](../services/util.js)).
+This guide is the spec for MicroQL services: what core asks of a service, how a service declares the calls it supports, and how to write one. `util`, MicroQL's builtin service, is the reference implementation ([src/service/util.js](../src/service/util.js)).
 
-Most service definitions will be wrappers around existing APIs clients: REST, gRPC, SOAP, etc.  Some services will have direct, local implementations, such as `services/util.js`.  In addition to the traditional request/response lifecycle supported by most APIs, services can also support flow control like iterating lists, performing conditional logic, and error handling.  Read on to see what type of service is most relevant for your present task.
+Most service definitions will be wrappers around existing APIs clients: REST, gRPC, SOAP, etc.  Some services will have direct, local implementations, such as `src/service/util.js`.  In addition to the traditional request/response lifecycle supported by most APIs, services can also support flow control like iterating lists, performing conditional logic, and error handling.  Read on to see what type of service is most relevant for your present task.
 
 ## Table of Contents
 
@@ -23,7 +23,7 @@ A service's primary function is to answer **service calls**.  Service calls are 
 A service key has the format `METHOD [service]/resource`, and MicroQL hands a service every field of the key ([Service keys](#service-keys)):
 
 - `method`: the key's method (`GET`, `POST`, `QUERY`...), or `null` when the key has none.
-- `service`: the name the present Query gives the service. It is the Query's choice, so the same service may answer under different names in different Queries; a service uses it to name the key in its messages.
+- `service`: the name the service is registered under in its runtime, which the key names. One service may be registered under several names, such as two accounts each with its own config; a service uses it to name the key in its messages.
 - `resource`: the resource the key names, such as `/orders`.
 - `confined`: whether the key is written `[@service]`, confining the call's data to the caller's own custody ([Confined keys](#confined-keys)).
 
@@ -33,11 +33,11 @@ In order to be recognized by MicroQL, a service must be presented as an object t
 
 - **`supportedCalls()`** returns every service call the service supports, each as its `resource` and `method` with its declaration. This allows a catalog (autocomplete, et al.) to list what the service offers. A service with no listable calls (maybe they're dynamic or something) must return `[]`. Core never calls it.
 
-- **`init(runtime)`** returns an **instance** of the service for a runtime ([init and tearDown](#init-and-teardown)). The instance offers:
+- **`init(env)`** returns an **instance** of the service, made with what its runtime gives it ([init and tearDown](#init-and-teardown)). The instance offers:
   - **`call({method, service, resource, confined, fields})`**: during execution MicroQL calls it with the key's fields and the call's resolved `fields`, and it returns the result. It throws an error for a key it has no entry for, saying why. The service is responsible for efficient lookup and calling.
   - **`tearDown()`**, optionally: releases what the instance holds.
 
-`lookup` and `supportedCalls` belong to the service, not to an instance, because compiling a Query and planning it need no runtime: they read declarations, and never make a call.
+`lookup` and `supportedCalls` belong to the service, not to an instance, because compiling a Query and planning it need no instance: they read declarations, and never make a call.
 
 A service call's **declaration** is:
 
@@ -47,7 +47,7 @@ A service call's **declaration** is:
 | `input` | its input fields by path, each a zodly type with its tags ([Declarations](#declarations)) |
 | `output` | the zodly type of what it returns |
 
-Every field is optional: a service call that declares nothing (`{}`) takes any fields and returns any value. A service may also list in `requires` the runtime keys its instances use ([init and tearDown](#init-and-teardown)), and declare in `config` the configuration it reads ([Configuration](#configuration)).
+Every field is optional: a service call that declares nothing (`{}`) takes any fields and returns any value. A service may also list in `requires` the `env` keys its instances use ([init and tearDown](#init-and-teardown)), and declare in `config` the configuration it reads ([Configuration](#configuration)).
 
 **Core never reads or cares where a declaration came from.** A service may be written by hand, read from an OpenAPI document, an MCP server's tool list or a protobuf file, or generated from route definitions. Its implementation turns that into declarations whose types are zodly descriptors or zod schemas. A service that discovers its calls asynchronously (fetching a spec, connecting to a server) does so before the Query is compiled, so that `lookup` can answer synchronously.
 
@@ -204,8 +204,8 @@ A service that declares nothing about what its call fields receive gets `any`.  
 
 A service has one lifecycle function, and its instances may have another:
 
-- **`init(runtime)`** makes an instance of the service for a runtime. It may be async, to log in or open a connection say: core waits for every instance a Run uses before the Run's first call. Core never keeps instances: before a Run, it asks the runtime for instances of the services the Run uses (`runtime.init(services)`), and the runtime decides when to call `init`: once per service, per tenant, or however it keys them ([Runtime Integration § Services](runtime-integration.md#services)). Through `init`, an instance receives the runtime's capabilities: `log` and `cache`, `config`, and whatever more the runtime offers. A service that writes output should use these rather than reaching for the environment itself (the file system, stdout), so it runs wherever MicroQL does. A service lists the runtime keys it uses in `requires`; a Run on a runtime without one of them fails before it starts ([Runtime Integration § Capabilities beyond the standard](runtime-integration.md#capabilities-beyond-the-standard)).
-- **`tearDown()`**, on an instance, releases what it holds (a browser context, a connection pool). Core MicroQL never calls it; the runtime that made the instance does, when it is done with it: a server shutting down, a test's `after()` (`nodeRuntime.tearDown()`, see [Runtime Integration § Services](runtime-integration.md#services)). Typically a process that's exiting anyway doesn't need to call this explicitly. It should do no harm when called twice.
+- **`init(env)`** makes an instance of the service. It may be async, to log in or open a connection say: a Run waits for it before the service's first call. Core never keeps instances: it makes every call through its runtime, which makes an instance of a service on its first call in a scope (a tenant, say) and keeps it for every later Run there ([Runtime Integration § Service instances](runtime-integration.md#service-instances)). `env` is what the runtime gives its services: `log`, whatever more the runtime offers, and `config`, the service's own configuration ([Configuration](#configuration)). A service that writes output should use these rather than reaching for the environment itself (the file system, stdout), so it runs wherever MicroQL does. A service lists the `env` keys it uses in `requires`; a Query naming it doesn't compile on a runtime without them ([Runtime Integration § Capabilities beyond the standard](runtime-integration.md#capabilities-beyond-the-standard)).
+- **`tearDown()`**, on an instance, releases what it holds (a browser context, a connection pool). Core MicroQL never calls it; the runtime that made the instance does, when it is done with it: a server shutting down, a test's `after()` (`nodeRuntime.tearDown()`), new config for the service. Typically a process that's exiting anyway doesn't need to call this explicitly. It should do no harm when called twice.
 
 With `defineService`, `init` and `tearDown` in the definition run with the instance as `this`: an object of the instance's own, which inherits from the definition. So an instance can keep what `init` gave it, apart from every other instance:
 
@@ -214,13 +214,13 @@ import {defineService, format} from 'microql'
 
 const reporter = defineService({
   requires: ['log'],
-  init(runtime) {
-    this.runtime = runtime
+  init(env) {
+    this.env = env
   },
   '/report': {
     input: {on: ['any', 'optional', {tags: ['target']}]},
     async call({on}) {
-      await this.runtime.log(format(on), {color: 'cyan'})
+      await this.env.log(format(on), {color: 'cyan'})
       return on
     }
   },
@@ -230,26 +230,26 @@ const reporter = defineService({
 })
 ```
 
-**An instance belongs to the runtime it was made for.** A runtime scoped to a tenant makes instances of its own, so what an instance holds (a token, a browser context) is that tenant's. Several Runs may use one instance at once, so an instance keeps what `init` gave it and what its calls share by design (a connection pool, a client), never anything about the Run it's serving.
+**An instance belongs to one scope.** A runtime keeps an instance of each service per scope, such as a tenant, and makes it with that scope's config, so what an instance holds (a token, a browser context) is that tenant's. Several Runs may use one instance at once, so an instance keeps what `init` gave it and what its calls share by design (a connection pool, a client), never anything about the Run it's serving.
 
 **Keep nothing in module scope or on the definition.** Two instances share the definition and the module, and with them anything stored there, so that is how one tenant's data reaches another's instance. Store on `this`, which is the instance's own, and beware of mutating objects `this` inherits from the definition.
 
-**Authentication is the service's business.** A service may read credentials from its configuration (received through `init`), run an OAuth flow in `init`, or authenticate on its first call; core neither knows nor cares.
+**Authentication is the service's business.** A service may read credentials from its configuration (received through `init`), exchange a refresh token its runtime filed for it ([OAuth](#oauth)), or authenticate on its first call; core neither knows nor cares. A token an instance keeps on `this` is its scope's own.
 
 ## Configuration
 
-A service that needs configuration, such as a base URL or an API key, declares it in `config`, a zodly document of the keys it reads, and reads them from `runtime.config` in `init`. The platform files each service's configuration under the service's name, scoped to the tenant the runtime serves, and an instance's `runtime.config` is only what's filed under its name. So a service declares its keys plainly (`token`), never sees another service's configuration, and never knows which tenant it is configured for. One service under two names, such as two accounts, gets two instances, each with its own configuration.
+A service that needs configuration, such as a base URL or an API key, declares it in `config`, a zodly document of the keys it reads, and reads them from `env.config` in `init`. Its runtime keeps each service's configuration by scope and name, and checks it against the service's config declaration as it's filed, so an instance is only ever made with config its service accepts. A service declares its keys plainly (`token`), never sees another service's configuration, and never knows which tenant it is configured for. One service under two names, such as two accounts, gets two instances, each with its own configuration. A service that declares config, with none filed, fails its first call with `invalid-config`.
 
-Before a Run starts, MicroQL checks the configuration filed under each service's name against the service's config declaration: a runtime with no `config` fails with `missing-capability`, and configuration the declaration doesn't accept, or none under the service's name, fails with `invalid-config`, naming the service and what was wrong. So a missing credential is reported up front, not by a call halfway through the Run.
+In node, a Query brings its services and their configuration, by service name:
 
 ```javascript
-import query, {defineService, nodeRuntime} from 'microql'
+import query, {defineService} from 'microql'
 
 const github = defineService({
   config: {token: ['string', {min: 1}]},
-  init(runtime) {
+  init(env) {
     this.baseUrl = 'https://api.github.com'
-    this.token = runtime.config.token
+    this.token = env.config.token
   },
   async '/get'({endpoint, params}) {
     const url = new URL(endpoint, this.baseUrl)
@@ -260,16 +260,34 @@ const github = defineService({
   }
 })
 
-// a node script files each service's config under its name, on its runtime
-const runtime = {
-  ...nodeRuntime,
+await query({
+  services: {github, githubWork: github},
   config: {
     github: {token: process.env.GITHUB_TOKEN},
     githubWork: {token: process.env.GITHUB_WORK_TOKEN}
-  }
-}
-await query({runtime, services: {github, githubWork: github}, phases: {...}})
+  },
+  phases: {...}
+})
 ```
+
+Configuration the declaration doesn't accept fails the Query before any call, with `invalid-config`, naming the service and what was wrong. A platform files configuration with its runtime's `config.set(scope, name, value)`, which checks it the same way ([Runtime Integration § Config](runtime-integration.md#config)).
+
+### OAuth
+
+A service whose API uses OAuth declares an `oauth` type in its config, with the provider's details, and leaves the protocol to its runtime:
+
+```javascript
+const github = defineService({
+  config: {github: ['oauth', {authorizeUrl: 'https://github.com/login/oauth/authorize', tokenUrl: 'https://github.com/login/oauth/access_token', scopes: ['repo']}]},
+  async init(env) {
+    const {clientId, clientSecret, refreshToken} = env.config.github
+    this.token = await exchange({clientId, clientSecret, refreshToken})
+  },
+  async '/repos'() { /* ... */ }
+})
+```
+
+`oauth` reads as an object of what the runtime files once it has run the consent flow: `clientId`, `clientSecret` and `refreshToken`, each optional, since none is there before the flow has run, and each for the runtime to fill, not for a person to edit. `init` exchanges the refresh token for an access token, and keeps it on `this`. In node, where no platform runs a consent flow, log in before running the Query and pass what you got as config.
 
 ## Error handling
 
@@ -289,28 +307,28 @@ A Query author can catch the error, or can let it terminate the query.  `catch` 
 
 ## Testing services
 
-MicroQL ships smoke tests for services: `serviceSmokeTests(service, {runtime, config})` checks that a service keeps its side of this spec, without knowing its calls. It returns a table of tests, `[{describe, it, test}]`, where `test` is an async function that throws when the service fails it, so you can run them in whichever test runner you use. Run them from your service's own tests, and when you take up a newer MicroQL, its smoke tests check your service against the newer spec.
+MicroQL ships smoke tests for services: `serviceSmokeTests(service, {env, config})` checks that a service keeps its side of this spec, without knowing its calls. It returns a table of tests, `[{describe, it, test}]`, where `test` is an async function that throws when the service fails it, so you can run them in whichever test runner you use. Run them from your service's own tests, and when you take up a newer MicroQL, its smoke tests check your service against the newer spec.
 
-- `runtime` holds the capabilities your service's `init` receives. It must have every key your service `requires`.
+- `env` holds what a runtime gives your service's `init`. It must have every key your service `requires`.
 - `config` is your service's own configuration and credentials, as its config declaration describes them.
 - `confined: true` checks a service that answers only [confined keys](#confined-keys).
 
 ```javascript
 import {describe, it} from 'node:test'
-import {serviceSmokeTests, memoryStore, serviceRegistry} from 'microql'
+import {serviceSmokeTests} from 'microql'
 import orders from '../orders.js'
 
-const runtime = {log() {}, cache: memoryStore(), ...serviceRegistry()}
+const env = {log() {}}
 const config = {apiKey: process.env.ORDERS_API_KEY}
 
-for (const {describe: name, it: check, test} of serviceSmokeTests(orders, {runtime, config})) {
+for (const {describe: name, it: check, test} of serviceSmokeTests(orders, {env, config})) {
   describe(name, () => it(check, test))
 }
 ```
 
 They check that:
 
-- the service has `lookup`, `supportedCalls` and `init`, the runtime has every key it `requires`, and its config declaration accepts `config`, as a Run checks them;
+- the service has `lookup`, `supportedCalls` and `init`, `env` has every key it `requires`, and its config declaration accepts `config`, as a runtime checks them;
 - `supportedCalls()` lists each call by `resource` and `method`, with no functions;
 - `lookup` answers each listed call with its declaration, and the declaration reads;
 - `lookup` refuses a resource the service lacks, and a key whose custody it doesn't answer;
@@ -340,14 +358,15 @@ describe('orders', () => {
 })
 ```
 
-To test against a runtime of your own, capturing output or keeping the cache in memory, pass it as `runtime`. A runtime makes the instances of the services a Run uses, which `serviceRegistry()` does for you:
+To test against a runtime of your own, capturing output or keeping the cache in memory, pass it as `runtime`. A `NodeRuntime` of the test's own keeps its own instances, too:
 
 ```javascript
-import query, {memoryStore, serviceRegistry} from 'microql'
+import query, {NodeRuntime, memoryCache} from 'microql'
 
 const logged = []
-const runtime = {log: (text, {to} = {}) => logged.push({text, to}), cache: memoryStore(), ...serviceRegistry()}
-await query({runtime, phases: {...}})
+const runtime = new NodeRuntime({cache: memoryCache()})
+runtime.env = {log: (text, {to} = {}) => logged.push({text, to})}
+await query({runtime, services: {orders}, phases: {...}})
 ```
 
 ## Best practices

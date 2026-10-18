@@ -1,7 +1,7 @@
 import assert from 'node:assert'
 import {afterEach, beforeEach, describe, it} from 'node:test'
 import query from '../index.js'
-import util from '../services/util.js'
+import util from '../src/service/util.js'
 
 describe('Settings Override Tests', () => {
   let originalWrite

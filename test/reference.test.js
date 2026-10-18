@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import {parseReference, isReference, resolveReference, mapReferences} from '../reference.js'
+import {parseReference, isReference, resolveReference, mapReferences} from '../src/query/reference.js'
 
 describe('Reference grammar', () => {
   // [string, parsed reference]

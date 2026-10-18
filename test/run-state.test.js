@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import query, {memoryStore, nodeRuntime, plan, defineService} from '../index.js'
+import query, {memoryCache, NodeRuntime, plan, defineService} from '../index.js'
+import {ownRun} from './test-services.js'
 
 // A service that counts its calls by input, and fails the inputs it's told to.
 const counting = (failing = new Set()) => {
@@ -27,24 +28,24 @@ const listingsQuery = (service) => ({
 
 describe('Run State', () => {
   it('resumes an interrupted Run without running any call twice', async () => {
-    const runState = memoryStore()
+    const run = ownRun()
     const interrupted = new Set([3])
     const service = counting(interrupted)
 
-    await assert.rejects(query(listingsQuery(service), {runState}), /interrupted at 3/)
+    await assert.rejects(query(listingsQuery(service), {runId: run.id}), /interrupted at 3/)
     assert.deepEqual(service.calls, {1: 1, 2: 1, 3: 1})
 
     interrupted.clear()
-    const result = await query(listingsQuery(service), {runState})
+    const result = await query(listingsQuery(service), {runId: run.id})
     assert.deepEqual(result, [{id: 1}, {id: 2}, {id: 3}])
     assert.deepEqual(service.calls, {1: 1, 2: 1, 3: 2}, 'only the failed call runs again')
   })
 
   it('reuses every result on a completed Run State', async () => {
-    const runState = memoryStore()
+    const run = ownRun()
     const service = counting()
-    await query(listingsQuery(service), {runState})
-    await query(listingsQuery(service), {runState})
+    await query(listingsQuery(service), {runId: run.id})
+    await query(listingsQuery(service), {runId: run.id})
     assert.deepEqual(service.calls, {1: 1, 2: 1, 3: 1})
   })
 
@@ -56,13 +57,13 @@ describe('Run State', () => {
   })
 
   it('stores each result by form hash, per item by input', async () => {
-    const runState = memoryStore()
+    const run = ownRun()
     const query1 = listingsQuery(counting(new Set([2])))
-    await assert.rejects(query(query1, {runState}))
+    await assert.rejects(query(query1, {runId: run.id}))
 
     const {calls} = plan(query1)
     const inner = calls.find(call => call.address === '$fetched.@1a1')
-    const entries = await runState.list(inner.formHash)
+    const entries = await run.list(inner.formHash)
 
     const byId = Object.fromEntries(entries.map(entry => [entry.inputs.id, entry]))
     assert.equal(entries.length, 3, 'one entry per item')
@@ -85,15 +86,15 @@ describe('Run State', () => {
         return 'slow'
       }
     })
-    const runState = memoryStore()
+    const run = ownRun()
     const config = {services: {service}, phases: {a: ['[service]/fast', {}], b: ['[service]/slow', {}]}}
 
-    await assert.rejects(query(config, {runState}), /fast failure/)
+    await assert.rejects(query(config, {runId: run.id}), /fast failure/)
     events.push('reported')
     assert.deepEqual(events, ['slow finished', 'reported'])
 
     const {calls} = plan(config)
-    const [entry] = await runState.list(calls.find(c => c.address === '$b.@1').formHash)
+    const [entry] = await run.list(calls.find(c => c.address === '$b.@1').formHash)
     assert.equal(entry.status, 'done')
   })
 
@@ -119,7 +120,7 @@ describe('Cache', () => {
   })
 
   it('reuses a result across Runs only when the inputs match', async () => {
-    const runtime = {...nodeRuntime, cache: memoryStore()}
+    const runtime = new NodeRuntime({cache: memoryCache()})
     const service = counting()
     await query({...cachedQuery(service, 1), runtime})
     await query({...cachedQuery(service, 1), runtime})
@@ -130,8 +131,8 @@ describe('Cache', () => {
   // Ages a call's only cache entry by some days.
   const age = async (cache, config, days) => {
     const {calls: [call]} = plan(config)
-    const [entry] = await cache.list(call.formHash)
-    await cache.set(call.formHash, entry.input, {...entry, created: new Date(Date.now() - days * 86400000).toISOString()})
+    const [entry] = await cache.list({}, call.formHash)
+    await cache.set({}, call.formHash, entry.input, {...entry, created: new Date(Date.now() - days * 86400000).toISOString()})
     return entry
   }
 
@@ -145,9 +146,9 @@ describe('Cache', () => {
 
   for (const [cache, settings, days, reused] of ttls) {
     it(`${reused ? 'reuses' : 'misses'} a ${days}-day-old entry for cache: ${JSON.stringify(cache)} with settings ${JSON.stringify(settings)}`, async () => {
-      const store = memoryStore()
+      const store = memoryCache()
       const service = counting()
-      const config = {...cachedQuery(service, 1, cache), settings, runtime: {...nodeRuntime, cache: store}}
+      const config = {...cachedQuery(service, 1, cache), settings, runtime: new NodeRuntime({cache: store})}
 
       await query(config)
       await age(store, config, days)
@@ -157,25 +158,25 @@ describe('Cache', () => {
   }
 
   it('records when each entry expires', async () => {
-    const store = memoryStore()
-    const config = {...cachedQuery(counting(), 1, {ttl: '2h'}), runtime: {...nodeRuntime, cache: store}}
+    const store = memoryCache()
+    const config = {...cachedQuery(counting(), 1, {ttl: '2h'}), runtime: new NodeRuntime({cache: store})}
     await query(config)
 
     const {calls: [call]} = plan(config)
-    const [entry] = await store.list(call.formHash)
+    const [entry] = await store.list({}, call.formHash)
     assert.equal(Date.parse(entry.expires) - Date.parse(entry.created), 2 * 3600000)
   })
 
   it('misses an entry older than its ttl', async () => {
-    const cache = memoryStore()
-    const runtime = {...nodeRuntime, cache}
+    const cache = memoryCache()
+    const runtime = new NodeRuntime({cache})
     const service = counting()
     const config = {...cachedQuery(service, 1, {ttl: '1h'}), runtime}
 
     await query(config)
     const {calls: [call]} = plan(config)
-    const [entry] = await cache.list(call.formHash)
-    await cache.set(call.formHash, entry.input, {...entry, created: new Date(Date.now() - 2 * 3600000).toISOString()})
+    const [entry] = await cache.list({}, call.formHash)
+    await cache.set({}, call.formHash, entry.input, {...entry, created: new Date(Date.now() - 2 * 3600000).toISOString()})
 
     await query(config)
     assert.deepEqual(service.calls, {1: 2})
@@ -216,11 +217,11 @@ describe('the input of a call that holds calls', () => {
   }
 
   it('misses its Cache entry when a phase the calls it holds read has changed', async () => {
-    const cache = memoryStore()
+    const cache = memoryCache()
     const config = (label) => ({
       given: {label},
       services,
-      runtime: {...nodeRuntime, cache},
+      runtime: new NodeRuntime({cache}),
       phases: {
         label: ['[util]/template', {text: '$given.label'}],
         grid: ['[util]/each', {on: [1], cache: true, service: ['[pair]/of', {x: '$label.text', y: '@'}]}]
@@ -232,11 +233,11 @@ describe('the input of a call that holds calls', () => {
   })
 
   it('records what it read in its Run State entry; a call reading nothing outside keeps its fields\' hash', async () => {
-    const runState = memoryStore()
+    const run = ownRun()
     const config = {given: {xs: ['a']}, services, phases: {grid: ['$given.xs', '[util]/each', {as: 'x', service: ['[util]/try', {service: ['[pair]/of', {x: '@x', y: 0}]}]}]}}
-    await query(config, {runState})
+    await query(config, {runId: run.id})
     const {calls} = plan(config)
-    const entryAt = async (address) => (await runState.list(calls.find(c => c.address === address).formHash))[0]
+    const entryAt = async (address) => (await run.list(calls.find(c => c.address === address).formHash))[0]
 
     assert.deepEqual((await entryAt('$grid.@1a1')).reads, {'@x': 'a'})
     assert.equal((await entryAt('$grid.@1')).reads, undefined)

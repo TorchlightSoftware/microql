@@ -92,7 +92,7 @@ The error names which validation failed. A schema that can't be parsed fails bef
 
 ## Examples
 
-Here are some examples.  You can find more in the [util service](../services/util.js).
+Here are some examples.  You can find more in the [util service](../src/service/util.js).
 
 ### Basic String Validation
 

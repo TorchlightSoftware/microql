@@ -1,13 +1,13 @@
 {
   "name": "microql",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "A query language for composing microservices.",
   "type": "module",
   "main": "index.js",
   "files": [
     "*.js",
     "!eslint.config.js",
-    "services/",
+    "src/",
     "docs/"
   ],
   "exports": {

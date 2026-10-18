@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import query, {defineService, nodeRuntime} from '../index.js'
+import query, {defineService, NodeRuntime} from '../index.js'
 
 // tearDown belongs to the runtime that keeps a service's instances: a Run
 // never calls it.
@@ -17,7 +17,7 @@ describe('tearDown', () => {
   }
 
   // A runtime of its own, keeping its own instances, as a test would use.
-  const ownRuntime = () => ({...nodeRuntime})
+  const ownRuntime = () => new NodeRuntime()
 
   // [description, phases, whether the Run fails]
   const runs = [

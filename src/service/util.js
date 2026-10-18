@@ -2,16 +2,16 @@
  * @fileoverview Utility service for common data transformations in MicroQL.
  * Resources are addressed by service keys with no method: `[util]/each`.
  *
- * `inspect` and `log` reach the outside world through the runtime's `log`,
- * which the runtime hands to each instance of the service at init. Both return what they were
- * given, so they sit anywhere in a chain.
+ * `inspect` and `log` reach the outside world through env's `log`, which the
+ * runtime hands each instance of the service at init. Both return what they
+ * were given, so they sit anywhere in a chain.
  */
 
-import {isPlainObject, mapValues, pick} from '../common.js'
-import {canonical} from '../forms.js'
-import {defineService} from '../define-service.js'
-import {format} from '../format.js'
-import {isErrorData, fromErrorData} from '../errors.js'
+import {isPlainObject, mapValues, pick} from '../common/common.js'
+import {canonical} from '../query/forms.js'
+import {defineService} from './define-service.js'
+import {format} from '../common/format.js'
+import {isErrorData, fromErrorData} from '../execute/errors.js'
 import {parseSchema} from '@tlsft/zodly'
 
 // A copy of plain data: arrays and plain objects are rebuilt, everything else
@@ -73,9 +73,9 @@ const RETIRED = {
 const serviceDefinition = {
   requires: ['log'],
 
-  // Keeps the runtime this instance was made for.
-  init(runtime) {
-    this.runtime = runtime
+  // Keeps the env this instance was made with.
+  init(env) {
+    this.env = env
   },
 
   '/each': {
@@ -217,7 +217,7 @@ const serviceDefinition = {
     output: ['type', {fromField: 'on'}],
     async call({on, settings, color, to}) {
       const timestamp = settings?.ts ? `[${new Date().toISOString()}] ` : ''
-      await this.runtime.log(timestamp + format(on, settings?.inspect), {color, to})
+      await this.env.log(timestamp + format(on, settings?.inspect), {color, to})
       return on
     }
   },
@@ -227,7 +227,7 @@ const serviceDefinition = {
     input: {on: ['any', 'optional', {tags: ['target']}], to: ['string', {min: 1}, 'optional']},
     output: ['type', {fromField: 'on'}],
     async call({on, to}) {
-      await this.runtime.log(format(on), {to})
+      await this.env.log(format(on), {to})
       return on
     }
   },

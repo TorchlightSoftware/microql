@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import {concurrencyLimit} from '../concurrency.js'
+import {concurrencyLimit} from '../src/execute/concurrency.js'
 
 describe('concurrencyLimit', () => {
   // [cap, number of calls]

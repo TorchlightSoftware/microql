@@ -1,7 +1,7 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
 import query from '../index.js'
-import util from '../services/util.js'
+import util from '../src/service/util.js'
 import {math, test, data} from './test-services.js'
 
 describe('Circular Dependency Detection Tests', () => {

@@ -4,22 +4,23 @@
  * Core asks a service three things. `lookup(key)` gives the declaration of
  * the service call a key names, and throws for a key the service refuses (a
  * resource it lacks, a method it doesn't take). `supportedCalls()` lists every
- * call it supports, for a builder to list. `init(runtime)` makes an instance
- * of the service for a runtime, whose `call({...key, fields})` makes a service
- * call and whose `tearDown()` releases what it holds. A key is
+ * call it supports, for a builder to list. `init(env)` makes an instance of
+ * the service with what its runtime gives it, whose `call({...key, fields})`
+ * makes a service call and whose `tearDown()` releases what it holds. A key is
  * {method, service, resource, confined}, as @tlsft/service-key parses it.
  *
  * A service definition is the plainest way to answer them: resources ('/each')
  * map to a service call, or to one service call per method ({GET, POST}). A
  * service call is {description, input, output, call} (see declaration.js), or
  * just its call when it declares nothing. `init` and `tearDown` in the
- * definition are an instance's lifecycle, `requires` lists the runtime keys
- * it uses, `config` declares the runtime.config it reads (a zodly document), and `confined: true` says it answers only confined keys
- * (`[@service]`), where a service that isn't answers none.
+ * definition are an instance's lifecycle, `requires` lists the env keys it
+ * uses, `config` declares the env.config it reads (a zodly document), and
+ * `confined: true` says it answers only confined keys (`[@service]`), where a
+ * service that isn't answers none.
  *
  * Service calls and hooks run with the instance as `this`: an object of its
- * own that inherits from the definition, so an instance keeps the runtime it
- * was made with, apart from every other instance.
+ * own that inherits from the definition, so an instance keeps the env it was
+ * made with, apart from every other instance.
  */
 
 const isServiceCall = (entry) => typeof entry === 'function' || typeof entry?.call === 'function'
@@ -75,10 +76,10 @@ export function defineService(serviceDefinition) {
   const supportedCalls = () => [...resources].flatMap(([resource, byMethod]) =>
     [...byMethod].map(([method, {declaration}]) => ({method, resource, ...declaration})))
 
-  // An instance for a runtime: its own `this`, set up by the definition's init.
-  async function init(runtime) {
+  // An instance: its own `this`, set up by the definition's init with env.
+  async function init(env) {
     const self = Object.create(serviceDefinition)
-    await serviceDefinition.init?.call(self, runtime)
+    await serviceDefinition.init?.call(self, env)
     return {
       call: async ({fields, ...key}) => serviceCallAt(key).call.call(self, fields),
       ...(serviceDefinition.tearDown && {tearDown: () => serviceDefinition.tearDown.call(self)})

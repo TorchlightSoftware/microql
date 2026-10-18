@@ -1,7 +1,7 @@
 import assert from 'node:assert'
 import {describe, it, beforeEach, afterEach} from 'node:test'
 import query, {plan, defineService} from '../index.js'
-import util from '../services/util.js'
+import util from '../src/service/util.js'
 import {ANSI_COLORS} from '../index.js'
 
 // A key to util, as core hands it to the service.

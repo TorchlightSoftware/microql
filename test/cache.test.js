@@ -1,11 +1,12 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query, {nodeRuntime, fileStore, defineService} from '../index.js'
+import query, {NodeRuntime, fileCache, defineService} from '../index.js'
+import {hashOf} from '../src/query/forms.js'
 import {readdir, rm} from 'fs/promises'
 
 const CACHEDIR = '.cache-test-cache'
 // the node runtime with its Cache kept in a test directory
-const runtime = {...nodeRuntime, cache: fileStore(CACHEDIR)}
+const runtime = new NodeRuntime({cache: fileCache(CACHEDIR)})
 
 describe('Cache Tests', () => {
   // Clean up cache before tests
@@ -134,12 +135,15 @@ describe('Cache Tests', () => {
         select: '$result'
       })
 
-      // One directory per form, one file per input
-      const formDirs = await readdir(CACHEDIR)
+      // One directory per scope, one per form within it, one file per input
+      const scopeDirs = await readdir(CACHEDIR)
+      assert.deepStrictEqual(scopeDirs, [hashOf({})], 'The node runtime\'s one scope has one directory, named by its hash')
+
+      const formDirs = await readdir(`${CACHEDIR}/${scopeDirs[0]}`)
       assert.strictEqual(formDirs.length, 1, 'Should have one form directory')
       assert.match(formDirs[0], /^[0-9a-f]{64}$/, 'Form directory is named by form hash')
 
-      const cacheFiles = await readdir(`${CACHEDIR}/${formDirs[0]}`)
+      const cacheFiles = await readdir(`${CACHEDIR}/${scopeDirs[0]}/${formDirs[0]}`)
       assert(cacheFiles.length === 1, 'Should have one cache file')
       assert.match(cacheFiles[0], /^[0-9a-f]{64}\.json$/, 'Cache file is named by input hash')
     })

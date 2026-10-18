@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
 import query, {plan, defineService} from '../index.js'
-import {describeSchema} from '../types.js'
+import {describeSchema} from '../src/types/types.js'
 
 const acme = {'@type': 'Organization', '@id': 'https://acme.example/#org', name: 'Acme Fabrication'}
 const bolt = {'@type': 'LocalBusiness', '@id': 'https://bolt.example/#org', name: 'Bolt Works'}

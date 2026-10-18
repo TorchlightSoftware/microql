@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import {plan, addressToPath, pathToAddress, defineService} from '../core.js'
-import {describeSchema, receivedBy} from '../types.js'
+import {plan, addressToPath, pathToAddress, defineService} from '../index.js'
+import {describeSchema, receivedBy} from '../src/types/types.js'
 
 // A service whose resource takes two calls, to exercise field lettering.
 const branch = defineService({

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
 import {z} from 'zod'
-import {any, isAny, widenedTypeOf, schemaAtPath, elementOf, fieldValueOf, compare, describeSchema, union, difference, literalTypeOf, isLiteral, valueOfLiteral, schemaOfDescriptor, pick, merge} from '../types.js'
-import {errorSchema} from '../errors.js'
+import {any, isAny, widenedTypeOf, schemaAtPath, elementOf, fieldValueOf, compare, describeSchema, union, difference, literalTypeOf, isLiteral, valueOfLiteral, schemaOfDescriptor, pick, merge} from '../src/types/types.js'
+import {errorSchema} from '../src/execute/errors.js'
 
 describe('describeSchema', () => {
   // [schema, description]

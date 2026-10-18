@@ -2,8 +2,17 @@
  * Shared test services for MicroQL tests
  */
 
-import {defineService} from '../define-service.js'
-import {mapValues} from '../common.js'
+import {randomUUID} from 'node:crypto'
+import {defineService} from '../src/service/define-service.js'
+import {nodeRuntime} from '../index.js'
+import {mapValues} from '../src/common/common.js'
+
+// A Run of a test's own on the node runtime: its id, to run or resume it
+// with, and its Run State's entries for a form.
+export const ownRun = () => {
+  const id = randomUUID()
+  return {id, list: (form) => nodeRuntime.runStates.list({}, id, form)}
+}
 
 // Services by name, each written as a table of service calls.
 export const servicesFromTables = (tables) => mapValues(tables, defineService)

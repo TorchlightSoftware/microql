@@ -3,7 +3,7 @@
  *
  * Each wrapper takes the next step, plus the call and Run it is built for,
  * and returns a step of the same shape, `(args, invocation) => result`, where
- * an invocation is {call, scope, run}. A pipeline is built once per call per
+ * an invocation is {call, context, run}. A pipeline is built once per call per
  * Run, so what depends only on the call is worked out then, not per execution.
  * They are applied in canonical order, outermost first:
  *
@@ -22,11 +22,11 @@
  * fit — while a precheck failure isn't, since no attempt changes the arguments.
  */
 
-import {mapReferences, parseReference, resolveReference, resolveRead} from './reference.js'
-import {VALIDATION_NAMES, getServiceColorName, mapValues, defaults, setPaths} from './common.js'
-import {hashOf} from './forms.js'
+import {mapReferences, parseReference, resolveReference, resolveRead} from '../query/reference.js'
+import {VALIDATION_NAMES, getServiceColorName, mapValues, defaults, setPaths} from '../common/common.js'
+import {hashOf} from '../query/forms.js'
 import {validate} from '@tlsft/zodly'
-import {format} from './format.js'
+import {format} from '../common/format.js'
 import {toErrorData} from './errors.js'
 
 
@@ -35,15 +35,15 @@ const labelOf = (call) => `[${call.address} - ${call.key}]`
 
 // Arguments with every reference replaced by its value; a reference that
 // names nothing resolves to undefined.
-export const resolveArgs = (value, scope, nodes) =>
-  mapReferences(value, text => resolveReference(parseReference(text), scope, nodes))
+export const resolveArgs = (value, context, nodes) =>
+  mapReferences(value, text => resolveReference(parseReference(text), context, nodes))
 
 // What a catch makes of a failure: the handler's result, given the failure as
 // error data, and the item whose call failed, if any. Without a handler, or
 // once the Run is aborted, the failure stands.
-export const catchWith = (handler, scope, run, item) => (error) => {
+export const catchWith = (handler, context, run, item) => (error) => {
   if (!handler || run.signal?.aborted) throw error
-  return run.runPosition(handler, scope, toErrorData(error), item)
+  return run.runPosition(handler, context, toErrorData(error), item)
 }
 
 // The input hash: of the call's fields, and of what the calls it holds read
@@ -56,15 +56,15 @@ const inputHash = (inputs, reads) => Object.keys(reads).length ? hashOf({inputs,
 const withArgs = (next, call) => {
   const positions = servicePositions(call)
   return async (_args, inv) => {
-    const {scope, run} = inv
-    const data = resolveArgs(call.args, scope, run.nodes)
-    const settingsArgs = mapValues(resolveArgs(call.settingsArgs, scope, run.nodes),
+    const {context, run} = inv
+    const data = resolveArgs(call.args, context, run.nodes)
+    const settingsArgs = mapValues(resolveArgs(call.settingsArgs, context, run.nodes),
       value => defaults(value, call.settings))
     const services = Object.fromEntries(positions.map(([field, position]) =>
-      [field, (input) => run.runPosition(position, scope, input).catch(catchWith(call.positions.catch, scope, run, input))]))
+      [field, (input) => run.runPosition(position, context, input).catch(catchWith(call.positions.catch, context, run, input))]))
 
     inv.inputs = setPaths(data, settingsArgs)
-    inv.reads = Object.fromEntries(call.closure.map(read => [read.key, resolveRead(read, scope, run.nodes)]))
+    inv.reads = Object.fromEntries(call.closure.map(read => [read.key, resolveRead(read, context, run.nodes)]))
     inv.input = inputHash(inv.inputs, inv.reads)
     return next(setPaths(inv.inputs, services), inv)
   }
@@ -77,9 +77,9 @@ const withDebug = (next) => async (args, inv) => {
   const show = (value) => format(value, settings.inspect)
   const startTime = Date.now()
 
-  run.runtime.log(`${labelOf(call)} Called with args:\n${show(inv.inputs)}`, {color})
+  run.runtime.env.log(`${labelOf(call)} Called with args:\n${show(inv.inputs)}`, {color})
   const result = await next(args, inv)
-  run.runtime.log(`${labelOf(call)} Completed in ${Date.now() - startTime}ms returning:\n${show(result)}`, {color})
+  run.runtime.env.log(`${labelOf(call)} Completed in ${Date.now() - startTime}ms returning:\n${show(result)}`, {color})
   return result
 }
 
@@ -120,17 +120,20 @@ const withRunState = (next, call, run) => {
   }
 }
 
+// Records a call's outcome in the Run State: done with its output, or failed.
+// A call that finishes after the Run is aborted is work in progress the
+// abort discarded, so nothing is recorded for it.
 async function recordResult(next, args, inv, form) {
   const {call, run} = inv
   const startedAt = new Date()
   const entry = {address: call.address, input: inv.input, inputs: inv.inputs, ...(call.closure.length && {reads: inv.reads}), startedAt: startedAt.toISOString()}
+  const record = (outcome) => run.signal?.aborted ? undefined : run.runState.set(form, inv.input, {...entry, ...outcome, duration: Date.now() - startedAt})
   try {
     const output = await next(args, inv)
-    await run.runState.set(form, inv.input, {...entry, status: 'done', output, duration: Date.now() - startedAt})
+    await record({status: 'done', output})
     return output
   } catch (error) {
-    const failure = {message: error.message, attempts: error.attempts ?? 1, at: call.address}
-    await run.runState.set(form, inv.input, {...entry, status: 'failed', error: failure, duration: Date.now() - startedAt})
+    await record({status: 'failed', error: {message: error.message, attempts: error.attempts ?? 1, at: call.address}})
     throw error
   }
 }
@@ -253,9 +256,9 @@ function wrappersFor(call, run) {
   ].filter(Boolean)
 }
 
-// The call, made by its service's instance, wrapped in its behaviour: a step `(args, invocation) => result`.
+// The call, made through the runtime, wrapped in its behaviour: a step
+// `(args, invocation) => result`.
 export function wrap(call, run) {
-  const instance = run.instances[call.parts.service]
-  const serviceCall = (fields) => instance.call({...call.parts, fields})
+  const serviceCall = (fields) => run.runtime.call(call.parts, fields)
   return wrappersFor(call, run).reduceRight((next, wrapper) => wrapper(next, call, run), serviceCall)
 }

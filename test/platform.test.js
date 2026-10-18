@@ -15,11 +15,11 @@ const rulesFired = async (code, filePath) => {
 describe('core is free of environment dependencies', () => {
   // [import, file it appears in, banned]
   const cases = [
-    ['import fs from \'fs\'\nfs()', 'execute.js', true],
-    ['import fs from \'node:fs\'\nfs()', 'compile.js', true],
-    ['import {inspect} from \'util\'\ninspect()', 'wrappers.js', true],
-    ['import fs from \'fs-extra\'\nfs()', 'services/util.js', true],
-    ['import {sha256} from \'@noble/hashes/sha2.js\'\nsha256()', 'forms.js', false],
+    ['import fs from \'fs\'\nfs()', 'src/execute/execute.js', true],
+    ['import fs from \'node:fs\'\nfs()', 'src/query/compile.js', true],
+    ['import {inspect} from \'util\'\ninspect()', 'src/execute/wrappers.js', true],
+    ['import fs from \'fs-extra\'\nfs()', 'src/service/util.js', true],
+    ['import {sha256} from \'@noble/hashes/sha2.js\'\nsha256()', 'src/query/forms.js', false],
     ['import fs from \'node:fs\'\nfs()', 'core.js', true],
     ['import fs from \'node:fs\'\nfs()', 'index.js', false],
     ['import fs from \'node:fs\'\nfs()', 'test/anything.test.js', false]
@@ -32,11 +32,11 @@ describe('core is free of environment dependencies', () => {
   }
 
   it('bans node globals in core', async () => {
-    assert.ok((await rulesFired('process.stdout.write("x")\n', 'execute.js')).includes('no-undef'))
+    assert.ok((await rulesFired('process.stdout.write("x")\n', 'src/execute/execute.js')).includes('no-undef'))
   })
 
   it('holds for every core file', async () => {
-    const results = await eslint.lintFiles(['*.js', 'services/*.js'])
+    const results = await eslint.lintFiles(['*.js', 'src/**/*.js'])
     const violations = results.flatMap(r => r.messages
       .filter(m => ['no-restricted-imports', 'no-undef'].includes(m.ruleId))
       .map(m => `${r.filePath}:${m.line} ${m.message}`))
@@ -71,13 +71,13 @@ describe('published package', () => {
   const packed = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {encoding: 'utf8'}))[0].files.map(f => f.path)
 
   it('ships the entry points, core and the builtin service', () => {
-    for (const file of ['index.js', 'core.js', 'compile.js', 'declaration.js', 'define-service.js', 'services/util.js', 'README.md', 'package.json']) {
+    for (const file of ['index.js', 'core.js', 'src/query/compile.js', 'src/types/declaration.js', 'src/service/define-service.js', 'src/service/util.js', 'README.md', 'package.json']) {
       assert.ok(packed.includes(file), `${file} is shipped`)
     }
   })
 
   it('ships nothing outside the library and its docs', () => {
-    const shipped = (file) => /^[^/]+\.(js|md|json)$/.test(file) || /^(services|docs)\//.test(file)
+    const shipped = (file) => /^[^/]+\.(js|md|json)$/.test(file) || /^(src|docs)\//.test(file)
     assert.deepEqual(packed.filter(file => !shipped(file)), [])
     assert.deepEqual(packed.filter(file => ['eslint.config.js', 'performance.md', 'function-names.md'].includes(file)), [])
   })

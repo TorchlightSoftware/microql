@@ -15,7 +15,7 @@
  */
 
 import {isPlainObject, defaults} from './common.js'
-import {isErrorData, toErrorData} from './errors.js'
+import {isErrorData, toErrorData} from '../execute/errors.js'
 
 const DEFAULTS = {depth: 2, maxArrayLength: 100, maxStringLength: 10000}
 

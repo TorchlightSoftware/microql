@@ -7,7 +7,8 @@
  */
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import query, {memoryStore, plan, defineService, serviceRegistry} from '../index.js'
+import query, {plan, defineService, Runtime} from '../index.js'
+import {ownRun} from './test-services.js'
 
 const GALLERY_PAGES = {
   'https://museum.example/sculpture': {
@@ -62,13 +63,9 @@ const stubServices = () => {
   return {calls, services: {crawler, assistant, catalogue}}
 }
 
-// What the Query logs to a destination: its failures.
+// What the Query logs to a destination: its failures, which this runtime keeps.
 const failureLog = []
-const runtime = {
-  log: (text, {to} = {}) => { if (to) failureLog.push({to, text}) },
-  cache: memoryStore(),
-  ...serviceRegistry()
-}
+const runtime = Object.assign(new Runtime(), {env: {log: (text, {to} = {}) => { if (to) failureLog.push({to, text}) }}})
 
 // Logs a failure to a destination, keeping it as data in the failed item's place.
 const logTo = (to) => ['@err', '[util]/log', {to}]
@@ -214,11 +211,11 @@ describe('gallery crawl acceptance (offline)', () => {
 
   it('resumes from its Run State without calling any service again', async () => {
     const {services, calls} = stubServices()
-    const runState = memoryStore()
-    await query(galleryCrawl(services), {runState})
+    const run = ownRun()
+    await query(galleryCrawl(services), {runId: run.id})
     const firstRun = calls.length
 
-    const entries = await query(galleryCrawl(services), {runState})
+    const entries = await query(galleryCrawl(services), {runId: run.id})
     assert.deepEqual(entries, EXPECTED_ENTRIES)
     assert.equal(calls.length, firstRun)
   })

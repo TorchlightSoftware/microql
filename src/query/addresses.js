@@ -10,7 +10,7 @@
  * its address, its JSON path, and the path of its arguments.
  */
 
-import {parseFieldPath} from './common.js'
+import {parseFieldPath} from '../common/common.js'
 
 // A call address, then an optional field path.
 const ADDRESS = /^(.+?\.@\d+(?:[a-z]\d+)*)(?:\.(.+))?$/

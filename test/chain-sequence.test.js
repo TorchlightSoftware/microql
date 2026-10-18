@@ -2,7 +2,7 @@ import assert from 'node:assert'
 import {describe, it} from 'node:test'
 import query from '../index.js'
 import {servicesFromTables} from './test-services.js'
-import util from '../services/util.js'
+import util from '../src/service/util.js'
 
 describe('Chain Sequential Execution Tests', () => {
   describe('Chain steps without path dependencies', () => {

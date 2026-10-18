@@ -3,7 +3,7 @@ import {describe, it, after} from 'node:test'
 import os from 'node:os'
 import path from 'node:path'
 import {mkdtemp, rm} from 'node:fs/promises'
-import query, {plan, defineService, fileStore} from '../index.js'
+import query, {plan, defineService, NodeRuntime, fileRunStates} from '../index.js'
 
 describe('Error Handling Tests', () => {
   const errorService = defineService({
@@ -150,8 +150,8 @@ describe('Error Handling Tests', () => {
         phases: {result: ['$given.items', '[util]/each', {service: ['[error]/fail', {item: '@'}], catch: ['@err', '[keep]/same']}]},
         select: '$result'
       }
-      const first = await query(config, {runState: fileStore(dir)})
-      const resumed = await query(config, {runState: fileStore(dir)})
+      const first = await query({...config, runtime: new NodeRuntime({runStates: fileRunStates(dir)})}, {runId: 'run'})
+      const resumed = await query({...config, runtime: new NodeRuntime({runStates: fileRunStates(dir)})}, {runId: 'run'})
 
       assert.deepStrictEqual(resumed, first)
       assert.strictEqual(resumed[0].message, '[$result.@1a1 - [error]/fail] Service failed')

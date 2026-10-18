@@ -15,9 +15,9 @@
 
 import {sha256} from '@noble/hashes/sha2.js'
 import {bytesToHex, utf8ToBytes} from '@noble/hashes/utils.js'
-import {mapReferences, parseReference, rootScope, enterPosition, scopedRoot} from './reference.js'
+import {mapReferences, parseReference, rootContext, enterPosition, contextRoot} from './reference.js'
 import {columnsOf} from './graph.js'
-import {isPlainObject, getIn, omit, setPaths} from './common.js'
+import {isPlainObject, getIn, omit, setPaths} from '../common/common.js'
 
 // Settings that change how a call runs, never what it returns.
 const OPERATIONAL_SETTINGS = ['timeout', 'retry', 'debug', 'cache']
@@ -50,23 +50,23 @@ function canonicalValue(value) {
 export const hashOf = (value) => bytesToHex(sha256(utf8ToBytes(canonical(value))))
 
 // A reference's form: what it points to, as a hash or (for root nodes) a value.
-function referenceForm(text, scope, env) {
+function referenceForm(text, context, env) {
   const ref = parseReference(text)
   const {sigil, name, path} = ref
   if (sigil === '$' && name in env.nodes) return {value: getIn(env.nodes[name], path) ?? null}
   if (sigil === '$') return {phase: env.phases[name], path}
-  return {scoped: scopedRoot(ref, scope), path}
+  return {context: contextRoot(ref, context), path}
 }
 
 // Arguments with every reference replaced by its form.
-const argumentsForm = (value, scope, env) => mapReferences(value, text => referenceForm(text, scope, env))
+const argumentsForm = (value, context, env) => mapReferences(value, text => referenceForm(text, context, env))
 
 // Forms the steps of a phase or position in order; returns each step's hash.
-function stepsForm(steps, scope, env) {
+function stepsForm(steps, context, env) {
   const hashes = []
-  let flow = scope.flow
+  let flow = context.flow
   for (const step of steps) {
-    flow = callForm(step, {...scope, flow}, env)
+    flow = callForm(step, {...context, flow}, env)
     hashes.push(flow)
   }
   return hashes
@@ -75,10 +75,10 @@ function stepsForm(steps, scope, env) {
 // A call's form and hash, recorded by address. The data part (key and
 // arguments) is hashed first: a position's input is "the input of this call",
 // which the inner forms name by that hash, so a form never contains itself.
-function callForm(call, scope, env) {
+function callForm(call, context, env) {
   const data = {
     key: call.key,
-    args: argumentsForm(setPaths(call.args, call.settingsArgs), scope, env),
+    args: argumentsForm(setPaths(call.args, call.settingsArgs), context, env),
     settings: omit(call.settings, [...OPERATIONAL_SETTINGS, 'rateLimit', 'inspect']),
     checks: call.checks
   }
@@ -88,7 +88,7 @@ function callForm(call, scope, env) {
   const positions = {}
   for (const [field, position] of Object.entries(call.positions)) {
     const item = {itemOf: input}
-    const entered = field === 'catch' ? enterPosition(position, scope, {errorOf: input}, item) : enterPosition(position, scope, item)
+    const entered = field === 'catch' ? enterPosition(position, context, {errorOf: input}, item) : enterPosition(position, context, item)
     positions[field] = stepsForm(position.steps, entered, env)
   }
 
@@ -107,12 +107,12 @@ export function formsOf(compiled, {trigger} = {}) {
 
   // in column order, so a phase's upstream form hashes are known before it
   for (const name of columnsOf(compiled.phases).flat()) {
-    env.phases[name] = stepsForm(compiled.phases[name].steps, rootScope, env).at(-1)
+    env.phases[name] = stepsForm(compiled.phases[name].steps, rootContext, env).at(-1)
   }
 
   const handler = compiled.settings.catch
   if (handler) {
-    stepsForm(handler.steps, enterPosition(handler, rootScope, {errorOf: 'phase'}), env)
+    stepsForm(handler.steps, enterPosition(handler, rootContext, {errorOf: 'phase'}), env)
   }
 
   return {calls: env.calls, phases: env.phases, queryHash: hashOf(env.phases)}

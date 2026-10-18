@@ -17,7 +17,7 @@
  * serves both dependency extraction (compile) and resolution (execute).
  */
 
-import {isPlainObject, mapValues, getIn} from './common.js'
+import {isPlainObject, mapValues, getIn} from '../common/common.js'
 
 const PATH = '((?:\\.[^.[\\]]+|\\[\\d+\\])*)'
 const REFERENCE = new RegExp(`^([$@])([A-Za-z_]\\w*)?${PATH}$`)
@@ -77,50 +77,50 @@ export function parseReference(text) {
   return {sigil, name, path: pathOf(text, dotted)}
 }
 
-// Scope: what an `@` reference can see — {flow, bindings, errors}. The same
+// Context: what an `@` reference can see — {flow, bindings, errors}. The same
 // shape holds runtime values (execute), forms (forms.js) and types (plan.js).
-export const rootScope = {flow: null, bindings: {}, errors: []}
+export const rootContext = {flow: null, bindings: {}, errors: []}
 
-// The scope inside a position, for one input: a lone call receives the input
+// The context inside a position, for one input: a lone call receives the input
 // as `@`, and the position's `as:` names the item, which is the input itself
 // except in a catch, whose input is the error and whose item is the one whose
 // call failed; catch adds its input to the errors.
-export const enterPosition = (position, scope, input, item = input) => ({
+export const enterPosition = (position, context, input, item = input) => ({
   flow: position.chain ? null : input,
-  bindings: position.as ? {...scope.bindings, [position.as]: item} : scope.bindings,
-  errors: position.field === 'catch' ? [...scope.errors, input] : scope.errors
+  bindings: position.as ? {...context.bindings, [position.as]: item} : context.bindings,
+  errors: position.field === 'catch' ? [...context.errors, input] : context.errors
 })
 
-// What an `@` reference names in a scope, before its path.
-export const scopedRoot = ({name, depth}, scope) =>
-  depth ? scope.errors[scope.errors.length - depth]
-    : name ? scope.bindings[name]
-      : scope.flow
+// What an `@` reference names in a context, before its path.
+export const contextRoot = ({name, depth}, context) =>
+  depth ? context.errors[context.errors.length - depth]
+    : name ? context.bindings[name]
+      : context.flow
 
 // A reference as a read: what it names in terms that hold anywhere in the
 // Query — a node or a binding by name, an error by the level of the catch that
 // holds it (1 the outermost) — plus its path, and a key naming the read. A
 // call's reads from outside itself are part of its input (see compile.js).
-export function readOf({sigil, name, depth, path}, scope) {
-  const level = depth ? scope.errors - depth + 1 : undefined
+export function readOf({sigil, name, depth, path}, context) {
+  const level = depth ? context.errors - depth + 1 : undefined
   const root = level ? `err${level}` : `${sigil}${name ?? ''}`
   return {sigil, name, level, path, key: [root, ...path].join('.')}
 }
 
-// Whether a read, made inside a call compiled in this scope, names something
-// bound outside it: any node, a binding the scope already has, or the error of
+// Whether a read, made inside a call compiled in this context, names something
+// bound outside it: any node, a binding the context already has, or the error of
 // a catch around it. The flow `@` is always bound inside.
-export const readsOutside = (read, scope) =>
-  read.sigil === '$' || (read.level ? read.level <= scope.errors : Boolean(read.name) && scope.bindings.includes(read.name))
+export const readsOutside = (read, context) =>
+  read.sigil === '$' || (read.level ? read.level <= context.errors : Boolean(read.name) && context.bindings.includes(read.name))
 
-// The value a read names in a runtime scope.
-export function resolveRead({sigil, name, level, path}, scope, nodes) {
-  const root = sigil === '$' ? nodes[name] : level ? scope.errors[level - 1] : scope.bindings[name]
+// The value a read names in a context, as the Run resolves it.
+export function resolveRead({sigil, name, level, path}, context, nodes) {
+  const root = sigil === '$' ? nodes[name] : level ? context.errors[level - 1] : context.bindings[name]
   return getIn(root, path)
 }
 
-// The value a reference names, given the current scope and the resolved nodes.
-export function resolveReference(ref, scope, nodes) {
-  const root = ref.sigil === '$' ? nodes[ref.name] : scopedRoot(ref, scope)
+// The value a reference names, given the current context and the resolved nodes.
+export function resolveReference(ref, context, nodes) {
+  const root = ref.sigil === '$' ? nodes[ref.name] : contextRoot(ref, context)
   return getIn(root, ref.path)
 }

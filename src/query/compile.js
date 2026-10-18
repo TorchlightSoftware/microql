@@ -2,9 +2,10 @@
  * @fileoverview MicroQL Query Compiler
  *
  * Compiles a Query into a plain tree of phases and service calls. Compile is
- * pure: it reads the Query and the service definitions, checks every reference
- * against the scope it appears in, and assigns each call its Service Call
- * Address. Nothing here touches the runtime; execute attaches that.
+ * pure: it reads the Query and the services its runtime has registered in the
+ * Query's scope, checks every reference against the context it appears in, and
+ * assigns each call its Service Call Address. It never makes a call: execute
+ * does, through the runtime.
  *
  * Domain:
  *   Phase     a named node of the Query; a chain of service calls (a chain of
@@ -26,12 +27,12 @@
 
 import {parseServiceKey} from '@tlsft/service-key'
 
-import {RESERVE_ARGS, VALIDATION_NAMES, isPlainObject, mapValues, pick, omit, omitIn, getIn, setIn, defaults} from './common.js'
-import {readDeclaration} from './declaration.js'
+import {RESERVE_ARGS, VALIDATION_NAMES, isPlainObject, mapValues, pick, omit, omitIn, getIn, setIn, defaults} from '../common/common.js'
+import {readDeclaration} from '../types/declaration.js'
 import {isReference, parseReference, readOf, readsOutside} from './reference.js'
 import {parseSchema} from '@tlsft/zodly'
 import {fieldPathOf} from './addresses.js'
-import util from './services/util.js'
+import {missingCapability, inScope} from '../runtime/runtime.js'
 
 // Nodes resolved before the first phase runs; never valid phase names.
 const ROOT_NODES = ['given', 'trigger']
@@ -96,13 +97,16 @@ function parseDescriptor(site, descriptor) {
 const SERVICE_METHODS = ['lookup', 'supportedCalls', 'init']
 const isService = (service) => SERVICE_METHODS.every(method => typeof service?.[method] === 'function')
 
-// The service a key names, by its name in the Query's services.
-function serviceAt(site, services, parts) {
-  const service = services[parts.service]
+// The service a key names, as the runtime has it registered in the Query's
+// scope, once it's known to be a service whose env keys the runtime has.
+function serviceAt(site, {runtime}, parts) {
+  const service = runtime.services.get(parts.service)
   if (!service) fail(site, 'unknown-service', `Service '${parts.service}' not found`)
   if (!isService(service)) {
-    fail(site, 'not-a-service', `Service '${parts.service}' must provide lookup(key), supportedCalls() and init(runtime). A service definition gets them from defineService`)
+    fail(site, 'not-a-service', `Service '${parts.service}' must provide lookup(key), supportedCalls() and init(env). A service definition gets them from defineService`)
   }
+  const missing = missingCapability(service, runtime.env)
+  if (missing) fail(site, 'missing-capability', `Service '${parts.service}' requires env.${missing}, which this runtime doesn't provide`)
   return service
 }
 
@@ -171,16 +175,16 @@ const compileSettings = (serviceName, args, settingsArgs, querySettings) => {
   return settings
 }
 
-// Checks every reference in a call's data arguments against its scope, and
+// Checks every reference in a call's data arguments against its context, and
 // returns the phases they depend on and what they read.
-function checkReferences(site, args, scope, query) {
+function checkReferences(site, args, context, query) {
   const dependencies = new Set()
   const reads = []
   const check = (value) => {
     if (isReference(value)) {
       const ref = parseWithSite(site, value)
-      checkReference(site, ref, value, scope, query)
-      reads.push(readOf(ref, scope))
+      checkReference(site, ref, value, context, query)
+      reads.push(readOf(ref, context))
       if (ref.sigil === '$' && !ROOT_NODES.includes(ref.name)) dependencies.add(ref.name)
     } else if (Array.isArray(value)) {
       value.forEach(check)
@@ -203,13 +207,13 @@ function parseWithSite(site, text) {
   }
 }
 
-function checkReference(site, {sigil, name, depth}, text, scope, query) {
+function checkReference(site, {sigil, name, depth}, text, context, query) {
   if (sigil === '$' && !query.nodeNames.has(name)) fail(site, 'unknown-reference', `Unknown reference '${text}': no phase or node named '${name}'`)
-  if (depth > scope.errors) {
-    fail(site, 'unknown-reference', scope.errors ? `Unknown reference '${text}': it is inside only ${scope.errors} catch` : `Unknown reference '${text}': no enclosing catch`)
+  if (depth > context.errors) {
+    fail(site, 'unknown-reference', context.errors ? `Unknown reference '${text}': it is inside only ${context.errors} catch` : `Unknown reference '${text}': no enclosing catch`)
   }
-  if (sigil === '@' && name && !depth && !scope.bindings.includes(name)) fail(site, 'unknown-reference', `Unknown reference '${text}': no enclosing iteration is named '${name}' by as:`)
-  if (sigil === '@' && !name && !scope.flow) fail(site, 'invalid-reference', `Invalid reference '${text}': nothing flows into this call. The first call of a phase or chain receives nothing; name an iteration with as: to reach its item`)
+  if (sigil === '@' && name && !depth && !context.bindings.includes(name)) fail(site, 'unknown-reference', `Unknown reference '${text}': no enclosing iteration is named '${name}' by as:`)
+  if (sigil === '@' && !name && !context.flow) fail(site, 'invalid-reference', `Invalid reference '${text}': nothing flows into this call. The first call of a phase or chain receives nothing; name an iteration with as: to reach its item`)
 }
 
 // Declares an iteration name; names are Query-scoped, so each is used once.
@@ -232,19 +236,19 @@ const sitesAt = (prefix, path) => (i, chain) => ({
 // Compiles a call or chain at consecutive sites. Each step's flow is the
 // previous step's result; a lone call receives the container's input, if it
 // has one, and a chain's first step receives nothing.
-function compileSteps(value, siteOf, scope, hasInput, query) {
+function compileSteps(value, siteOf, context, hasInput, query) {
   const chain = isChain(value)
   const descriptors = chain ? value : [value]
   return descriptors.map((descriptor, i) =>
-    compileCall(descriptor, siteOf(i, chain), {...scope, flow: i > 0 || (hasInput && !chain)}, query))
+    compileCall(descriptor, siteOf(i, chain), {...context, flow: i > 0 || (hasInput && !chain)}, query))
 }
 
-// A position: the field's call or chain, compiled in the owner's scope plus
+// A position: the field's call or chain, compiled in the owner's context plus
 // its iteration name. A single call receives its input as `@`; a chain's
 // first step receives nothing, so a chain reaches its input by name only.
 // catch's input is the error, reached as @err (with one more @ for each catch
 // it is inside); `as:` names the item whose call failed, as in the others.
-function compilePosition(owner, field, letter, value, scope, as, query) {
+function compilePosition(owner, field, letter, value, context, as, query) {
   // an object in a service position is a template of its input
   const descriptor = isPlainObject(value) ? ['[util]/template', value] : value
   const chain = isChain(descriptor)
@@ -253,8 +257,8 @@ function compilePosition(owner, field, letter, value, scope, as, query) {
   }
 
   const inner = {
-    bindings: as ? [...scope.bindings, as] : scope.bindings,
-    errors: field === 'catch' ? scope.errors + 1 : scope.errors
+    bindings: as ? [...context.bindings, as] : context.bindings,
+    errors: field === 'catch' ? context.errors + 1 : context.errors
   }
   const siteOf = sitesAt(`${owner.address}${letter}`, fieldPathOf(owner, field))
   return {
@@ -281,11 +285,11 @@ function positionFields(site, args, declaration, key) {
     .sort((a, b) => a.path.localeCompare(b.path))
 }
 
-// Compiles one service descriptor at a site, in a scope.
-function compileCall(descriptor, site, scope, query) {
+// Compiles one service descriptor at a site, in a context.
+function compileCall(descriptor, site, context, query) {
   if (!Array.isArray(descriptor)) fail(site, 'invalid-descriptor', `Invalid service descriptor. Expected ['[METHOD] [service]/resource', {...}] format. Got: ${JSON.stringify(descriptor)}`)
   const parsed = parseDescriptor(site, descriptor)
-  const service = serviceAt(site, query.services, parsed.parts)
+  const service = serviceAt(site, query, parsed.parts)
   const declaration = declarationAt(site, service, parsed)
   if (!isPlainObject(parsed.args)) fail(site, 'invalid-descriptor', `Arguments for ${parsed.key} must be an object`)
 
@@ -296,7 +300,6 @@ function compileCall(descriptor, site, scope, query) {
     targetField: parsed.hasTarget ? targetField(site, declaration, parsed.key) : undefined,
     key: parsed.key,
     parts: parsed.parts,
-    service,
     declaration,
     ownTimeout: parsed.args.timeout !== undefined
   }
@@ -320,15 +323,15 @@ function compileCall(descriptor, site, scope, query) {
   call.settings = compileSettings(parsed.parts.service, args, call.settingsArgs, query.settings)
   call.checks = pick(args, ['precheck', 'postcheck'])
   call.validators = compileValidators(site, args, declaration)
-  const own = checkReferences(site, {...call.args, ...call.settingsArgs}, scope, query)
+  const own = checkReferences(site, {...call.args, ...call.settingsArgs}, context, query)
   const letters = lettersOf(fields)
   call.positions = Object.fromEntries(fields.map(({path, segments}) =>
-    [path, compilePosition(call, path, letters[path], getIn(args, segments), scope, as, query)]))
+    [path, compilePosition(call, path, letters[path], getIn(args, segments), context, as, query)]))
 
   // what the calls it holds read from outside it is part of its input, as
   // much as its own fields are: their results differ with it
   const steps = Object.values(call.positions).flatMap(position => position.steps)
-  call.closure = uniqueReads(steps.flatMap(step => step.reads).filter(read => readsOutside(read, scope)))
+  call.closure = uniqueReads(steps.flatMap(step => step.reads).filter(read => readsOutside(read, context)))
   call.reads = uniqueReads([...own.reads, ...call.closure])
   call.dependencies = steps.reduce((deps, step) => deps.union(step.dependencies), own.dependencies)
   query.calls.push(call)
@@ -364,16 +367,18 @@ function compileSelect(select, query) {
 }
 
 /**
- * Compile a Query into its tree of phases and calls.
- * @returns {Object} {phases, calls, given, trigger, triggerSchema, select, settings, services, runtime, warnings}
+ * Compile a Query into its tree of phases and calls, for the scope it runs
+ * in on its runtime.
+ * @returns {Object} {phases, calls, given, trigger, triggerSchema, select, settings, runtime, warnings},
+ *   where runtime is the Query's, in its scope (see inScope)
  */
 export function compile(config) {
-  const {phases = {}, given, trigger, settings = {}} = config
-  const services = defaults(config.services, {util})
+  const {phases = {}, given, trigger, settings = {}, runtime, scope = {}} = config
+  if (!runtime) throw new Error('compile needs a runtime: pass config.runtime, whose services the Query\'s keys name (microql/core has none of its own)')
   checkRetired({address: 'settings'}, Object.keys(settings))
 
   const query = {
-    services,
+    runtime: inScope(runtime, scope),
     settings,
     // $trigger always exists: it holds whatever payload the Run is given
     nodeNames: new Set([...Object.keys(phases), ...(given !== undefined ? ['given'] : []), 'trigger']),
@@ -395,8 +400,7 @@ export function compile(config) {
       ...settings,
       catch: settings.catch ? compileGlobalCatch(settings.catch, query) : undefined
     },
-    services,
-    runtime: config.runtime,
+    runtime: query.runtime,
     warnings: query.warnings
   }
 }

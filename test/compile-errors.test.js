@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
 import {readFile} from 'node:fs/promises'
-import compile from '../compile.js'
-import {defineService} from '../define-service.js'
+import {compile} from '../index.js'
+import {defineService} from '../src/service/define-service.js'
 
 const echo = defineService({
   '/echo': {input: {on: ['any', 'optional', {tags: ['target']}]}, call: async ({on}) => on},
@@ -158,7 +158,7 @@ describe('Compile-time errors', () => {
     ['a service without lookup, supportedCalls and init',
       {services: {plain: {'/x': async () => 1}}, phases: {a: ['[plain]/x', {}]}},
       {code: 'not-a-service', address: '$a.@1'},
-      /Service 'plain' must provide lookup\(key\), supportedCalls\(\) and init\(runtime\)/],
+      /Service 'plain' must provide lookup\(key\), supportedCalls\(\) and init\(env\)/],
     ['a service with lookup only',
       {services: {partial: {lookup: () => ({})}}, phases: {a: ['[partial]/x', {}]}},
       {code: 'not-a-service', address: '$a.@1'},
@@ -212,7 +212,7 @@ describe('Compile-time errors', () => {
 describe('error codes', () => {
   const read = (file) => readFile(new URL(`../${file}`, import.meta.url), 'utf8')
   const raised = async () => {
-    const sources = await Promise.all(['compile.js', 'graph.js', 'types.js', 'execute.js'].map(read))
+    const sources = await Promise.all(['src/query/compile.js', 'src/query/graph.js', 'src/types/types.js', 'src/runtime/config.js'].map(read))
     const codes = sources.flatMap(source => [...source.matchAll(/(?:fail\([^,]+, |runError\([^,]+, |code: |issue\()'([a-z-]+)'/g)].map(([, code]) => code))
     return [...new Set(codes)].sort()
   }

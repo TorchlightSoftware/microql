@@ -30,7 +30,7 @@
  */
 
 import {parseSchema, tagsOf} from '@tlsft/zodly'
-import {isPlainObject, writeFieldPath} from './common.js'
+import {isPlainObject, writeFieldPath} from '../common/common.js'
 import {isAny, unwrap, returnedBy} from './types.js'
 import {checkedAsAny, resolvedIn} from './sources.js'
 

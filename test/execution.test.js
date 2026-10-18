@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import query, {memoryStore, plan, defineService} from '../index.js'
+import query, {plan, defineService} from '../index.js'
+import {ownRun} from './test-services.js'
 
 // A service that counts its calls by id, and fails the ids it's told to.
 const counting = (failing = new Set()) => ({
@@ -94,10 +95,10 @@ describe('onUpdate', () => {
   for (const [description, change, stale] of reruns) {
     it(`lets a platform tell that a later phase is ${stale ? '' : 'not '}stale after rerunning upstream with ${description}`, async () => {
       const source = versioned()
-      const runState = memoryStore()
-      const first = await doneUpdates(pipeline(source), {runState})
+      const run = ownRun()
+      const first = await doneUpdates(pipeline(source), {runId: run.id})
       change(source)
-      const rerun = await doneUpdates(pipeline(source), {runState, target: '$categories'})
+      const rerun = await doneUpdates(pipeline(source), {runId: run.id, target: '$categories'})
       assert.equal(first.listings.upstream.categories !== rerun.categories.resultHash, stale)
     })
   }
@@ -125,23 +126,23 @@ describe('target', () => {
 
   it('reuses stored upstream results, and always reruns the target phase', async () => {
     const source = counting()
-    const runState = memoryStore()
-    await query(pipeline(source), {runState})
-    await query(pipeline(source), {runState, target: '$listings'})
+    const run = ownRun()
+    await query(pipeline(source), {runId: run.id})
+    await query(pipeline(source), {runId: run.id, target: '$listings'})
 
     assert.deepEqual(source.calls, {categories: 1, listings: 2, records: 1, summary: 1})
   })
 
   it('reruns every call of the target phase, inside its iterations too', async () => {
     const source = counting()
-    const runState = memoryStore()
+    const run = ownRun()
     const config = {
       given: {ids: [1, 2]},
       services: {source: defineService(source)},
       phases: {fetched: ['$given.ids', '[util]/each', {service: ['[source]/fetch', {id: '@'}]}]}
     }
-    await query(config, {runState})
-    await query(config, {runState, target: '$fetched'})
+    await query(config, {runId: run.id})
+    await query(config, {runId: run.id, target: '$fetched'})
     assert.deepEqual(source.calls, {1: 2, 2: 2})
   })
 
@@ -185,9 +186,9 @@ describe('abort', () => {
   it('stops at once, reports the running phase cancelled with its calls in flight, and keeps finished results', {timeout: 2000}, async () => {
     const gate = gated()
     const controller = new AbortController()
-    const runState = memoryStore()
+    const named = ownRun()
     const updates = []
-    const run = query(gatedQuery(gate), {runState, signal: controller.signal, onUpdate: update => updates.push(update)})
+    const run = query(gatedQuery(gate), {runId: named.id, signal: controller.signal, onUpdate: update => updates.push(update)})
 
     await gate.started
     controller.abort()
@@ -197,7 +198,7 @@ describe('abort', () => {
     assert.deepEqual(cancelled.inFlight, ['$waiting.@1'])
     assert.deepEqual(gate.calls, ['quick', 'wait'])
     const {calls} = plan(gatedQuery(gate))
-    const [quick] = await runState.list(calls.find(c => c.address === '$quick.@1').formHash)
+    const [quick] = await named.list(calls.find(c => c.address === '$quick.@1').formHash)
     assert.equal(quick.status, 'done')
   })
 

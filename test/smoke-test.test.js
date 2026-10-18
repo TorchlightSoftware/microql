@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import {serviceSmokeTests, defineService, util, memoryStore, serviceRegistry} from '../core.js'
+import {serviceSmokeTests, defineService, util} from '../core.js'
 
-const runtime = {log() {}, cache: memoryStore(), ...serviceRegistry()}
+// What a service's init receives from its runtime.
+const env = {log() {}}
 
 // The smoke tests a service fails, as "describe: it".
-async function failuresOf(service, options = {runtime}) {
+async function failuresOf(service, options = {env}) {
   const failed = []
   for (const row of serviceSmokeTests(service, options)) {
     try {
@@ -25,7 +26,7 @@ const shop = defineService({
 
 describe('serviceSmokeTests', () => {
   it('is a table of tests, each named by what it describes and what it checks', () => {
-    for (const row of serviceSmokeTests(shop, {runtime})) {
+    for (const row of serviceSmokeTests(shop, {env})) {
       assert.deepEqual(Object.keys(row), ['describe', 'it', 'test'])
       assert.equal(typeof row.test, 'function')
     }
@@ -33,10 +34,10 @@ describe('serviceSmokeTests', () => {
 
   // [description, service, options]
   const passing = [
-    ['util', util, {runtime}],
-    ['a defined service', shop, {runtime}],
-    ['a confined service', defineService({confined: true, '/secret': async () => 'kept'}), {runtime, confined: true}],
-    ['a configured service, with its own config', defineService({config: {vault: ['string']}, init(runtime) { if (runtime.config.vault !== 'notes') throw new Error('not its config') }, async '/where'() {}}), {runtime, config: {vault: 'notes'}}]
+    ['util', util, {env}],
+    ['a defined service', shop, {env}],
+    ['a confined service', defineService({confined: true, '/secret': async () => 'kept'}), {env, confined: true}],
+    ['a configured service, with its own config', defineService({config: {vault: ['string']}, init(env) { if (env.config.vault !== 'notes') throw new Error('not its config') }, async '/where'() {}}), {env, config: {vault: 'notes'}}]
   ]
 
   for (const [description, service, options] of passing) {
@@ -73,12 +74,12 @@ describe('serviceSmokeTests', () => {
       'init: makes a fresh instance each time',
       'call: refuses a resource the service lacks'
     ]],
-    ['a runtime without what the service requires', shop, [
-      'service: can run on the runtime: it has the keys the service requires, and config the service accepts'
-    ], {runtime: {cache: memoryStore(), ...serviceRegistry()}}],
-    ['a runtime whose config the service doesn\'t accept', defineService({config: {vault: ['string']}, async '/where'() {}}), [
-      'service: can run on the runtime: it has the keys the service requires, and config the service accepts'
-    ], {runtime, config: {vault: 1}}],
+    ['an env without what the service requires', shop, [
+      'service: can be made with env and config: env has every key it requires, and its config declaration accepts config'
+    ], {env: {}}],
+    ['config the service doesn\'t accept', defineService({config: {vault: ['string']}, async '/where'() {}}), [
+      'service: can be made with env and config: env has every key it requires, and its config declaration accepts config'
+    ], {env, config: {vault: 1}}],
     ['a confined service checked as one that isn\'t', defineService({confined: true, '/secret': async () => 'kept'}), [
       'lookup: answers [smoke]/secret with its declaration',
       'lookup: refuses a key whose custody the service doesn\'t answer'

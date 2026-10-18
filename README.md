@@ -33,6 +33,10 @@ const leads = await query({
 })
 ```
 
+## Versions
+
+MicroQL 1.x versions should be considered unstable on a minor release basis.  We bumped to 1.x to mark a significant rewrite of the protocol, but we are still continuing to evolve the language as we build out the ecosystem and the cloud runtime support.
+
 ## Contents
 
 - [Target Audience](#target-audience)
@@ -142,9 +146,9 @@ Every string beginning with `$` or `@` is a reference. A literal like `"$5.00"` 
 
 ### Services
 
-A service is an API of some kind - like Google, Facebook, Square, Salesforce, etc.  It could be local or remote, and each service call can be sync or async.  See the [util.js](services/util.js) service for a built-in example of a service.  You will be using this service a lot for flow control within queries, like processing lists of things or creating conditional logic.  Also see the [microql-services](https://github.com/TorchlightSoftware/microql-services) project, where we are keeping a catalog of existing services.
+A service is an API of some kind - like Google, Facebook, Square, Salesforce, etc.  It could be local or remote, and each service call can be sync or async.  See the [util.js](src/service/util.js) service for a built-in example of a service.  You will be using this service a lot for flow control within queries, like processing lists of things or creating conditional logic.  Also see the [microql-services](https://github.com/TorchlightSoftware/microql-services) project, where we are keeping a catalog of existing services.
 
-Wrapping existing APIs to create a new service is easy, see our [service development guide](docs/service-guide.md) for more information.
+A Query brings the services it calls, by the names its keys use, and their configuration, such as credentials, by the same names: `query({services: {github}, config: {github: {token}}, phases})`. Wrapping existing APIs to create a new service is easy, see our [service development guide](docs/service-guide.md) for more information.
 
 
 ### Chains
@@ -248,37 +252,38 @@ Per call, `cache: true` (or `cache: {ttl: '1D'}`) reuses the result across runs 
 
 ## Runs and stored results
 
-A **Run** is one or more executions of a Query against one **Run State**, the store holding the result of every call it made. MicroQL writes each result there as it goes and reuses any result already there, so running again against the same Run State resumes where the last attempt stopped. A Run is only a concept: MicroQL keeps no record of Runs, and the Run State is their only trace.
+A **Run** is one or more executions of a Query with one Run id, against its **Run State**, the store holding the result of every call it made. MicroQL writes each result there as it goes and reuses any result already there, so running again against the same Run State resumes where the last attempt stopped. A Run is only a concept: MicroQL keeps no record of Runs, and the Run State is their only trace.
 
 What the node runtime (`import query from 'microql'`) does with results:
 
 | Store | Where | Lasts | To clear it |
 |---|---|---|---|
-| Run State | in memory, fresh for each `query()` call, unless you pass `{runState: fileStore(dir)}` | the call, or as long as `dir` exists | start a new store, or `await fileStore(dir).clear()` |
+| Run State | in memory, for the `query()` call, unless you name the Run with `{runId}`; on disk with `new NodeRuntime({runStates: fileRunStates(dir)})` | the call; a named Run, as long as the process or `dir` exists | start a new Run, or `await runtime.runStates.clear({}, runId)` |
 | Cache, for calls with `cache` set | the `.cache` directory under the current working directory | until its ttl passes; expired entries are swept when the store is first used | `rm -rf .cache`, or `await nodeRuntime.cache.clear()` |
 | What `util/log` and `util/inspect` write `to:` a destination | appended to that file | until you delete it | delete the file |
 
-`fileStore(dir)` keeps one directory per call form and one JSON file per input, so a Run State on disk can be inspected by hand. How core keys and reuses results is in [Runtime Integration § Storage](docs/runtime-integration.md#storage).
+`fileRunStates(dir)` keeps a directory per Run, with one directory per call form and one JSON file per input, so a Run State on disk can be inspected by hand. The Cache, `fileCache('.cache')`, keeps one such store per scope, in a directory named by the scope's hash (the node runtime has one scope). How core keys and reuses results is in [Runtime Integration § Storage](docs/runtime-integration.md#storage).
 
 ## Running from the Command Line
 
-A Query is an ordinary module, so a script is all a command needs. Pass a [Run State](#runs-and-stored-results) on disk and an interrupted run resumes without repeating finished work — the scrape you already paid for isn't paid for again:
+A Query is an ordinary module, so a script is all a command needs. Keep [Run States](#runs-and-stored-results) on disk and name the Run, and an interrupted run resumes without repeating finished work — the scrape you already paid for isn't paid for again:
 
 ```javascript
 #!/usr/bin/env -S node --env-file=.env
 // queries/lead-gen.js
-import query, {fileStore} from 'microql'
+import query, {NodeRuntime, fileRunStates} from 'microql'
 import {scraper, claude, hubspot} from '../services/index.js'
 
 const today = new Date().toISOString().split('T')[0]
 const directory = process.argv[2] ?? 'https://chamber.example.org/member-directory'
 
 const created = await query({
+  runtime: new NodeRuntime({runStates: fileRunStates('runs')}),
   given: {directory},
   services: {scraper, claude, hubspot},
   phases: {/* as above */},
   select: '$created'
-}, {runState: fileStore(`runs/lead-gen-${today}`)})
+}, {runId: `lead-gen-${today}`})
 
 console.log(`Created ${created.length} companies`)
 process.exit(0) // HTTP clients may keep connections alive

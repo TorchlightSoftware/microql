@@ -280,7 +280,7 @@ describe('MicroQL Comprehensive Tests', () => {
             result: ['[invalid]/action', {value: '$given.data'}]
           }
         }),
-        /Service 'invalid' must provide lookup\(key\), supportedCalls\(\) and init\(runtime\)/
+        /Service 'invalid' must provide lookup\(key\), supportedCalls\(\) and init\(env\)/
       )
     })
   })

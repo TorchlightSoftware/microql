@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
 import {z} from 'zod'
 import {parseSchema} from '@tlsft/zodly'
-import {readDeclaration, READINGS} from '../declaration.js'
+import {readDeclaration, READINGS} from '../src/types/declaration.js'
 
 describe('readDeclaration', () => {
   it('reads the roles of input fields from their tags and types, by path', () => {

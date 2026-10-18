@@ -17,9 +17,11 @@ import * as espree from 'espree'
 
 const parse = (source) => espree.parse(source, {ecmaVersion: 'latest', sourceType: 'module', loc: true})
 
-// Core: the modules at the root and the services, but not tooling or tests.
+// Core: the modules under src, and the entry points at the root (as the
+// baseline, which kept every module at the root and the services in
+// services/), but not tooling or tests.
 export const isCore = (file) =>
-  /^(services\/)?[^/]+\.js$/.test(file) && file !== 'eslint.config.js'
+  /^(src\/.+|(services\/)?[^/]+)\.js$/.test(file) && file !== 'eslint.config.js'
 
 // Every node of a tree, with its parent and the field it sits in.
 function* walk(node, parent, field) {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import {defineService} from '../define-service.js'
+import {defineService} from '../src/service/define-service.js'
 
 // A service key's fields, as core hands them to a service.
 const keyOf = (method, resource, confined = false) => ({method, service: 'shop', resource, confined})
@@ -91,11 +91,11 @@ describe('defineService', () => {
   })
 
   describe('instances', () => {
-    // A definition whose instances keep the runtime they were made with.
+    // A definition whose instances keep the env they were made with.
     const serviceDefinition = {
-      init(runtime) { this.runtime = runtime },
+      init(env) { this.env = env },
       async tearDown() { this.closed = true },
-      async '/whoami'() { return this.runtime.name },
+      async '/whoami'() { return this.env.name },
       async '/closed'() { return Boolean(this.closed) }
     }
     const service = defineService(serviceDefinition)
@@ -108,10 +108,10 @@ describe('defineService', () => {
       assert.equal(await instance.call({...keyOf(null, '/closed'), fields: {}}), true)
     })
 
-    it('keeps each instance to the runtime it was made with, leaving the definition untouched', async () => {
+    it('keeps each instance to the env it was made with, leaving the definition untouched', async () => {
       const [one, other] = await Promise.all([service.init({name: 'one'}), service.init({name: 'other'})])
       assert.deepEqual([await one.call(whoami), await other.call(whoami)], ['one', 'other'])
-      assert.equal(Object.hasOwn(serviceDefinition, 'runtime'), false)
+      assert.equal(Object.hasOwn(serviceDefinition, 'env'), false)
     })
 
     it('gives an instance no tearDown when the definition has none', async () => {

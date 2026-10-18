@@ -79,8 +79,9 @@ describe('function index', () => {
 
   // [path, is core]
   const files = [
-    ['compile.js', true],
-    ['services/util.js', true],
+    ['src/query/compile.js', true],
+    ['src/service/util.js', true],
+    ['core.js', true],
     ['eslint.config.js', false],
     ['test/forms.test.js', false],
     ['scripts/bench.js', false],

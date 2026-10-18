@@ -2,21 +2,21 @@
  * @fileoverview Smoke tests for a service: what every service owes core,
  * checked without knowing its calls.
  *
- * serviceSmokeTests(service, {runtime, config}) is a table of tests,
+ * serviceSmokeTests(service, {env, config}) is a table of tests,
  * [{describe, it, test}], for a service author to run in whatever test runner
- * they use. `runtime` holds the capabilities the service's init receives, and
- * `config` the service's own configuration and credentials, checked against
- * its config declaration as a Run checks them; `confined` says the
- * service answers only confined keys. Behaviour is the author's own tests'
+ * they use. `env` holds what a runtime gives the service's init, and `config`
+ * the service's own configuration and credentials, checked against its config
+ * declaration as a runtime checks them when they're filed; `confined` says
+ * the service answers only confined keys. Behaviour is the author's own tests'
  * business; these check the contract, so a service can take up a newer
  * MicroQL by running the newer smoke tests.
  */
 
-import {readDeclaration} from './declaration.js'
-import {runtimeRefusal} from './execute.js'
-import {runtimeFor} from './runtime.js'
+import {readDeclaration} from '../types/declaration.js'
+import {missingCapability} from '../runtime/runtime.js'
+import {configRefusal} from '../runtime/config.js'
 
-// The name the smoke tests give the service, as a Query would.
+// The name the smoke tests give the service, as a runtime would register it.
 const SERVICE = 'smoke'
 
 // A resource no service has.
@@ -42,8 +42,8 @@ const hasFunction = (value) =>
 const nameOf = ({method, resource, confined}) => `${method ? `${method} ` : ''}[${confined ? '@' : ''}${SERVICE}]${resource}`
 
 // Runs a test with a fresh instance of the service, released afterwards.
-async function withInstance(service, runtime, test) {
-  const instance = await service.init(runtime)
+async function withInstance(service, env, test) {
+  const instance = await service.init(env)
   try {
     return await test(instance)
   } finally {
@@ -58,11 +58,9 @@ const listedCalls = (service) => isFunction(service.supportedCalls) ? service.su
  * The smoke tests for a service: rows of {describe, it, test}, where test is
  * an async function that throws when the service fails it.
  */
-export function serviceSmokeTests(service, {runtime: given, config, confined = false}) {
-  // the runtime as a Run's would be, with the service's config filed under
-  // its name, and the runtime its instances receive
-  const runtime = {...given, ...(config !== undefined && {config: {[SERVICE]: config}})}
-  const instanceRuntime = runtimeFor(runtime, SERVICE)
+export function serviceSmokeTests(service, {env, config, confined = false}) {
+  // what the service's instances receive, as a runtime would give it
+  const instanceEnv = {...env, config}
   const keyOf = ({method, resource}) => ({method, service: SERVICE, resource, confined})
   const listed = listedCalls(service)
 
@@ -71,8 +69,10 @@ export function serviceSmokeTests(service, {runtime: given, config, confined = f
       const missing = ['lookup', 'supportedCalls', 'init'].filter(method => !isFunction(service[method]))
       check(missing.length === 0, `The service lacks ${missing.join(', ')}`)
     }),
-    row('service', 'can run on the runtime: it has the keys the service requires, and config the service accepts', async () => {
-      const refusal = runtimeRefusal(service, SERVICE, runtime)
+    row('service', 'can be made with env and config: env has every key it requires, and its config declaration accepts config', async () => {
+      const missing = missingCapability(service, env)
+      check(!missing, `The service requires env.${missing}, which env lacks`)
+      const refusal = configRefusal(service, SERVICE, config)
       check(!refusal, refusal?.message)
     }),
     row('supportedCalls', 'lists each call by resource and method, with no functions', async () => {
@@ -96,16 +96,16 @@ export function serviceSmokeTests(service, {runtime: given, config, confined = f
         await refuses(() => service.lookup(key), `lookup answers ${nameOf(key)}, whose custody the service doesn't answer`)
       }
     }),
-    row('init', 'makes an instance that answers call', () => withInstance(service, instanceRuntime, async (instance) => {
-      check(isFunction(instance?.call), 'init(runtime) returns an instance with call')
+    row('init', 'makes an instance that answers call', () => withInstance(service, instanceEnv, async (instance) => {
+      check(isFunction(instance?.call), 'init(env) returns an instance with call')
       check(instance.tearDown === undefined || isFunction(instance.tearDown), 'An instance\'s tearDown, if it has one, is a function')
     })),
-    row('init', 'makes a fresh instance each time', () => withInstance(service, instanceRuntime, (one) =>
-      withInstance(service, instanceRuntime, async (other) => check(one !== other, 'Two inits make two instances: each runtime keeps its own')))),
-    row('call', 'refuses a resource the service lacks', () => withInstance(service, instanceRuntime, (instance) =>
+    row('init', 'makes a fresh instance each time', () => withInstance(service, instanceEnv, (one) =>
+      withInstance(service, instanceEnv, async (other) => check(one !== other, 'Two inits make two instances: a runtime keeps one per scope')))),
+    row('call', 'refuses a resource the service lacks', () => withInstance(service, instanceEnv, (instance) =>
       refuses(() => instance.call({...keyOf({method: null, resource: MISSING}), fields: {}}), `call answers ${MISSING}, which the service lacks, rather than throwing`))),
     row('tearDown', 'can run twice', async () => {
-      const instance = await service.init(instanceRuntime)
+      const instance = await service.init(instanceEnv)
       await instance.tearDown?.()
       await instance.tearDown?.()
     })

@@ -1,12 +1,12 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query, {nodeRuntime, fileStore, defineService} from '../index.js'
+import query, {NodeRuntime, fileCache, defineService} from '../index.js'
 import {existsSync} from 'fs'
 import {rm} from 'fs/promises'
 
 const CACHEDIR = '.cache-test-cache-ratelimit'
 // the node runtime with its Cache kept in a test directory
-const runtime = {...nodeRuntime, cache: fileStore(CACHEDIR)}
+const runtime = new NodeRuntime({cache: fileCache(CACHEDIR)})
 
 describe('Cache and Rate Limit Integration Tests', () => {
   const cleanup = async () => {

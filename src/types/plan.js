@@ -11,24 +11,24 @@
  */
 
 import {z} from 'zod'
-import compile from './compile.js'
-import {columnsOf} from './graph.js'
-import {formsOf} from './forms.js'
-import {isReference, parseReference, rootScope, enterPosition, scopedRoot} from './reference.js'
+import compile from '../query/compile.js'
+import {columnsOf} from '../query/graph.js'
+import {formsOf} from '../query/forms.js'
+import {isReference, parseReference, rootContext, enterPosition, contextRoot} from '../query/reference.js'
 import {any, isAny, unwrap, widenedTypeOf, schemaAtPath, sharedSchema, compare, describeSchema, union, receivedBy, returnedBy} from './types.js'
-import {isPlainObject, mapValues, getIn, setPaths, parseFieldPath} from './common.js'
+import {isPlainObject, mapValues, getIn, setPaths, parseFieldPath} from '../common/common.js'
 import {READINGS} from './declaration.js'
 import {errorSchema, parseSchema} from '@tlsft/zodly'
 
 // The type of an argument: a literal's own type, or what its reference names.
-function typeOfArgument(value, scope, env) {
+function typeOfArgument(value, context, env) {
   if (isReference(value)) {
     const ref = parseReference(value)
-    const root = ref.sigil === '$' ? (env.nodes[ref.name] ?? env.phases[ref.name]) : scopedRoot(ref, scope)
+    const root = ref.sigil === '$' ? (env.nodes[ref.name] ?? env.phases[ref.name]) : contextRoot(ref, context)
     return schemaAtPath(root ?? any, ref.path)
   }
-  if (Array.isArray(value)) return z.array(sharedSchema(value.map(v => typeOfArgument(v, scope, env))))
-  if (isPlainObject(value)) return z.object(mapValues(value, v => typeOfArgument(v, scope, env)))
+  if (Array.isArray(value)) return z.array(sharedSchema(value.map(v => typeOfArgument(v, context, env))))
+  if (isPlainObject(value)) return z.object(mapValues(value, v => typeOfArgument(v, context, env)))
   return widenedTypeOf(value)
 }
 
@@ -57,17 +57,17 @@ function checkType(expected, actual, where, env) {
   }
 }
 
-function stepsTypes(steps, scope, env) {
-  let flow = scope.flow
-  for (const step of steps) flow = callTypes(step, {...scope, flow}, env)
+function stepsTypes(steps, context, env) {
+  let flow = context.flow
+  for (const step of steps) flow = callTypes(step, {...context, flow}, env)
   return flow
 }
 
 // The type of a call's arguments: what flows into them, except the fields the
 // call's own precheck names, which take its types, since the call checks them
 // before it runs.
-function argumentsType(call, args, scope, env) {
-  const flowing = typeOfArgument(args, scope, env)
+function argumentsType(call, args, context, env) {
+  const flowing = typeOfArgument(args, context, env)
   const precheck = call.validators?.precheck?.call
   return precheck?.def.type === 'object' ? z.object({...flowing.shape, ...precheck.shape}) : flowing
 }
@@ -76,9 +76,9 @@ function argumentsType(call, args, scope, env) {
 // field's type is what flows into it, or what its precheck says (for a call
 // field, what its nested call returns, or its catch does, once typed), or its
 // declared type when nothing known flows in.
-function fieldsOf(call, scope, env) {
+function fieldsOf(call, context, env) {
   const args = setPaths(call.args, call.settingsArgs)
-  const argsType = argumentsType(call, args, scope, env)
+  const argsType = argumentsType(call, args, context, env)
   const declared = (path) => call.declaration.fields.find(field => field.path === path)?.declaredType
   const returns = {}
   const typeOf = (path) => {
@@ -107,21 +107,21 @@ const itemOf = (received) => {
 
 // What a catch returns, given the error and the item whose call failed; none
 // when there is no catch.
-const catchType = (handler, scope, item, env) =>
-  handler && stepsTypes(handler.steps, enterPosition(handler, scope, errorSchema, item), env)
+const catchType = (handler, context, item, env) =>
+  handler && stepsTypes(handler.steps, enterPosition(handler, context, errorSchema, item), env)
 
 // Each call field's expected and actual return. `@` inside it is what the
 // declaration says it receives. A failed invocation returns what the call's
 // catch does, so a field returns its nested call's type or the catch's. A call
 // field's return, once typed, is its type for the fields typed after it.
-function positionTypes(call, scope, fields, env) {
+function positionTypes(call, context, fields, env) {
   const {catch: handler, ...held} = call.positions
   // the call field's function type, with what's typed so far
   const signatureOf = (path) => unwrap(schemaAtPath(expectedInput(call, fields), parseFieldPath(path)))
-  const caught = catchType(handler, scope, itemOf(Object.keys(held).map(path => receivedBy(signatureOf(path)))), env)
+  const caught = catchType(handler, context, itemOf(Object.keys(held).map(path => receivedBy(signatureOf(path)))), env)
   const types = mapValues(held, (position, path) => {
     const signature = signatureOf(path)
-    const returned = stepsTypes(position.steps, enterPosition(position, scope, receivedBy(signature)), env)
+    const returned = stepsTypes(position.steps, enterPosition(position, context, receivedBy(signature)), env)
     const actual = caught ? union(returned, caught) : returned
     const expected = returnedBy(signature)
     checkType(expected, actual, `${call.address}.${path}`, env)
@@ -136,10 +136,10 @@ const returnType = (call, fields) =>
   call.validators?.postcheck?.call ?? expectedOutput(call, fields)
 
 // A call's types: its arguments', its call fields', and its return type.
-function callTypes(call, scope, env) {
-  const fields = fieldsOf(call, scope, env)
+function callTypes(call, context, env) {
+  const fields = fieldsOf(call, context, env)
   const args = argumentTypes(call, fields, env)
-  const positions = positionTypes(call, scope, fields, env)
+  const positions = positionTypes(call, context, fields, env)
   const returns = returnType(call, fields)
   env.calls.set(call.address, {args, positions, returns})
   return returns
@@ -159,9 +159,9 @@ function inferTypes(compiled, columns, trigger) {
     calls: new Map(),
     errors: []
   }
-  const caught = catchType(compiled.settings.catch, rootScope, any, env)
+  const caught = catchType(compiled.settings.catch, rootContext, any, env)
   for (const name of columns.flat()) {
-    const returned = stepsTypes(compiled.phases[name].steps, {...rootScope, flow: any}, env)
+    const returned = stepsTypes(compiled.phases[name].steps, {...rootContext, flow: any}, env)
     env.phases[name] = caught ? union(returned, caught) : returned
   }
   return env

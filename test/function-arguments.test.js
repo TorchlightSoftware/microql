@@ -1,7 +1,7 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
 import query, {defineService} from '../index.js'
-import util from '../services/util.js'
+import util from '../src/service/util.js'
 
 describe('Function Arguments Tests', () => {
   describe('Raw Function Arguments Should Be Rejected', () => {

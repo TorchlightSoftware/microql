@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import {isErrorData, toErrorData, fromErrorData} from '../errors.js'
+import {isErrorData, toErrorData, fromErrorData} from '../src/execute/errors.js'
 
 // An Error labelled the way MicroQL labels the call that raised it.
 const labelled = (message, fields, options) => Object.assign(new Error(message, options), fields)

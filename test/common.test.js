@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import {isPlainObject, mapValues, pick, omit, filterObject, getIn, setIn, omitIn, setPaths, defaults, parseFieldPath, writeFieldPath} from '../common.js'
+import {isPlainObject, mapValues, pick, omit, filterObject, getIn, setIn, omitIn, setPaths, defaults, parseFieldPath, writeFieldPath} from '../src/common/common.js'
 
 describe('isPlainObject', () => {
   // [value, is plain]

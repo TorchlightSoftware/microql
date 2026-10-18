@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import {format} from '../format.js'
+import {format} from '../src/common/format.js'
 
 describe('format', () => {
   // [description, value, options, text]
