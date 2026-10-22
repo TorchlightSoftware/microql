@@ -213,7 +213,7 @@ listings: ['$categories', '[util]/each', {as: 'category',
 - **Retries come first**: a `catch` sees only a failure that outlasted its retries. An aborted Run catches nothing.
 - **`settings.catch`** handles each phase that fails: its result is the phase's, and the Run carries on.
 
-An error names the call that raised it by its address: `[$listings.@1a1 - [scraper]/extract] Timed out after 30000ms`. A `catch` is always lettered `e` (`$listings.@1e1`), so adding one moves no other address.
+An error names the call that raised it by its address: `[$listings.@1a1 - [scraper]/extract] Timed out after 30000ms.`. A `catch` is always lettered `e` (`$listings.@1e1`), so adding one moves no other address.
 
 ## Built-in Utilities
 
@@ -254,15 +254,17 @@ Per call, `cache: true` (or `cache: {ttl: '1D'}`) reuses the result across runs 
 
 A **Run** is one or more executions of a Query with one Run id, against its **Run State**, the store holding the result of every call it made. MicroQL writes each result there as it goes and reuses any result already there, so running again against the same Run State resumes where the last attempt stopped. A Run is only a concept: MicroQL keeps no record of Runs, and the Run State is their only trace.
 
+Every Query runs in a **scope**, which its runtime gives it. Scoping is the runtime's: it decides what a scope is keyed by, a tenant, a Run, or both, and gives the Query its services, their environment, the Cache and the Run State through it. MicroQL's engine runs a Query in whatever scope it's given, and never knows how it's keyed. The node runtime's scopes are Runs: services, their config and the Cache are every Run's, and each Run has a Run State and service instances of its own.
+
 What the node runtime (`import query from 'microql'`) does with results:
 
 | Store | Where | Lasts | To clear it |
 |---|---|---|---|
-| Run State | in memory, for the `query()` call, unless you name the Run with `{runId}`; on disk with `new NodeRuntime({runStates: fileRunStates(dir)})` | the call; a named Run, as long as the process or `dir` exists | start a new Run, or `await runtime.runStates.clear({}, runId)` |
+| Run State | in memory, for the `query()` call, unless you name the Run with `{runId}`; on disk with `new NodeRuntime({runStates: fileStores(dir)})` | the call; a named Run, as long as the process or `dir` exists | start a new Run, or `await runtime.runStates.clear({runId})` |
 | Cache, for calls with `cache` set | the `.cache` directory under the current working directory | until its ttl passes; expired entries are swept when the store is first used | `rm -rf .cache`, or `await nodeRuntime.cache.clear()` |
 | What `util/log` and `util/inspect` write `to:` a destination | appended to that file | until you delete it | delete the file |
 
-`fileRunStates(dir)` keeps a directory per Run, with one directory per call form and one JSON file per input, so a Run State on disk can be inspected by hand. The Cache, `fileCache('.cache')`, keeps one such store per scope, in a directory named by the scope's hash (the node runtime has one scope). How core keys and reuses results is in [Runtime Integration § Storage](docs/runtime-integration.md#storage).
+`fileStores(dir)` keeps a directory per scope, named by the scope's hash, with one directory per call form and one JSON file per input, so a Run State on disk can be inspected by hand: the node runtime keeps one per Run. The Cache, `fileStores('.cache')`, keeps one for every Run's scope, `{}`. How core keys and reuses results is in [Runtime Integration § Storage](docs/runtime-integration.md#storage).
 
 ## Running from the Command Line
 
@@ -271,14 +273,14 @@ A Query is an ordinary module, so a script is all a command needs. Keep [Run Sta
 ```javascript
 #!/usr/bin/env -S node --env-file=.env
 // queries/lead-gen.js
-import query, {NodeRuntime, fileRunStates} from 'microql'
+import query, {NodeRuntime, fileStores} from 'microql'
 import {scraper, claude, hubspot} from '../services/index.js'
 
 const today = new Date().toISOString().split('T')[0]
 const directory = process.argv[2] ?? 'https://chamber.example.org/member-directory'
 
 const created = await query({
-  runtime: new NodeRuntime({runStates: fileRunStates('runs')}),
+  runtime: new NodeRuntime({runStates: fileStores('runs')}),
   given: {directory},
   services: {scraper, claude, hubspot},
   phases: {/* as above */},
@@ -289,7 +291,7 @@ console.log(`Created ${created.length} companies`)
 process.exit(0) // HTTP clients may keep connections alive
 ```
 
-A script that's done can just exit, as this one does: the process takes its services' browsers and connections with it. A long-running process, or a test, cleans them up instead with `await nodeRuntime.tearDown()`, which calls the `tearDown` of each service instance the runtime keeps.
+Each Run has service instances of its own. `query()` releases those of a Run it named itself once it's done; those of a Run you name are kept for its later calls. A script that's done can just exit, as this one does: the process takes its services' browsers and connections with it. A long-running process, or a test, cleans them up instead with `await nodeRuntime.tearDown()`, which calls the `tearDown` of each service instance the runtime keeps.
 
 ```bash
 chmod +x queries/lead-gen.js

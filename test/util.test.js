@@ -239,12 +239,12 @@ describe('Util Service Tests', () => {
     })
 
     it('refuses to look up a method', () => {
-      assert.throws(() => util.lookup(utilKey('/each', {method: 'GET'})), /\[util\]\/each takes no method; got GET/)
+      assert.throws(() => util.lookup(utilKey('/each', {method: 'GET'})), /\[util\]\/each takes no method, and got GET/)
     })
 
     it('refuses to call with a method', async () => {
       const instance = await util.init({})
-      await assert.rejects(instance.call({...utilKey('/each', {method: 'GET'}), fields: {}}), /\[util\]\/each takes no method; got GET/)
+      await assert.rejects(instance.call({...utilKey('/each', {method: 'GET'}), fields: {}}), /\[util\]\/each takes no method, and got GET/)
     })
 
     it('refuses a confined key: util is no service of the caller\'s own custody', () => {
@@ -566,7 +566,7 @@ describe('Util Service Tests', () => {
       const formHash = planned.calls.find(call => call.address === '$result.@1a1').formHash
       assert.deepStrictEqual(await run(phase), [
         {id: 1, processed: true},
-        {'@type': 'Error', name: 'Error', message: '[$result.@1a1 - [items]/process] Failed 2', address: '$result.@1a1', key: '[items]/process', queryHash: planned.queryHash, formHash, args: {item: {id: 2, fail: true}}},
+        {'@type': 'Error', name: 'Error', message: '[$result.@1a1 - [items]/process] Failed 2', baseMessage: '[$result.@1a1 - [items]/process] Failed 2', address: '$result.@1a1', key: '[items]/process', queryHash: planned.queryHash, formHash, args: {item: {id: 2, fail: true}}},
         {id: 4, processed: true}
       ])
     })

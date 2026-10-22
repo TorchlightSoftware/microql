@@ -3,6 +3,7 @@ import {describe, it} from 'node:test'
 import {readFile} from 'node:fs/promises'
 import {compile} from '../index.js'
 import {defineService} from '../src/service/define-service.js'
+import {ERRORS} from '../src/common/error-catalog.js'
 
 const echo = defineService({
   '/echo': {input: {on: ['any', 'optional', {tags: ['target']}]}, call: async ({on}) => on},
@@ -21,19 +22,19 @@ describe('Compile-time errors', () => {
     ['an unknown $name',
       {phases: {a: ['[echo]/echo', {on: '$missing'}]}},
       {code: 'unknown-reference', address: '$a.@1'},
-      /\[\$a\.@1\] Unknown reference '\$missing'/],
+      /^\[\$a\.@1\] '\$missing' names no phase or node\.$/],
     ['$given when the Query has no given',
       {phases: {a: ['[echo]/echo', {on: '$given.x'}]}},
       {code: 'unknown-reference', address: '$a.@1'},
-      /Unknown reference '\$given\.x'/],
+      /'\$given\.x' names no phase or node/],
     ['an unknown @name',
       {given: {xs: [1]}, phases: {a: ['$given.xs', '[util]/each', {service: ['[echo]/echo', {on: '@item'}]}]}},
-      {code: 'unknown-reference', address: '$a.@1a1'},
-      /\[\$a\.@1a1\] Unknown reference '@item'/],
+      {code: 'unknown-binding', address: '$a.@1a1'},
+      /\[\$a\.@1a1\] '@item' names 'item', which no enclosing iteration names with as:/],
     ['an @name used outside its iteration',
       {given: {xs: [1]}, phases: {a: ['$given.xs', '[util]/each', {as: 'x', service: ['[echo]/echo', {on: '@'}]}], b: ['[echo]/echo', {on: '@x'}]}},
-      {code: 'unknown-reference', address: '$b.@1'},
-      /\[\$b\.@1\] Unknown reference '@x'/],
+      {code: 'unknown-binding', address: '$b.@1'},
+      /\[\$b\.@1\] '@x' names 'x'/],
     ['a binding name used twice',
       {
         given: {xs: [1]}, phases: {
@@ -45,48 +46,48 @@ describe('Compile-time errors', () => {
       /\[\$b\.@1\] Binding name 'x' is used more than once/],
     ['the old $.name form',
       {given: {x: 1}, phases: {a: ['[echo]/echo', {on: '$.given.x'}]}},
-      {code: 'invalid-reference', address: '$a.@1'},
-      /The \$\.name form is replaced by \$name. Use '\$given\.x'/],
+      {code: 'retired-key', address: '$a.@1'},
+      /^\[\$a\.@1\] '\$\.given\.x' is retired\.\n\nThe \$\.name form is replaced by \$name: use '\$given\.x'\.$/],
     ['@@',
       {given: {xs: [1]}, phases: {a: ['$given.xs', '[util]/each', {service: ['[echo]/echo', {on: '@@'}]}]}},
-      {code: 'invalid-reference', address: '$a.@1a1'},
-      /@@ is removed/],
+      {code: 'retired-key', address: '$a.@1a1'},
+      /'@@' is retired/],
     ['bare $',
       {phases: {a: ['[echo]/echo', {on: '$'}]}},
-      {code: 'invalid-reference', address: '$a.@1'},
-      /Bare \$ is not supported/],
+      {code: 'bare-reference', address: '$a.@1'},
+      /'\$' names no phase\.\n\nReference a phase by name/],
     ['bare @ at the start of a phase',
       {phases: {a: ['[echo]/echo', {on: '@'}]}},
-      {code: 'invalid-reference', address: '$a.@1'},
-      /\[\$a\.@1\] Invalid reference '@': nothing flows into this call/],
+      {code: 'nothing-flows', address: '$a.@1'},
+      /\[\$a\.@1\] '@' reads what flows into this call, and nothing does/],
     ['bare @ in the first step of a chain',
       {given: {x: 1}, phases: {a: [['[echo]/echo', {on: '@'}], ['@', '[echo]/echo']]}},
-      {code: 'invalid-reference', address: '$a.@1'},
-      /\[\$a\.@1\] Invalid reference '@': nothing flows/],
+      {code: 'nothing-flows', address: '$a.@1'},
+      /\[\$a\.@1\] '@' reads what flows/],
     ['a chain in a service argument without as:',
       {given: {xs: [1]}, phases: {a: ['$given.xs', '[util]/each', {service: [['[echo]/echo', {on: 1}]]}]}},
       {code: 'unreachable-input', address: '$a.@1'},
-      /\[\$a\.@1\] The chain in 'service' can't reach its input. Name it with as:/],
+      /\[\$a\.@1\] The chain in 'service' can't reach its input\.\n\nName it with as:/],
     ['as: on a call that takes no call',
       {given: {x: 1}, phases: {a: ['[echo]/echo', {on: '$given.x', as: 'x'}]}},
       {code: 'misplaced-as', address: '$a.@1'},
       /as: names an iteration, but \[echo\]\/echo takes no call/],
     ['@err outside any catch',
       {phases: {a: ['[echo]/echo', {on: '@err'}]}},
-      {code: 'unknown-reference', address: '$a.@1'},
-      /\[\$a\.@1\] Unknown reference '@err': no enclosing catch/],
+      {code: 'unknown-error', address: '$a.@1'},
+      /\[\$a\.@1\] '@err' is inside no catch/],
     ['@@err with only one enclosing catch',
       {phases: {a: ['[util]/try', {service: ['[echo]/echo', {on: 1}], catch: ['[echo]/echo', {on: '@@err'}]}]}},
-      {code: 'unknown-reference', address: '$a.@1e1'},
-      /\[\$a\.@1e1\] Unknown reference '@@err': it is inside only 1 catch/],
+      {code: 'unknown-error', address: '$a.@1e1'},
+      /\[\$a\.@1e1\] '@@err' is inside only 1 catch/],
     ['catch on a call that holds no calls',
       {phases: {a: ['[echo]/echo', {on: 1, catch: ['[echo]/echo', {on: '@err'}]}]}},
       {code: 'misplaced-catch', address: '$a.@1'},
-      /\[\$a\.@1\] catch: handles failures of the calls a call holds, but \[echo\]\/echo holds none. To catch a single call, hold it in \[util\]\/try/],
+      /\[\$a\.@1\] catch: handles failures of the calls a call holds, but \[echo\]\/echo holds none\.\n\nTo catch a single call, hold it in \[util\]\/try/],
     ['the retired onError',
       {phases: {a: ['[echo]/echo', {on: 1, onError: ['[echo]/echo', {on: '@err'}]}]}},
       {code: 'retired-key', address: '$a.@1'},
-      /'onError' is retired. Use catch: on the call holding the calls whose failures it handles/],
+      /'onError' is retired\.\n\nUse catch: on the call holding the calls whose failures it handles\./],
     ['the retired ignoreErrors',
       {phases: {a: ['[echo]/echo', {on: 1, ignoreErrors: true}]}},
       {code: 'retired-key', address: '$a.@1'},
@@ -94,19 +95,19 @@ describe('Compile-time errors', () => {
     ['the retired skipOutputErrors',
       {given: {xs: [1]}, phases: {a: ['$given.xs', '[util]/each', {service: ['[echo]/echo', {on: '@'}], skipOutputErrors: true}]}},
       {code: 'retired-key', address: '$a.@1'},
-      /'skipOutputErrors' is retired. Use catch: to handle each failure, then skip: \['error'\] to leave them out/],
+      /'skipOutputErrors' is retired\.\n\nUse catch: to handle each failure, then skip: \['error'\] to leave them out/],
     ['the retired Query-level onError',
       {settings: {onError: ['[echo]/echo', {on: '@err'}]}, phases: {a: ['[echo]/echo', {on: 1}]}},
       {code: 'retired-key', address: 'settings'},
       /'onError' is retired/],
     ['a retired util resource',
       {phases: {a: ['[util]/print', {on: 1}]}},
-      {code: 'refused-key', address: '$a.@1'},
-      /\[util\]\/print is retired. Use \[util\]\/inspect/],
+      {code: 'retired-key', address: '$a.@1'},
+      /^\[\$a\.@1\] '\[util\]\/print' is retired\.\n\nUse \[util\]\/inspect\.$/],
     ['err as a binding name',
       {given: {xs: [1]}, phases: {a: ['$given.xs', '[util]/each', {as: 'err', service: ['[echo]/echo', {on: '@err'}]}]}},
       {code: 'reserved-name', address: '$a.@1'},
-      /'err' is reserved for the error in catch/],
+      /'err' is reserved, and can't name an iteration/],
     ['a phase named given',
       {phases: {given: ['[echo]/echo', {on: 1}]}},
       {code: 'reserved-name', address: '$given'},
@@ -114,15 +115,15 @@ describe('Compile-time errors', () => {
     ['a malformed Service Call Validation',
       {phases: {a: ['[echo]/echo', {on: 1, precheck: {on: ['nope']}}]}},
       {code: 'malformed-schema', address: '$a.@1'},
-      /Service Call Validation precheck schema parse error/],
+      /The Service Call Validation precheck schema is malformed/],
     ['a phase named trigger',
       {phases: {trigger: ['[echo]/echo', {on: 1}]}},
       {code: 'reserved-name', address: '$trigger'},
       /'trigger' is reserved/],
     ['a Service Call Address used as a reference',
       {phases: {a: ['[echo]/echo', {on: 1}], b: ['[echo]/echo', {on: '$a.@1'}]}},
-      {code: 'invalid-reference', address: '$b.@1'},
-      /Service call addresses are not reliable references in queries - they break when ordering changes. Use an alias instead./],
+      {code: 'address-reference', address: '$b.@1'},
+      /'\$a\.@1' names a Service Call Address/],
     ['a literal that looks like a reference',
       {phases: {a: ['[echo]/echo', {on: '$5.00'}]}},
       {code: 'invalid-reference', address: '$a.@1'},
@@ -130,39 +131,39 @@ describe('Compile-time errors', () => {
     ['the retired service:action form',
       {phases: {a: ['echo:echo', {on: 1}]}},
       {code: 'retired-key', address: '$a.@1'},
-      /uses the retired service:action form. Use '\[echo\]\/echo'/],
+      /'echo:echo' is retired\.\n\nThe service:action form is replaced by '\[echo\]\/echo'/],
     ['the retired service:action form in method syntax',
       {given: {x: 1}, phases: {a: ['$given.x', 'echo:echo']}},
       {code: 'retired-key', address: '$a.@1'},
-      /uses the retired service:action form. Use '\[echo\]\/echo'/],
+      /'echo:echo' is retired/],
     ['an unknown service',
       {phases: {a: ['[nope]/echo', {on: 1}]}},
       {code: 'unknown-service', address: '$a.@1'},
-      /Service 'nope' not found/],
+      /Service 'nope' is not registered in this scope/],
     ['an unknown resource',
       {phases: {a: ['[echo]/nope', {on: 1}]}},
-      {code: 'refused-key', address: '$a.@1'},
+      {code: 'unknown-resource', address: '$a.@1'},
       /\[\$a\.@1\] \[echo\]\/nope is not a resource of this service/],
     ['a method on a service call that takes none',
       {phases: {a: ['POST [echo]/echo', {on: 1}]}},
-      {code: 'refused-key', address: '$a.@1'},
-      /\[\$a\.@1\] \[echo\]\/echo takes no method; got POST/],
+      {code: 'method-not-allowed', address: '$a.@1'},
+      /^\[\$a\.@1\] \[echo\]\/echo takes no method, and got POST\.$/],
     ['a method missing from a resource with several',
       {phases: {a: ['DELETE [echo]/items', {}]}},
-      {code: 'refused-key', address: '$a.@1'},
-      /\[\$a\.@1\] \[echo\]\/items doesn't answer DELETE \(answers GET, POST\)/],
+      {code: 'method-not-allowed', address: '$a.@1'},
+      /^\[\$a\.@1\] \[echo\]\/items doesn't answer DELETE\.\n\nIt answers GET, POST\.$/],
     ['no method on a resource that needs one',
       {phases: {a: ['[echo]/items', {}]}},
-      {code: 'refused-key', address: '$a.@1'},
-      /\[echo\]\/items needs a method: GET, POST/],
+      {code: 'method-required', address: '$a.@1'},
+      /\[echo\]\/items needs a method\.\n\nIt answers GET, POST\./],
     ['a service without lookup, supportedCalls and init',
       {services: {plain: {'/x': async () => 1}}, phases: {a: ['[plain]/x', {}]}},
       {code: 'not-a-service', address: '$a.@1'},
-      /Service 'plain' must provide lookup\(key\), supportedCalls\(\) and init\(env\)/],
+      /Service 'plain' lacks lookup\(key\), supportedCalls\(\) or init\(env\)/],
     ['a service with lookup only',
       {services: {partial: {lookup: () => ({})}}, phases: {a: ['[partial]/x', {}]}},
       {code: 'not-a-service', address: '$a.@1'},
-      /Service 'partial' must provide/],
+      /Service 'partial' lacks/],
     ['a malformed declaration',
       {phases: {a: ['[echo]/broken', {on: 1}]}},
       {code: 'malformed-declaration', address: '$a.@1'},
@@ -170,15 +171,15 @@ describe('Compile-time errors', () => {
     ['method syntax on a service call with no target',
       {given: {x: 1}, phases: {a: ['$given.x', '[util]/when']}},
       {code: 'no-target', address: '$a.@1'},
-      /Method syntax was used for \[util\]\/when but it declares no target field/],
+      /Method syntax was used for \[util\]\/when, which declares no target field/],
     ['an unknown phase in select',
       {phases: {a: ['[echo]/echo', {on: 1}]}, select: '$b'},
       {code: 'unknown-reference', address: 'select'},
-      /Unknown reference '\$b' in select/],
+      /'\$b' names no phase or node/],
     ['a bare name in select',
       {phases: {a: ['[echo]/echo', {on: 1}]}, select: 'a'},
       {code: 'invalid-select', address: 'select'},
-      /select takes references: '\$a'/]
+      /select takes references, not 'a'\.\n\nUse '\$a'\./]
   ]
 
   for (const [name, query, {code, address}, pattern] of cases) {
@@ -207,24 +208,39 @@ describe('Compile-time errors', () => {
   })
 })
 
-// Error codes are API: every one core raises is documented, and every
-// documented one is raised.
+// Error codes are API: every one in the catalog is raised and documented,
+// as are the codes of plan()'s type issues.
 describe('error codes', () => {
   const read = (file) => readFile(new URL(`../${file}`, import.meta.url), 'utf8')
-  const raised = async () => {
-    const sources = await Promise.all(['src/query/compile.js', 'src/query/graph.js', 'src/types/types.js', 'src/runtime/config.js'].map(read))
-    const codes = sources.flatMap(source => [...source.matchAll(/(?:fail\([^,]+, |runError\([^,]+, |code: |issue\()'([a-z-]+)'/g)].map(([, code]) => code))
-    return [...new Set(codes)].sort()
-  }
+  const SOURCES = ['common/common.js',
+    'execute/execute.js',
+    'execute/wrappers.js',
+    'query/compile.js',
+    'query/graph.js',
+    'query/reference.js',
+    'runtime/config.js',
+    'runtime/runtime.js',
+    'runtime/service-registry.js',
+    'runtime/table.js',
+    'service/define-service.js',
+    'service/util.js',
+    'types/declaration.js',
+    'types/sources.js']
+  const quotedIn = async (files) => new Set((await Promise.all(files.map(read))).flatMap(source => [...source.matchAll(/'([a-z]+(?:-[a-z]+)*)'/g)].map(([, code]) => code)))
+  const issueCodes = async () => [...(await read('src/types/types.js')).matchAll(/issue\('([a-z-]+)'/g)].map(([, code]) => code)
   const documented = async () => {
     const doc = await read('docs/runtime-integration.md')
     const section = doc.slice(doc.indexOf('## Errors'), doc.indexOf('## The runtime API'))
     return [...new Set([...section.matchAll(/^\| `([a-z-]+)` \|/gm)].map(([, code]) => code))].sort()
   }
 
-  it('documents exactly the codes core raises', async () => {
-    const codes = await raised()
-    assert.equal(codes.length, 23)
+  it('raises every code in the catalog', async () => {
+    const quoted = await quotedIn(SOURCES.map(file => `src/${file}`))
+    assert.deepEqual(Object.keys(ERRORS).filter(code => !quoted.has(code)), [])
+  })
+
+  it('documents exactly the catalog\'s codes and the type issues\'', async () => {
+    const codes = [...new Set([...Object.keys(ERRORS), ...await issueCodes()])].sort()
     assert.deepEqual(await documented(), codes)
   })
 })

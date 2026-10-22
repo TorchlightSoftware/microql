@@ -2,10 +2,10 @@
  * @fileoverview MicroQL Query Compiler
  *
  * Compiles a Query into a plain tree of phases and service calls. Compile is
- * pure: it reads the Query and the services its runtime has registered in the
- * Query's scope, checks every reference against the context it appears in, and
- * assigns each call its Service Call Address. It never makes a call: execute
- * does, through the runtime.
+ * pure: it reads the Query and the services of the scope it runs in, checks
+ * every reference against the context it appears in, and assigns each call
+ * its Service Call Address. It never makes a call: execute does, through the
+ * scope.
  *
  * Domain:
  *   Phase     a named node of the Query; a chain of service calls (a chain of
@@ -27,12 +27,12 @@
 
 import {parseServiceKey} from '@tlsft/service-key'
 
+import {errorOf, locate, isCatalogued, reasonOf} from '../common/error-catalog.js'
 import {RESERVE_ARGS, VALIDATION_NAMES, isPlainObject, mapValues, pick, omit, omitIn, getIn, setIn, defaults} from '../common/common.js'
 import {readDeclaration} from '../types/declaration.js'
 import {isReference, parseReference, readOf, readsOutside} from './reference.js'
 import {parseSchema} from '@tlsft/zodly'
 import {fieldPathOf} from './addresses.js'
-import {missingCapability, inScope} from '../runtime/runtime.js'
 
 // Nodes resolved before the first phase runs; never valid phase names.
 const ROOT_NODES = ['given', 'trigger']
@@ -61,13 +61,16 @@ const RETIRED_ARGS = {
 // Fails on the first retired argument among the keys.
 function checkRetired(site, keys) {
   const retired = keys.find(key => Object.hasOwn(RETIRED_ARGS, key))
-  if (retired) fail(site, 'retired-key', `'${retired}' is retired. ${RETIRED_ARGS[retired]}`)
+  if (retired) fail(site, 'retired-key', {retired, replacement: `${RETIRED_ARGS[retired]}.`})
 }
 
-// A compile-time error: its message names the address, and the error carries
-// the address and a code (see docs/runtime-integration.md § Errors).
-const fail = (site, code, message) => {
-  throw Object.assign(new Error(`[${site.address}] ${message}`), {address: site.address, code})
+// A compile-time error at its site: its message starts with the address, and
+// the error carries it (see docs/runtime-integration.md § Errors).
+const atSite = (site, error) => Object.assign(locate(error, `[${site.address}]`), {address: site.address})
+
+// Fails at a site with the catalog's error for a code.
+const fail = (site, code, details, cause) => {
+  throw atSite(site, errorOf(code, details, {cause}))
 }
 
 // A chain is an array of service descriptors (each itself an array).
@@ -88,8 +91,8 @@ function parseDescriptor(site, descriptor) {
   const parts = parseServiceKey(key)
   if (!parts) {
     const retired = descriptor.find(d => typeof d === 'string' && RETIRED_KEY.test(d))?.match(RETIRED_KEY)
-    if (retired) fail(site, 'retired-key', `Service key '${retired[0]}' uses the retired service:action form. Use '[${retired[1]}]/${retired[2]}'`)
-    fail(site, 'invalid-descriptor', `Invalid service descriptor. Expected ['[METHOD] [service]/resource', {...}] format. Got: ${JSON.stringify(descriptor)}`)
+    if (retired) fail(site, 'retired-key', {retired: retired[0], replacement: `The service:action form is replaced by '[${retired[1]}]/${retired[2]}'.`})
+    fail(site, 'invalid-descriptor', {descriptor: JSON.stringify(descriptor)})
   }
   return {key, parts, args, hasTarget: false}
 }
@@ -97,43 +100,46 @@ function parseDescriptor(site, descriptor) {
 const SERVICE_METHODS = ['lookup', 'supportedCalls', 'init']
 const isService = (service) => SERVICE_METHODS.every(method => typeof service?.[method] === 'function')
 
-// The service a key names, as the runtime has it registered in the Query's
-// scope, once it's known to be a service whose env keys the runtime has.
-function serviceAt(site, {runtime}, parts) {
-  const service = runtime.services.get(parts.service)
-  if (!service) fail(site, 'unknown-service', `Service '${parts.service}' not found`)
-  if (!isService(service)) {
-    fail(site, 'not-a-service', `Service '${parts.service}' must provide lookup(key), supportedCalls() and init(env). A service definition gets them from defineService`)
-  }
-  const missing = missingCapability(service, runtime.env)
-  if (missing) fail(site, 'missing-capability', `Service '${parts.service}' requires env.${missing}, which this runtime doesn't provide`)
+// The first key a service requires that an env lacks, if any.
+export const missingCapability = (service, env) => service.requires?.find(key => !(key in env))
+
+// The service a key names among the scope's, once it's known to be a service
+// whose env keys the scope has.
+function serviceAt(site, {scope}, parts) {
+  const service = scope.services.get(parts.service)
+  if (!service) fail(site, 'unknown-service', {service: parts.service})
+  if (!isService(service)) fail(site, 'not-a-service', {service: parts.service})
+  const missing = missingCapability(service, scope.env)
+  if (missing) fail(site, 'missing-capability', {service: parts.service, capability: missing})
   return service
 }
 
 // What a service's lookup answers for a key: its declaration, or a refusal
 // for a key it won't take, such as a resource it lacks or a method it doesn't.
-function lookedUp(site, service, parts) {
+// A refusal not from the catalog is the service's own: a refused key.
+function lookedUp(site, service, {key, parts}) {
   try {
     return service.lookup(parts)
   } catch (error) {
-    fail(site, 'refused-key', error.message)
+    if (isCatalogued(error)) throw atSite(site, error)
+    fail(site, 'refused-key', {key, reason: error.message}, error)
   }
 }
 
 // The declaration of the service call a key names, as its service's lookup
 // answers it, read and checked; any error in it is reported at the call.
-function declarationAt(site, service, {key, parts}) {
-  const declaration = lookedUp(site, service, parts)
+function declarationAt(site, service, parsed) {
+  const declaration = lookedUp(site, service, parsed)
   try {
     return readDeclaration(declaration)
   } catch (error) {
-    fail(site, 'malformed-declaration', `The declaration of ${key} is malformed: ${error.message}`)
+    fail(site, 'malformed-declaration', {key: parsed.key, reason: reasonOf(error)}, error)
   }
 }
 
 // Method syntax puts its target in the field the declaration tags target.
 function targetField(site, declaration, key) {
-  if (!declaration.target) fail(site, 'no-target', `Method syntax was used for ${key} but it declares no target field`)
+  if (!declaration.target) fail(site, 'no-target', {key})
   return declaration.target.path
 }
 
@@ -142,7 +148,7 @@ function parseSchemaAt(site, designation, order, schema) {
   try {
     return parseSchema(schema)
   } catch (error) {
-    fail(site, 'malformed-schema', `${designation} ${order} schema parse error:\n${error.message}`)
+    fail(site, 'malformed-schema', {validation: designation, order, details: error.message}, error)
   }
 }
 
@@ -203,23 +209,21 @@ function parseWithSite(site, text) {
   try {
     return parseReference(text)
   } catch (error) {
-    fail(site, 'invalid-reference', error.message)
+    throw atSite(site, error)
   }
 }
 
 function checkReference(site, {sigil, name, depth}, text, context, query) {
-  if (sigil === '$' && !query.nodeNames.has(name)) fail(site, 'unknown-reference', `Unknown reference '${text}': no phase or node named '${name}'`)
-  if (depth > context.errors) {
-    fail(site, 'unknown-reference', context.errors ? `Unknown reference '${text}': it is inside only ${context.errors} catch` : `Unknown reference '${text}': no enclosing catch`)
-  }
-  if (sigil === '@' && name && !depth && !context.bindings.includes(name)) fail(site, 'unknown-reference', `Unknown reference '${text}': no enclosing iteration is named '${name}' by as:`)
-  if (sigil === '@' && !name && !context.flow) fail(site, 'invalid-reference', `Invalid reference '${text}': nothing flows into this call. The first call of a phase or chain receives nothing; name an iteration with as: to reach its item`)
+  if (sigil === '$' && !query.nodeNames.has(name)) fail(site, 'unknown-reference', {reference: text})
+  if (depth > context.errors) fail(site, 'unknown-error', {reference: text, catches: context.errors})
+  if (sigil === '@' && name && !depth && !context.bindings.includes(name)) fail(site, 'unknown-binding', {reference: text, binding: name})
+  if (sigil === '@' && !name && !context.flow) fail(site, 'nothing-flows', {reference: text})
 }
 
 // Declares an iteration name; names are Query-scoped, so each is used once.
 function declareBinding(site, name, query) {
-  if (name === 'err') fail(site, 'reserved-name', '\'err\' is reserved for the error in catch (@err); name the iteration something else')
-  if (query.bindingNames.has(name)) fail(site, 'duplicate-binding', `Binding name '${name}' is used more than once. Binding names are Query-scoped.`)
+  if (name === 'err') fail(site, 'reserved-name', {reserved: name, naming: 'an iteration: @err is the error in catch'})
+  if (query.bindingNames.has(name)) fail(site, 'duplicate-binding', {binding: name})
   query.bindingNames.add(name)
   if (query.nodeNames.has(name)) {
     query.warnings.push({address: site.address, message: `Binding '@${name}' shares its name with '$${name}'`})
@@ -253,7 +257,7 @@ function compilePosition(owner, field, letter, value, context, as, query) {
   const descriptor = isPlainObject(value) ? ['[util]/template', value] : value
   const chain = isChain(descriptor)
   if (chain && field !== 'catch' && !as) {
-    fail(owner, 'unreachable-input', `The chain in '${field}' can't reach its input. Name it with as: and reference it as @name`)
+    fail(owner, 'unreachable-input', {field})
   }
 
   const inner = {
@@ -276,7 +280,7 @@ function positionFields(site, args, declaration, key) {
     .filter(({segments}) => getIn(args, segments) !== undefined)
   for (const {path, segments} of fields) {
     if (typeof getIn(args, segments) === 'function') {
-      fail(site, 'raw-function', `Raw JavaScript functions are not supported in MicroQL. Use service descriptors instead of raw functions for argument '${path}' in ${key}. Example: ['[service]/resource', {arg: '@'}]`)
+      fail(site, 'raw-function', {key, path})
     }
   }
   // a reference or literal in a call field stays data
@@ -287,11 +291,11 @@ function positionFields(site, args, declaration, key) {
 
 // Compiles one service descriptor at a site, in a context.
 function compileCall(descriptor, site, context, query) {
-  if (!Array.isArray(descriptor)) fail(site, 'invalid-descriptor', `Invalid service descriptor. Expected ['[METHOD] [service]/resource', {...}] format. Got: ${JSON.stringify(descriptor)}`)
+  if (!Array.isArray(descriptor)) fail(site, 'invalid-descriptor', {descriptor: JSON.stringify(descriptor)})
   const parsed = parseDescriptor(site, descriptor)
   const service = serviceAt(site, query, parsed.parts)
   const declaration = declarationAt(site, service, parsed)
-  if (!isPlainObject(parsed.args)) fail(site, 'invalid-descriptor', `Arguments for ${parsed.key} must be an object`)
+  if (!isPlainObject(parsed.args)) fail(site, 'invalid-arguments', {key: parsed.key})
 
   const call = {
     address: site.address,
@@ -310,11 +314,11 @@ function compileCall(descriptor, site, context, query) {
   const fields = positionFields(site, args, declaration, parsed.key)
   const holdsCalls = fields.some(f => f.path !== 'catch')
   if (as !== undefined) {
-    if (!holdsCalls) fail(site, 'misplaced-as', `as: names an iteration, but ${parsed.key} takes no call`)
+    if (!holdsCalls) fail(site, 'misplaced-as', {key: parsed.key})
     declareBinding(site, as, query)
   }
   if (args.catch !== undefined && !holdsCalls) {
-    fail(site, 'misplaced-catch', `catch: handles failures of the calls a call holds, but ${parsed.key} holds none. To catch a single call, hold it in [util]/try`)
+    fail(site, 'misplaced-catch', {key: parsed.key})
   }
 
   const held = [...fields, ...declaration.settings]
@@ -339,7 +343,7 @@ function compileCall(descriptor, site, context, query) {
 }
 
 function compilePhase(name, descriptor, query) {
-  if (ROOT_NODES.includes(name)) fail({address: `$${name}`}, 'reserved-name', `'${name}' is reserved and can't name a phase`)
+  if (ROOT_NODES.includes(name)) fail({address: `$${name}`}, 'reserved-name', {reserved: name, naming: 'a phase'})
   const steps = compileSteps(descriptor, sitesAt(`$${name}.@`, ['phases', name]), {bindings: [], errors: 0}, false, query)
   return {
     name,
@@ -359,26 +363,25 @@ function compileSelect(select, query) {
   if (select === undefined) return undefined
   const site = {address: 'select'}
   const refs = [].concat(select).map(text => {
-    const ref = isReference(text) ? parseWithSite(site, text) : fail(site, 'invalid-select', `select takes references: '$${text}'`)
-    if (ref.sigil !== '$' || !query.nodeNames.has(ref.name)) fail(site, 'unknown-reference', `Unknown reference '${text}' in select`)
+    const ref = isReference(text) ? parseWithSite(site, text) : fail(site, 'invalid-select', {select: text})
+    if (ref.sigil !== '$' || !query.nodeNames.has(ref.name)) fail(site, 'unknown-reference', {reference: text})
     return ref
   })
   return Array.isArray(select) ? refs : refs[0]
 }
 
 /**
- * Compile a Query into its tree of phases and calls, for the scope it runs
- * in on its runtime.
- * @returns {Object} {phases, calls, given, trigger, triggerSchema, select, settings, runtime, warnings},
- *   where runtime is the Query's, in its scope (see inScope)
+ * Compile a Query into its tree of phases and calls, for the scope it runs in.
+ * @returns {Object} {phases, calls, given, trigger, triggerSchema, select, settings, scope, warnings},
+ *   where scope is the one the Query was compiled in, which execute runs it in
  */
 export function compile(config) {
-  const {phases = {}, given, trigger, settings = {}, runtime, scope = {}} = config
-  if (!runtime) throw new Error('compile needs a runtime: pass config.runtime, whose services the Query\'s keys name (microql/core has none of its own)')
+  const {phases = {}, given, trigger, settings = {}, scope} = config
+  if (!scope) throw errorOf('missing-scope', {}, {where: 'compile:'})
   checkRetired({address: 'settings'}, Object.keys(settings))
 
   const query = {
-    runtime: inScope(runtime, scope),
+    scope,
     settings,
     // $trigger always exists: it holds whatever payload the Run is given
     nodeNames: new Set([...Object.keys(phases), ...(given !== undefined ? ['given'] : []), 'trigger']),
@@ -400,7 +403,7 @@ export function compile(config) {
       ...settings,
       catch: settings.catch ? compileGlobalCatch(settings.catch, query) : undefined
     },
-    runtime: query.runtime,
+    scope,
     warnings: query.warnings
   }
 }

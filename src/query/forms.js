@@ -50,23 +50,23 @@ function canonicalValue(value) {
 export const hashOf = (value) => bytesToHex(sha256(utf8ToBytes(canonical(value))))
 
 // A reference's form: what it points to, as a hash or (for root nodes) a value.
-function referenceForm(text, context, env) {
+function referenceForm(text, context, formGraph) {
   const ref = parseReference(text)
   const {sigil, name, path} = ref
-  if (sigil === '$' && name in env.nodes) return {value: getIn(env.nodes[name], path) ?? null}
-  if (sigil === '$') return {phase: env.phases[name], path}
+  if (sigil === '$' && name in formGraph.nodes) return {value: getIn(formGraph.nodes[name], path) ?? null}
+  if (sigil === '$') return {phase: formGraph.phases[name], path}
   return {context: contextRoot(ref, context), path}
 }
 
 // Arguments with every reference replaced by its form.
-const argumentsForm = (value, context, env) => mapReferences(value, text => referenceForm(text, context, env))
+const argumentsForm = (value, context, formGraph) => mapReferences(value, text => referenceForm(text, context, formGraph))
 
 // Forms the steps of a phase or position in order; returns each step's hash.
-function stepsForm(steps, context, env) {
+function stepsForm(steps, context, formGraph) {
   const hashes = []
   let flow = context.flow
   for (const step of steps) {
-    flow = callForm(step, {...context, flow}, env)
+    flow = callForm(step, {...context, flow}, formGraph)
     hashes.push(flow)
   }
   return hashes
@@ -75,10 +75,10 @@ function stepsForm(steps, context, env) {
 // A call's form and hash, recorded by address. The data part (key and
 // arguments) is hashed first: a position's input is "the input of this call",
 // which the inner forms name by that hash, so a form never contains itself.
-function callForm(call, context, env) {
+function callForm(call, context, formGraph) {
   const data = {
     key: call.key,
-    args: argumentsForm(setPaths(call.args, call.settingsArgs), context, env),
+    args: argumentsForm(setPaths(call.args, call.settingsArgs), context, formGraph),
     settings: omit(call.settings, [...OPERATIONAL_SETTINGS, 'rateLimit', 'inspect']),
     checks: call.checks
   }
@@ -89,31 +89,33 @@ function callForm(call, context, env) {
   for (const [field, position] of Object.entries(call.positions)) {
     const item = {itemOf: input}
     const entered = field === 'catch' ? enterPosition(position, context, {errorOf: input}, item) : enterPosition(position, context, item)
-    positions[field] = stepsForm(position.steps, entered, env)
+    positions[field] = stepsForm(position.steps, entered, formGraph)
   }
 
   const form = {...data, positions}
   const hash = hashOf(form)
-  env.calls.set(call.address, {form, hash})
+  formGraph.calls.set(call.address, {form, hash})
   return hash
 }
 
 /**
- * The forms of every call in a compiled Query, against one trigger payload.
+ * The form graph of a compiled Query, against one trigger payload: every
+ * call's form and hash by address, each phase's form hash, and the Query's
+ * hash. Execute finds results by it; plan() shows them by it.
  * @returns {Object} {calls: Map(address → {form, hash}), phases: {name → hash}, queryHash: hash}
  */
 export function formsOf(compiled, {trigger} = {}) {
-  const env = {nodes: {given: compiled.given, trigger}, phases: {}, calls: new Map()}
+  const formGraph = {nodes: {given: compiled.given, trigger}, phases: {}, calls: new Map()}
 
   // in column order, so a phase's upstream form hashes are known before it
   for (const name of columnsOf(compiled.phases).flat()) {
-    env.phases[name] = stepsForm(compiled.phases[name].steps, rootContext, env).at(-1)
+    formGraph.phases[name] = stepsForm(compiled.phases[name].steps, rootContext, formGraph).at(-1)
   }
 
   const handler = compiled.settings.catch
   if (handler) {
-    stepsForm(handler.steps, enterPosition(handler, rootContext, {errorOf: 'phase'}), env)
+    stepsForm(handler.steps, enterPosition(handler, rootContext, {errorOf: 'phase'}), formGraph)
   }
 
-  return {calls: env.calls, phases: env.phases, queryHash: hashOf(env.phases)}
+  return {calls: formGraph.calls, phases: formGraph.phases, queryHash: hashOf(formGraph.phases)}
 }

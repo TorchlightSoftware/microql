@@ -148,11 +148,11 @@ describe('target', () => {
 
   // [target, error pattern]
   const invalid = [
-    ['$nope', /Unknown target '\$nope': no phase named 'nope'/],
-    ['$listings.@1', /Targets are phases: use '\$listings'/],
-    ['$listings.result', /Targets are phases: use '\$listings'/],
-    ['listings', /Targets are phases: use '\$listings'/],
-    ['@item', /Targets are phases, named '\$phase': got '@item'/]
+    ['$nope', {code: 'unknown-target', message: /^execute: Target '\$nope' names no phase\.$/}],
+    ['$listings.@1', {code: 'invalid-target', message: /Use '\$listings'/}],
+    ['$listings.result', {code: 'invalid-target', message: /Use '\$listings'/}],
+    ['listings', {code: 'invalid-target', message: /Use '\$listings'/}],
+    ['@item', {code: 'invalid-target', message: /^execute: Target '@item' is not a phase reference\.\n\nName a phase as '\$phase'\.$/}]
   ]
 
   for (const [target, pattern] of invalid) {

@@ -9,19 +9,40 @@ Three parties take part in running a Query, and each owns different things:
 | Party | Is | Owns |
 |---|---|---|
 | **Core** | `compile`, `plan` and `execute`, imported as `microql/core` | Query intepretation: references, chains, `each`, retries, timeouts, error handling, scheduling, and which results to reuse |
-| **Runtime** | one object for the whole process, passed as `config.runtime`, usually extending MicroQL's `Runtime` | its services, their config and their [instances](#service-instances), by [scope](#the-runtime-api); the [Cache](#the-cache); and `env`, the environment's utilities, such as output |
-| **Platform** | whatever calls core: a node script, a server, an editor | [Runs](#runs): which scope each runs in, its Run id, which names its [Run State](#storage), where results are shown, and when stores are cleared |
+| **Runtime** | one object for the whole process, usually extending MicroQL's `Runtime`, which gives each Query the [scope](#scopes) it runs in | how state is scoped: its services, their config and their [instances](#service-instances); the [Cache](#the-cache) and [Run States](#storage); and `env`, the environment's utilities, such as output |
+| **Platform** | whatever calls core: a node script, a server, an editor | [Runs](#runs): which scope each runs in, and so which [Run State](#storage); where results are shown, and when stores are cleared |
 
-**Core is kept free from environment dependencies: the file system, the network and so on.** A runtime provides these: core makes every service call through it, and each service instance receives its `env`. MicroQL ships `Runtime`, the base a runtime extends, and one runtime, the **node runtime**, as the reference implementation. Any object that satisfies [the runtime API](#the-runtime-api) is a runtime.
+**Core is kept free from environment dependencies: the file system, the network and so on.** A runtime provides these, through the scope it gives a Query: core makes every service call through the scope, and each service instance receives its `env`. MicroQL ships `Runtime`, the base a runtime extends, and one runtime, the **node runtime**, as the reference implementation. Any object that gives core a [scope](#scopes) is a runtime.
 
 The platform is yours. [A suggested architecture](#a-suggested-architecture) at the end shows one way to build one, but MicroQL requires none of it.
+
+## Scopes
+
+**Scoping is the runtime's.** A scope is what the runtime keys a Query's state by, such as `{tenantId, runId}`, described by its scope schema, a zodly document; and it is what the runtime gives core to run the Query in, `runtime.scopeOf(scope)`. Core runs a Query in whatever scope it's given, and never knows how anything in it is keyed.
+
+| Member | Is |
+|---|---|
+| `services.get(name)` | the service a key names, synchronously; compile looks up each key's service here. Every scope has `util` unless the runtime registers another service under that name |
+| `env` | the environment's utilities, which debug output uses and each service instance receives ([The runtime API](#the-runtime-api)) |
+| `call(key, fields)` | a service call's result. Core makes every call through it, with the key's fields, `{method, service, resource, confined}`, and the call's resolved fields |
+| `cache` | the [entry store](#entry-stores) whose entries outlive a Run: the [Cache](#the-cache) |
+| `run` | the entry store of the Run's results: its [Run State](#runs). Only a scope with every run key has one: a scope without, which `plan()` and `compile()` are content with, can't be executed |
+
+**A runtime's run keys are the fields that name a Run**, such as `['runId']`; the rest of a scope outlives any one Run. `Runtime` keeps services, their config and the Cache by the scope without its run fields, and Run States and service instances by the whole scope, so each Run has its own:
+
+| Runtime | Scope schema | Run scope | Services, config, Cache by | Run States, instances by |
+|---|---|---|---|---|
+| a platform's, by tenant | `{tenantId, runId}` | `['runId']` | `{tenantId}` | `{tenantId, runId}` |
+| the node runtime | `{runId}` | `['runId']` | `{}` | `{runId}` |
+
+A runtime with no run keys keeps everything by the whole scope. One that keys some other way overrides `scopeOf`.
 
 ## Entry points
 
 | Import | Resolves to | Is |
 |---|---|---|
-| `microql` | `index.js` | core with the node runtime wired in. `query()`, `plan()` and `compile()` take a Query's `services`, and `query()` its `config`, and file them in the node runtime's one scope before going on; `query()` runs a Run of its own, whose Run State it releases once done, unless you name one with `runId`. Also exports `NodeRuntime`, `nodeRuntime`, `fileStore`, `fileCache` and `fileRunStates`. |
-| `microql/core` | `core.js` | core alone, with no runtime of its own. `compile` refuses a Query without a `runtime`, and `execute` a Run without a `runId`. A lint rule keeps node built-ins out of every core file. |
+| `microql` | `index.js` | core with the node runtime wired in. `query()`, `plan()` and `compile()` take a Query's `services`, and `query()` its `config`, and file them for every Run before going on; `query()` runs a Run of its own, whose Run State and instances it releases once done, unless you name one with `runId`. Also exports `NodeRuntime`, `nodeRuntime`, `fileStore` and `fileStores`. |
+| `microql/core` | `core.js` | core alone, with no runtime of its own. `compile` refuses a Query without a `scope`, and `execute` a scope without a Run State (`scope.run`). A lint rule keeps node built-ins out of every core file, and the runtime out of the engine (`src/query`, `src/execute`, `src/types`). |
 
 MicroQL has an internal compile step that turns a Query into a plan - an internal memory representation which is also serializeable. "compile" does not infer any sort of language transpilation: MicroQL is just JavaScript. A plan's types are zod schemas, which [zodex](https://www.npmjs.com/package/zodex) serializes; zodex 4.0.1 drops a format written as a check, such as zodly's `['string', 'email']` (see zodly's comparison with zodex).
 
@@ -36,9 +57,8 @@ Both export:
 | `applySelection(results, select)` | what `select` names |
 | `addressToPath(plan, address)`, `pathToAddress(plan, path)` | [Service Call Addresses](#service-call-addresses) ↔ JSON paths |
 | `memoryStore()` | an [entry store](#entry-stores) in memory |
-| `scopedCache(storeOf)`, `memoryCache()` | a Cache: an entry store per scope ([Entry stores](#entry-stores)) |
-| `scopedRunStates(storeOf)`, `memoryRunStates()` | Run States: an entry store per scope and Run ([Entry stores](#entry-stores)) |
-| `Runtime` | the base a runtime extends: its services, their config and instances, and `call` ([The runtime API](#the-runtime-api)) |
+| `scopedStores(storeOf)`, `memoryStores()` | entry stores by scope, which a runtime keeps the Cache and Run States in ([Entry stores](#entry-stores)) |
+| `Runtime` | the base a runtime extends: its services, their config and instances, its stores, and the scopes it gives Queries ([The runtime API](#the-runtime-api)) |
 | `ServiceRegistry`, `ConfigRegistry` | a runtime's services and their instances, and its config, by scope and name; `Runtime` makes one of each, and a runtime that keeps config elsewhere extends `ConfigRegistry` ([Config](#config)) |
 | `configSchemaOf(declaration)` | the zod schema of a service's config declaration, `oauth` types included ([Config](#config)) |
 | `serviceSmokeTests(service, {env, config})` | a table of tests checking a service against the service spec ([Service Development Guide § Testing services](service-guide.md#testing-services)) |
@@ -66,16 +86,16 @@ Core calls three async methods, so a store may live anywhere: in memory, on disk
 
 To build one, implement those three methods over anything that stores JSON. Core never deletes entries; clearing a store is its owner's business. Both stores MicroQL ships, `memoryStore()` and the node runtime's `fileStore(dir)`, also offer `clear(form)` to empty one form, or `clear()` to empty all of them.
 
-**The Cache keeps an entry store per [scope](#the-runtime-api)**, so two tenants making an identical call, with credentials of their own, never share an entry: `get(scope, form, input)`, `set(scope, form, input, entry)`, `list(scope, form)`. `scopedCache(storeOf)` makes one from a store per scope, made by `storeOf(scope)` on the scope's first use; `memoryCache()` keeps them in memory, and the node runtime's `fileCache(dir)` keeps a `fileStore` per scope, in a directory named by the scope's hash. Both offer `clear(scope, form)`, `clear(scope)` and `clear()`.
+**A runtime keeps entry stores by [scope](#scopes)**, so no two scopes ever share an entry: `get(scope, form, input)`, `set(scope, form, input, entry)`, `list(scope, form)`. `scopedStores(storeOf)` makes them from a store per scope, made by `storeOf(scope)` on the scope's first use; `memoryStores()` keeps them in memory, and the node runtime's `fileStores(dir)` keeps a `fileStore` per scope, in a directory named by the scope's hash. Both offer `clear(scope, form)`, `clear(scope)` and `clear()`.
 
-**Run States are the runtime's too, an entry store per scope and Run**, so a store knows whose Runs it holds: `get(scope, runId, form, input)`, `set(scope, runId, form, input, entry)`, `list(scope, runId, form)`. The platform names each Run with an id, and running again with the same id resumes it. `scopedRunStates(storeOf)` makes them from a store per Run, made by `storeOf(scope, runId)`; `memoryRunStates()` keeps them in memory, and the node runtime's `fileRunStates(dir)` keeps a `fileStore` per Run, in a directory named by the Run's id within one named by its scope's hash. Both offer `clear(scope, runId)` and `clear()`.
+**The Cache and Run States are both kept this way, by different scopes.** The Cache is kept by the scope without its run fields, so its entries outlive a Run, and two tenants making an identical call, with credentials of their own, never share one. Run States are kept by the whole scope: each Run's own, and running again in the same scope resumes it.
 
 ### Two stores, two owners
 
 | Store | Holds results for | Supplied by | Passed as |
 |---|---|---|---|
-| **Run State** | one [Run](#runs) | the runtime, named by the platform's Run id | `runtime.runStates`, for `execute(compiled, {runId})` |
-| **Cache** | every Run, for calls with `cache` set | the runtime | `runtime.cache` |
+| **Run State** | one [Run](#runs) | the runtime, by the Run's scope | `scope.run`, from `runtime.runStates` |
+| **Cache** | every Run, for calls with `cache` set | the runtime, by the scope without its run fields | `scope.cache`, from `runtime.cache` |
 
 **A Run State entry** holds `address`, `input`, `inputs` (the resolved input fields), `reads` (for a call that holds others, what they read from outside it, by reference), `status` (`done` or `failed`), `output` or `error` (`{message, attempts, at}`), `startedAt` and `duration`. Core reuses only `done` entries, so a failed call runs again on resume. A failure a `catch` handled is the holding call's output, as [error data](#errors-as-data), so it is stored and reused like any other result.
 
@@ -85,7 +105,7 @@ Core reuses a Cache entry while it is younger than the call's ttl: `cache: {ttl}
 
 ## Runs
 
-**A Run is one or more executions of a Query against one Run State.** It is a concept, not engine state: core keeps no record of Runs, and the Run State is their only trace. Core works inside the Run State of whichever Run it is named, and never chooses or switches Runs. Deciding what a Run is, and labelling it or keeping its history, is the platform's job.
+**A Run is one or more executions of a Query against one Run State.** It is a concept, not engine state: core keeps no record of Runs, and the Run State is their only trace. Core works inside the Run State of the scope it's given, and never knows how Runs are named, nor chooses or switches them. Naming a Run is the runtime's, in the fields of its scope; deciding what a Run is, and labelling it or keeping its history, is the platform's.
 
 Core writes every call's result to the Run State as it goes, and reuses any result already there. That one rule covers three things:
 
@@ -93,22 +113,22 @@ Core writes every call's result to the Run State as it goes, and reuses any resu
 - **Resume after an interruption:** against a store holding some results, only what's missing runs.
 - **Rerunning part of a Query:** run again against the same store with a [target](#targets).
 
-To rerun everything, the platform starts a new Run, with a new id. When a call fails, core lets the calls already in flight finish and record their results before it reports the failure, so resuming never repeats them.
+To rerun everything, the platform starts a new Run, in a new scope. When a call fails, core lets the calls already in flight finish and record their results before it reports the failure, so resuming never repeats them.
 
 ## Running a Query
 
 ```javascript
 import {compile, execute} from 'microql/core'
 
-const compiled = compile({phases, runtime, scope: {tenantId}})  // runtime: your own, or the node runtime
-const results = await execute(compiled, {runId, trigger, target, signal, onUpdate})
+const scope = runtime.scopeOf({tenantId, runId})  // runtime: your own, or the node runtime
+const compiled = compile({phases, scope})
+const results = await execute(compiled, {trigger, target, signal, onUpdate})
 ```
 
-A Query runs on its `runtime`, in its `scope` there: the scope compile looks each key's service up in, and the Run's calls and stored results are keyed by. It's `{}` unless you give one, which is the node runtime's only scope.
+A Query runs in its `scope`: compile looks each key's service up there, and execute makes the Run's calls and keeps its results there. A compiled Query keeps the scope it was compiled in, so compile in the scope of the Run that executes it.
 
 | Option | Is |
 |---|---|
-| `runId` | required: the Run, whose Run State the runtime keeps; the same id again resumes it ([Entry stores](#entry-stores)) |
 | `trigger` | the payload [`$trigger`](#trigger) holds |
 | `target` | a [phase](../README.md#phases), `'$listings'`: run it and what it depends on, nothing after it |
 | `signal` | an `AbortSignal` that stops the Run |
@@ -139,7 +159,7 @@ Aborting the `signal` stops the Run at once:
 ```javascript
 {kind: 'phase', name: 'listings', status: 'running', startedAt: '2026-10-08T09:00:00.000Z'}
 {kind: 'phase', name: 'listings', status: 'done', startedAt: '…', duration: 4120, resultHash: '9f2c…', upstream: {categories: '41ab…'}}
-{kind: 'phase', name: 'listings', status: 'failed', startedAt: '…', duration: 512, error: '[$listings.@1a1 - [scraper]/extract] Timed out after 30000ms'}
+{kind: 'phase', name: 'listings', status: 'failed', startedAt: '…', duration: 512, error: '[$listings.@1a1 - [scraper]/extract] Timed out after 30000ms.'}
 {kind: 'phase', name: 'listings', status: 'cancelled', startedAt: '…', duration: 230, inFlight: ['$listings.@1a1']}
 ```
 
@@ -150,7 +170,7 @@ A phase with no update hasn't begun. A running phase reports when it started, ne
 The callback is synchronous and its return value is ignored, so wiring it to a websocket, a queue or a polling table is one line:
 
 ```javascript
-await execute(compiled, {runId, onUpdate: update => socket.send(JSON.stringify(update))})
+await execute(compiled, {onUpdate: update => socket.send(JSON.stringify(update))})
 ```
 
 `onUpdate` cannot fail a Run: if it throws, the error is logged and the Run carries on.
@@ -194,7 +214,7 @@ Pass `trigger` only to look up results from a Run that had that payload. Form ha
 | `errors` | type issues, by address and [code](#plan-errors) |
 | `warnings` | compile warnings, such as a binding that shares a phase's name |
 
-To show a call's results, the platform looks them up by the call's form hash in the Run's Run State: `runtime.runStates.list(scope, runId, formHash)`. Two addresses with one form hash are identical calls, which run once. `plan()` checks the Query against the services its runtime has registered in its scope, as compile does, so an editor passes the Query its `runtime` and `scope`.
+To show a call's results, the platform looks them up by the call's form hash in the Run's Run State: `runtime.runStates.list({tenantId, runId}, formHash)`. Two addresses with one form hash are identical calls, which run once. `plan()` checks the Query against the services of its scope, as compile does, so an editor passes the Query a `scope`: one that names no Run will do.
 
 ### Terms
 
@@ -244,47 +264,91 @@ Declarations are described in the [Service Development Guide](service-guide.md#d
 
 ## Errors
 
-Every error core reports carries a `code`, so a platform can decide what each means to its users without reading messages. Messages are for people, and may change; codes and addresses are the API.
+**Every error MicroQL raises comes from its catalog** (`src/common/error-catalog.js`), carrying a `code`, and the HTTP `status` a platform answers with. Codes, statuses and fields are the API: a platform decides what each means to its users by them, never by reading messages.
+
+**An error's `message` is everything a person should read:** where it happened, what went wrong, and, after a blank line, what to do about it, when there's something to say:
+
+```
+[$a.@1] 'onError' is retired.
+
+Use catch: on the call holding the calls whose failures it handles.
+```
+
+- **Where** is the API function at fault (`execute:`, `compile:`, `config.set:`), or the place in the Query, by its [Service Call Address](#service-call-addresses): `[$a.@1]` while compiling, `[$a.@1 - [svc]/res]` for a call that failed as it ran.
+- **What went wrong** is specific to the cause, and names what's at fault.
+- **What to do** is the hint.
+
+For programs, an error carries the same parts as fields: `baseMessage` (the message without its hint), `hint`, and its details, such as `service`, `key`, `reference` or `phases`. An error that wraps another, such as `malformed-declaration`, keeps it as its `cause`.
+
+A service's own error isn't MicroQL's: it keeps its message, has no `code` unless the service gave it one, and is labelled with the address of the call that failed.
 
 ### Errors as data
 
 A failed call throws, and its failure fails each call holding it in turn, until a `catch` handles it. There the failure becomes data, which `@err` holds inside the handler:
 
 ```javascript
-{'@type': 'Error', name, message, cause, address, key, queryHash, formHash, args}
+{'@type': 'Error', name, message, baseMessage, cause, address, key, queryHash, formHash, args, ...}
 ```
 
-It is zodly's `error` type: a JSON-LD node of type Error, recognised by `@type`, `name` and `message` whatever other fields it has ([Validation](validation.md)). Its fields are the thrown Error's own: `name`, `message`, `cause` (the error behind it, in the same form), any fields the service gave it, and those MicroQL labelled it with. `address` and `key` name the call that raised it, `queryHash` is the Query's form hash, `formHash` the call's own (its key in the Run State and the Cache), and `args` the call's resolved input fields. It is plain JSON, so it survives the Run State and the Cache. Incoming JSON-LD data of `@type` Error is an error too, as far as `skip: ['error']` is concerned. Core exports `errorSchema` to recognise it (it is zodly's `error` type), and `toErrorData` and `fromErrorData` to convert between it and an `Error`. A failure no `catch` handles ends the Run, and `execute` rejects with it as an `Error` carrying the same fields.
+It is zodly's `error` type: a JSON-LD node of type Error, recognised by `@type`, `name` and `message` whatever other fields it has ([Validation](validation.md)). Its fields are the thrown Error's own: `name`, `message`, `baseMessage`, `cause` (the error behind it, in the same form), the `code`, `status`, `hint` and details of an error MicroQL raised, any fields the service gave it, and those MicroQL labelled it with. `address` and `key` name the call that raised it, `queryHash` is the Query's form hash, `formHash` the call's own (its key in the Run State and the Cache), and `args` the call's resolved input fields. It is plain JSON, so it survives the Run State and the Cache. Incoming JSON-LD data of `@type` Error is an error too, as far as `skip: ['error']` is concerned. Core exports `errorSchema` to recognise it (it is zodly's `error` type), and `toErrorData` and `fromErrorData` to convert between it and an `Error`. A failure no `catch` handles ends the Run, and `execute` rejects with it as an `Error` carrying the same fields.
 
 ### Compile errors
 
-`compile()`, `plan()` and `query()` throw on a Query that can't run. The error has `message`, `code` and `address`, the [Service Call Address](#service-call-addresses) of the call or node at fault (`$a.@1`, `$trigger`, `select`). A cycle between phases has no single address, so it carries `phases`, the phases in the cycle, instead.
+`compile()`, `plan()` and `query()` throw on a Query that can't run. The error's `address` is the [Service Call Address](#service-call-addresses) of the call or node at fault (`$a.@1`, `$trigger`, `select`). A cycle between phases has no single address, so it carries `phases`, the phases in the cycle, instead; `plan()` and `execute` find it.
 
-| Code | Means |
-|---|---|
-| `invalid-descriptor` | a call isn't `['[METHOD] [service]/resource', {...}]`, or its arguments aren't an object |
-| `retired-key` | a key uses the retired `service:action` form, or a call or the Query's settings use a retired argument (`onError`, `ignoreErrors`, `skipInputErrors`, `skipOutputErrors`); the message names its replacement |
-| `unknown-service` | no service is registered under the key's name in the Query's scope |
-| `not-a-service` | the service lacks one of `lookup`, `supportedCalls` and `init` |
-| `missing-capability` | the service `requires` an `env` key the runtime doesn't provide ([Capabilities beyond the standard](#capabilities-beyond-the-standard)) |
-| `refused-key` | the service's `lookup` refused the key: a resource it lacks, a method it doesn't take, a key confined or not as it doesn't answer; the message is the service's |
-| `malformed-declaration` | the service call's declaration has an unknown tag, a malformed zodly type or a malformed source |
-| `no-target` | method syntax was used for a service call that declares no target field |
-| `malformed-schema` | a Service Call Validation or the trigger schema can't be parsed |
-| `unknown-reference` | a reference names no phase, node, iteration or enclosing `catch` |
-| `invalid-reference` | a reference is malformed: bare `$`, `@@`, a Service Call Address, `@` where nothing flows in |
-| `reserved-name` | a phase named `given` or `trigger`, or an iteration named `err` |
-| `duplicate-binding` | an iteration name used twice in a Query |
-| `unreachable-input` | a chain in a call field, without `as:` to reach its input |
-| `misplaced-as` | `as:` on a call that holds no nested call |
-| `misplaced-catch` | `catch:` on a call that holds no nested call; hold a single call in `[util]/try` to catch it |
-| `raw-function` | a JavaScript function where a call was expected |
-| `invalid-select` | `select` names something other than a reference |
-| `circular-dependency` | phases that depend on each other; see `phases` |
+| Code | Status | Means |
+|---|---|---|
+| `invalid-descriptor` | 400 | a call isn't `['[METHOD] [service]/resource', {...}]` |
+| `invalid-arguments` | 400 | a call's arguments aren't an object |
+| `retired-key` | 400 | a key uses the retired `service:action` form; a call or the Query's settings use a retired argument (`onError`, `ignoreErrors`, `skipInputErrors`, `skipOutputErrors`); a reference uses a retired form (`$.name`, `@@`); or a key names a retired `[util]` resource. The hint names its replacement |
+| `raw-function` | 400 | a JavaScript function where a call was expected |
+| `unreachable-input` | 400 | a chain in a call field, without `as:` to reach its input |
+| `misplaced-as` | 400 | `as:` on a call that holds no nested call |
+| `misplaced-catch` | 400 | `catch:` on a call that holds no nested call; hold a single call in `[util]/try` to catch it |
+| `reserved-name` | 400 | a phase named `given` or `trigger`, or an iteration named `err` |
+| `duplicate-binding` | 400 | an iteration name used twice in a Query |
+| `invalid-select` | 400 | `select` names something other than a reference |
+| `circular-dependency` | 400 | phases that depend on each other; see `phases` |
+| `malformed-schema` | 400 | a Service Call Validation or the trigger schema can't be parsed |
+| `no-target` | 400 | method syntax was used for a service call that declares no target field |
+| `invalid-reference` | 400 | a string beginning with `$` or `@` that isn't a reference; a literal one must come through `given` |
+| `bare-reference` | 400 | `$` alone |
+| `address-reference` | 400 | a reference through a Service Call Address, which moves when calls are reordered |
+| `unknown-reference` | 400 | a `$` reference, or `select`, names no phase or node |
+| `unknown-binding` | 400 | an `@name` reference names no enclosing iteration |
+| `unknown-error` | 400 | an `@err` reference has fewer enclosing `catch`es than it reaches for |
+| `nothing-flows` | 400 | `@` where nothing flows into the call |
+| `unknown-service` | 404 | no service is registered under the key's name in the Query's scope |
+| `not-a-service` | 500 | the service lacks one of `lookup`, `supportedCalls` and `init` |
+| `missing-capability` | 501 | the service `requires` an `env` key the runtime doesn't provide ([Capabilities beyond the standard](#capabilities-beyond-the-standard)) |
+
+**A service's `lookup` refuses a key it won't take.** A service made with `defineService` refuses with these codes; any other refusal is the service's own, reported as `refused-key`:
+
+| Code | Status | Means |
+|---|---|---|
+| `unknown-resource` | 404 | the service has no such resource |
+| `method-required` | 400 | the resource needs a method, and the key gives none; the hint lists them |
+| `method-not-allowed` | 405 | the resource doesn't answer the key's method, or takes none |
+| `confined-key` | 400 | a confined key, `[@service]`, for a service that answers none |
+| `unconfined-key` | 400 | a key that isn't confined, for a service that answers only confined ones |
+| `refused-key` | 400 | the service's `lookup` threw an error of its own, its `reason` |
+
+**A service's declaration is checked as compile reads it**, and a malformed one fails the call that names it with `malformed-declaration` (500), whose `cause` says what's malformed:
+
+| Code | Status | Means |
+|---|---|---|
+| `malformed-declaration` | 500 | the service call's declaration is malformed; see `cause` |
+| `malformed-document` | 500 | its input or output document isn't zodly that core reads |
+| `function-type` | 500 | a field typed `function`, where a service call field is typed `call` |
+| `unknown-tag` | 500 | a field tagged with a tag core doesn't know |
+| `multiple-targets` | 500 | more than one field tagged `target` |
+| `malformed-source` | 500 | a dynamic type's source isn't exactly one of the kinds of source |
+| `malformed-source-operand` | 500 | a source's operand isn't what its kind takes |
+| `invalid-field-path` | 500 | a field path names an empty field |
 
 ### Plan errors
 
-Each of `plan().errors` is `{address, code, message, expected, actual}`. `address` is the field's, followed by the path inside its value where the issue is (`$a.@1.data.name`; `*` stands for any item of a list or value of a record). `expected` and `actual` are the zod schemas there.
+Each of `plan().errors` is `{address, code, message, expected, actual}`. `address` is the field's, followed by the path inside its value where the issue is (`$a.@1.data.name`; `*` stands for any item of a list or value of a record). `expected` and `actual` are the zod schemas there. They're reported, not raised, so they have no status.
 
 | Code | Means | Will the call run? |
 |---|---|---|
@@ -298,46 +362,67 @@ A call field with a `catch` returns its nested call's type or the `catch`'s, as 
 
 ### Run errors
 
-`execute` checks what a Run needs before any call starts: a Run id, and a trigger payload that fits `trigger.schema`. Each fails with a plain error, as does compile for a Query with no runtime.
+`execute` checks what a Run needs before any call starts; a call fails as it runs with the rest, at its address:
 
-### Config errors
+| Code | Status | Means |
+|---|---|---|
+| `missing-scope` | 500 | `compile` was given no `scope` ([Scopes](#scopes)) |
+| `missing-run-state` | 500 | `execute` was given a scope without a Run State, `scope.run`: one without its run keys |
+| `invalid-target` | 400 | a target that isn't `$phase` |
+| `unknown-target` | 400 | a target that names no phase of the Query |
+| `invalid-trigger` | 422 | the trigger payload doesn't fit `trigger.schema` |
+| `precheck-failed` | 422 | a call's arguments don't fit its Service Call Validation or Service Defined Validation |
+| `postcheck-failed` | 502 | a call's result doesn't fit them |
+| `timeout` | 504 | a call outlasted its `timeout` |
+| `invalid-ttl` | 400 | a cache `ttl` that isn't a duration, such as `'7D'` |
 
-| Code | Means |
-|---|---|
-| `invalid-config` | `config.set` refused config: it doesn't fit its service's config declaration, the declaration is malformed, or no service is registered under its name in the scope. Or a service that declares config had none filed when its first call needed an instance: that call fails, at its `address` ([Config](#config)) |
+### Runtime and config errors
+
+| Code | Status | Means |
+|---|---|---|
+| `invalid-scope` | 500 | a scope doesn't fit the runtime's scope schema |
+| `unknown-service` | 404 | `config.set` names a service the scope doesn't have; or a call's service is gone from the scope by the time it runs |
+| `invalid-config` | 422 | `config.set` refused config that doesn't fit its service's config declaration |
+| `malformed-config-declaration` | 500 | the service's config declaration is malformed; see `cause` |
+| `malformed-oauth` | 500 | an `oauth` type without its provider's details |
+| `missing-config` | 500 | a service that declares config had none filed when its first call needed an instance: that call fails, at its `address` ([Config](#config)) |
 
 ## The runtime API
 
-**A runtime is one object for the whole process, and a Query runs on it in a scope.** A scope is whatever the runtime isolates by, such as `{tenantId}`, described by its scope schema, a zodly document. A runtime that isolates nothing, such as the node runtime, has one scope: the empty one, `{}`. A Query names both: `{runtime, scope, phases}`.
+**A runtime is one object for the whole process, and gives each Query the [scope](#scopes) it runs in**: `runtime.scopeOf(scope)`, which is all of the runtime core sees. A runtime that isolates nothing but Runs, such as the node runtime, has scopes that are only Runs: `{runId}`.
 
-Core uses these members of a runtime, each by the Query's scope:
+What a runtime offers through a scope:
 
-| Member | Is | Node runtime |
-|---|---|---|
-| `services` | a `ServiceRegistry`: the runtime's services, by scope and name, synchronously; compile looks up each key's service in it. Every scope has `util` unless the runtime registers another service under that name | its one scope holds the services the Query brings |
-| `call(scope, key, fields)` | a service call's result. Core makes every call through it, with the key's fields, `{method, service, resource, confined}`, and the call's resolved fields | `Runtime`'s: the instance of the key's service in the scope, made on its first call ([Service instances](#service-instances)) |
-| `cache` | a Cache: an [entry store](#entry-stores) per scope, whose entries outlive a Run | `fileCache('.cache')` |
-| `runStates` | Run States: an entry store per scope and Run ([Entry stores](#entry-stores)) | `memoryRunStates()`; `fileRunStates(dir)` keeps them on disk |
-| `env` | the environment's utilities, which debug output uses and each service instance receives: `log(text, {color, to})` writes a line of text, shown in the named colour if any, or kept at the destination `to`, which the runtime interprets; it may be async. A runtime may offer more ([Capabilities beyond the standard](#capabilities-beyond-the-standard)) | `log`: stdout in colour; with `to`, appended to that file |
+| Member | Node runtime |
+|---|---|
+| `services.get(name)` | the services the Query brings, filed for every Run |
+| `env` | `log(text, {color, to})` writes a line of text, shown in the named colour if any, or kept at the destination `to`, which the runtime interprets; it may be async. A runtime may offer more ([Capabilities beyond the standard](#capabilities-beyond-the-standard)). The node runtime's `log` writes to stdout in colour; with `to`, it appends to that file |
+| `call(key, fields)` | `Runtime`'s: the instance of the key's service in the scope, made on its first call ([Service instances](#service-instances)) |
+| `cache` | `fileStores('.cache')`, by the empty scope: every Run's |
+| `run` | `memoryStores()`, by Run; `fileStores(dir)` keeps them on disk |
 
 And these, which core never calls, are its owner's:
 
 | Member | Is |
 |---|---|
-| `config` | a `ConfigRegistry`: each service's config, by scope and name, checked as it's filed ([Config](#config)) |
+| `scopeOf(scope)` | the scope a Query runs in, as core receives it ([Scopes](#scopes)) |
+| `services` | a `ServiceRegistry`: the runtime's services by the scope without its run fields, and their instances by the whole scope |
+| `config` | a `ConfigRegistry`: each service's config, by the scope without its run fields and name, checked as it's filed ([Config](#config)) |
+| `cache`, `runStates` | entry stores by scope ([Entry stores](#entry-stores)): the Cache by the scope without its run fields, Run States by the whole scope |
 | `register(scope)` | the runtime's own: registers a scope's services with `services.register(scope, name, service)`, for its owner to call before the scope's Queries run, or its config is set. It must be cheap to repeat: registering the same service again keeps its instance, and an instance is made on a service's first call, not here. The node runtime has none: its `query()` files a Query's services |
-| `tearDown(scope)` | releases the service instances of a scope, or of every scope: for tests, a server shutting down, a runtime unloading tenants that have gone quiet |
+| `tearDown(scope)` | releases the service instances of each scope the given scope's fields are in: one Run's (`{tenantId, runId}`), every Run of a tenant (`{tenantId}`), or every scope's (none). For tests, a server shutting down, a runtime unloading tenants that have gone quiet |
 
-**`Runtime` is the base a runtime extends.** It holds a `ServiceRegistry` and a `ConfigRegistry` keyed by its scope schema, a `memoryCache()`, `memoryRunStates()`, an empty `env` and `call`. Core binds a Query's scope into the runtime once, as it compiles, so nothing else in core carries it. A runtime gives it its scope schema, its `env`, its Cache, a config registry that stores elsewhere if it needs one, and `register`. The node runtime, `NodeRuntime`, is `Runtime` with `log` and a Cache on disk. A platform on Cloudflare Workers might look like this:
+**`Runtime` is the base a runtime extends.** `new Runtime({scopeSchema, runKeys})` holds a `ServiceRegistry` and a `ConfigRegistry` keyed by its scope schema, `memoryStores()` for the Cache and Run States, an empty `env`, `call` and `scopeOf`. A runtime gives it its scope schema and run keys, its `env`, its stores, a config registry that stores elsewhere if it needs one, and `register`. The node runtime, `NodeRuntime`, is `Runtime` scoped by Run, with `log` and a Cache on disk. A platform on Cloudflare Workers might look like this:
 
 ```javascript
-import query, {Runtime, scopedCache} from 'microql/core'
+import query, {Runtime, scopedStores} from 'microql/core'
 
 class PlatformRuntime extends Runtime {
   constructor(bindings) {
-    super({tenantId: ['string']})                           // the scope's schema
+    super({scopeSchema: {tenantId: ['string'], runId: ['string']}, runKeys: ['runId']})
     this.env = {log: platformLog}
-    this.cache = scopedCache(({tenantId}) => kvStore(bindings.CACHE, tenantId))  // an entry store in KV per tenant
+    this.cache = scopedStores(({tenantId}) => kvStore(bindings.CACHE, tenantId))  // an entry store in KV per tenant
+    this.runStates = scopedStores(({tenantId, runId}) => runStore(bindings.RUNS, tenantId, runId))  // one per Run
     this.config = new D1Config(this.services, bindings.DB)  // a ConfigRegistry that stores in D1
   }
 
@@ -350,14 +435,14 @@ const runtime = new PlatformRuntime(bindings)  // one per isolate, shared by its
 
 // POST [automation]/execute
 await runtime.register({tenantId})
-await query({runtime, scope: {tenantId}, phases}, {runId})
+await query({scope: runtime.scopeOf({tenantId, runId}), phases})
 
 // the settings UI
 await runtime.register({tenantId})
 await runtime.config.set({tenantId}, 'github', {token})   // invalid-config if github's declaration refuses it
 ```
 
-The runtime keeps Run States, as it keeps the Cache; the platform names the Run, with `execute(compiled, {runId})`. Text is rendered by core, the same on every runtime: `format` (exported) is what `[util]/format`, `[util]/inspect`, debug output and validation messages all use.
+The runtime keeps Run States, as it keeps the Cache; the platform names the Run in the scope it asks for. Text is rendered by core, the same on every runtime: `format` (exported) is what `[util]/format`, `[util]/inspect`, debug output and validation messages all use.
 
 ### Capabilities beyond the standard
 
@@ -385,18 +470,18 @@ Core runs anywhere JavaScript does: a lint rule keeps node built-ins out of ever
 
 ### Service instances
 
-**The runtime keeps service instances; core keeps none.** Core makes every service call through `runtime.call(scope, key, fields)`. `Runtime` makes the instance of each service in each scope on the service's first call there, and keeps it for every later Run in that scope:
+**The runtime keeps service instances; core keeps none.** Core makes every service call through its scope's `call`, which is `runtime.call(scope, key, fields)`. `Runtime` makes the instance of each service in each scope on the service's first call there, and keeps it for every later call in that scope: with run keys, every later call of its Run, since each Run has instances of its own:
 
-- **Each instance is made with `env` and its service's config**: `init({...env, config})`, where `config` is what's filed for the service in the scope. A service that declares config, with none filed, fails its first call with `invalid-config`.
-- **Runs that start together share one instance**, so an async `init` runs once. An `init` that fails is forgotten, so the next call tries again.
+- **Each instance is made with `env` and its service's config**: `init({...env, config})`, where `config` is what's filed for the service in the scope without its run fields. A service that declares config, with none filed, fails its first call with `missing-config`.
+- **Calls that start together share one instance**, so an async `init` runs once. An `init` that fails is forgotten, so the next call tries again.
 - **An instance is released when what it was made from changes**: new config for its service (`config.set` with a different value, or `config.delete`), or another service registered under its name. Its next call makes a fresh one. That reaches the instances this runtime keeps: a runtime in another process, such as another Worker isolate, keeps its own until it releases them, and keeping them in step is its own business.
-- **`tearDown(scope)` is the runtime's, and never core's to call.** A Run never calls it. The runtime's owner calls it when done with a scope's instances, or calls `tearDown()` for every scope's: a test's `after()`, a server shutting down, a platform unloading tenants that have gone quiet. A script that's done may simply `process.exit()`.
-- **Runs may overlap.** Core keeps no state between Runs: each Run's state is its own, and Run States and the Cache are keyed by scope, form and input, Run States by Run too. An instance serves every Run in its scope, so services keep no per-Run state of their own ([Service Development Guide § init and tearDown](service-guide.md#init-and-teardown)).
-- **The node runtime has one scope.** Its `query()` files the services and config a Query brings there as the scope's only ones, and keeps each instance for later Queries that bring the same service and config. Two Queries running at once that bring different services under one name replace each other's: run them one after another, or give each a `NodeRuntime` of its own.
+- **`tearDown(scope)` is the runtime's and the platform's, and never core's to call.** The runtime's owner calls it when done with a Run's instances, a tenant's, or calls `tearDown()` for every scope's: a Run that's finished, a test's `after()`, a server shutting down, a platform unloading tenants that have gone quiet. A script that's done may simply `process.exit()`.
+- **Runs may overlap.** Core keeps no state between Runs: each Run's state is its own, and Run States and the Cache are keyed by scope, form and input. With run keys, an instance serves only its own Run; without one, it serves every Run in its scope, so services keep no per-Run state of their own ([Service Development Guide § init and tearDown](service-guide.md#init-and-teardown)).
+- **The node runtime's scopes are Runs.** Its `query()` files the services and config a Query brings for every Run, as the only ones, and gives each Run instances of its own: those of a Run it named itself are released once it's done, and those of a Run the caller named are kept for its later calls, until `tearDown`. Two Queries running at once that bring different services under one name replace each other's: run them one after another, or give each a `NodeRuntime` of its own.
 
 ### Config
 
-**A service declares its config, and the runtime keeps it, by scope and name.** `config.set(scope, name, value)` checks the value against the config declaration of the service registered under the same scope and name, and refuses it with `invalid-config` when it doesn't fit, when the declaration is malformed, or when the scope has no service by that name. So config is checked once, as it's filed, and an instance is made only with config its service accepts. `config.delete(scope, name)` removes it.
+**A service declares its config, and the runtime keeps it, by scope and name**, the scope without its run fields, since config outlives any one Run. `config.set(scope, name, value)` checks the value against the config declaration of the service registered under the same scope and name, and refuses it with `invalid-config` when it doesn't fit, `malformed-config-declaration` when the declaration is malformed, or `unknown-service` when the scope has no service by that name. So config is checked once, as it's filed, and an instance is made only with config its service accepts. `config.delete(scope, name)` removes it.
 
 `ConfigRegistry` keeps config in memory. A runtime that keeps it elsewhere extends it, overriding `get(scope, name)`, `write(scope, name, value)` and `erase(scope, name)`; `set` and `delete` check and release instances as they do in memory:
 
@@ -418,14 +503,14 @@ class D1Config extends ConfigRegistry {
 
 A platform serving several tenants in one process, such as a Cloudflare worker handling many requests, must keep each tenant's credentials, cached results and service state from the others. MicroQL's part is to keep core free of state, so that **isolation is the runtime's, and services never see an isolation boundary**: the runtime keys and stores tenant data, and a service only uses what its runtime gives it.
 
-**Within a process, a scope per tenant.** The platform runs each Query in its tenant's scope, `{tenantId}`, on one runtime it keeps for the process. The runtime keys services, config, instances and stored results by scope, and each instance is made with `env` and its own service's config in its scope. What this gives, and what it costs:
+**Within a process, a scope per tenant.** The platform runs each Query in a scope of its tenant's, `{tenantId, runId}`, on one runtime it keeps for the process. The runtime keys services, config and the Cache by tenant, and instances and Run States by Run, and each instance is made with `env` and its own service's config. What this gives, and what it costs:
 
 - **A service never holds a tenant identifier**, so it can't ask for another tenant's config or cache, and can't hand back the wrong keying: the runtime does the keying, and doesn't rely on services to behave.
 - **Every instance is one tenant's**, so what it holds (a token, a connection, a Puppeteer `BrowserContext`, which keeps its own cookies and storage within a shared browser) is that tenant's.
 - **`env` is every tenant's.** What differs by tenant reaches a service through its config, never through `env`.
-- **The Cache and Run States are keyed by scope**, so two tenants making an identical call never share an entry, and a store knows whose Runs it holds.
+- **The Cache and Run States are keyed by scope**, the Cache by tenant and Run States by Run, so two tenants making an identical call never share an entry, and a store knows whose Runs it holds.
 - **Memory is still shared.** Every tenant's instances run in one process, with the same modules. A service that keeps data in module scope, or on its definition, carries it from one tenant to the next, and a hostile service can read anything in the process. Scopes guard against careless services, not hostile ones. Static checks for mutable module state catch the common accidents, never a service written to evade them.
-- **Instances multiply**: one per service per tenant, held until the runtime releases them. A platform with many tenants tears down the instances of tenants that go quiet, with `tearDown(scope)`.
+- **Instances multiply**: one per service per scope, held until the runtime releases them. A platform tears down a Run's instances once it's done with the Run, and those of tenants that go quiet, with `tearDown(scope)`.
 
 **Across processes, complete isolation.** Each tenant's Runs execute in a process (or isolate) of their own: on Cloudflare, a worker per tenant (Workers for Platforms dispatch namespaces), or tenant code loaded into an isolate of its own. What this gives, and what it costs:
 
@@ -439,6 +524,6 @@ MicroQL needs nothing more for either: core is stateless, and both are ways to b
 None of this is required. It is one way to build a platform for automations on MicroQL.
 
 - **A runtime per process.** Keep one runtime for the process, or the isolate, and in each request register the scope's services before running its Queries or setting its config ([The runtime API](#the-runtime-api)).
-- **Runs.** Keep a record per Run: its Query version, its scope, its trigger payload, its status. Give each Run an id, keep its Run State in whatever database your runtime's `runStates` use, and keep finished Runs as history. To rerun everything, start a new Run.
+- **Runs.** Keep a record per Run: its Query version, its scope, its trigger payload, its status. Give each Run an id in its scope, keep its Run State in whatever database your runtime's `runStates` use, and keep finished Runs as history. To rerun everything, start a new Run.
 - **An editor.** Call `plan()` on every edit, and show `errors` beside the fields they name. Show a call's results by looking up its form hash in the selected Run's Run State. Drive the phase view from `onUpdate`, and mark phases stale with the `resultHash` and `upstream` of their `done` updates. "Run this phase" is a [target](#targets), and "stop" is an abort.
 - **Triggers.** Turn a webhook, a schedule or a queue message into a call to `execute` with its payload as `trigger`. Keep the trigger's configuration (its kind, its path, its timing) beside `trigger.schema` in the Query, or in your own store.

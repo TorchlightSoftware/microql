@@ -21,6 +21,7 @@ import {parseSchema, validate} from '@tlsft/zodly'
 import {canonical} from '../query/forms.js'
 import {format} from '../common/format.js'
 import {ScopedTable} from './table.js'
+import {errorOf, locate, reasonOf} from '../common/error-catalog.js'
 
 // The provider details an oauth type takes.
 const OAUTH_DETAILS = {authorizeUrl: ['string', 'url'], tokenUrl: ['string', 'url'], scopes: ['array', ['string'], 'optional']}
@@ -31,7 +32,7 @@ const filedByRuntime = ['string', {min: 1}, 'optional', {tags: ['internal']}]
 // The oauth type, as the object of what the runtime files, with the provider's details.
 function asOAuth(form) {
   const [, details] = form
-  if (details === undefined) throw new Error('oauth takes {authorizeUrl, tokenUrl, scopes}')
+  if (details === undefined) throw errorOf('malformed-oauth')
   validate(OAUTH_DETAILS, details, format)
   const filed = {clientId: filedByRuntime, clientSecret: filedByRuntime, refreshToken: filedByRuntime}
   return [filed, {meta: {tags: ['oauth'], oauth: details}}]
@@ -42,21 +43,19 @@ const CONFIG_TYPES = {oauth: asOAuth}
 // The zod schema of a service's config declaration.
 export const configSchemaOf = (declaration) => parseSchema(declaration, {preprocess: CONFIG_TYPES})
 
-export const configError = (message) => Object.assign(new Error(message), {code: 'invalid-config'})
-
-// Why a service, by name, can't use a config, if it can't.
+// The error refusing a config to a service, by name, if it can't use it.
 export function configRefusal(service, name, value) {
   if (!service.config) return undefined
   let schema
   try {
     schema = configSchemaOf(service.config)
   } catch (error) {
-    return configError(`Service '${name}' has a malformed config declaration: ${error.message}`)
+    return errorOf('malformed-config-declaration', {service: name, reason: reasonOf(error)}, {cause: error})
   }
   try {
     validate(schema, value, format)
   } catch (error) {
-    return configError(`Service '${name}' can't use this config:\n${error.message}`)
+    return errorOf('invalid-config', {service: name, details: error.message})
   }
 }
 
@@ -89,9 +88,9 @@ export class ConfigRegistry {
   // Files config for the service under a name, once its declaration accepts it.
   async set(scope, name, value) {
     const service = this.services.get(scope, name)
-    if (!service) throw configError(`No service '${name}' in this scope to configure`)
+    if (!service) throw errorOf('unknown-service', {service: name}, {where: 'config.set:'})
     const refusal = configRefusal(service, name, value)
-    if (refusal) throw refusal
+    if (refusal) throw locate(refusal, 'config.set:')
     if (canonical(await this.get(scope, name)) === canonical(value)) return
     await this.write(scope, name, value)
     await this.services.tearDown(scope, name)

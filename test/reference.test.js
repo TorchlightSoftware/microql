@@ -31,14 +31,14 @@ describe('Reference grammar', () => {
 
   // [string, error pattern]
   const invalid = [
-    ['$', /Bare \$ is not supported/],
+    ['$', {code: 'bare-reference'}],
     ['$.given.x', /\$\.name form is replaced by \$name.*'\$given\.x'/],
     ['$.', /\$\.name form is replaced/],
-    ['@@', /@@ is removed/],
-    ['@@@.naics', /@@ is removed/],
-    ['@@item', /@@ is removed/],
-    ['$listings.@1a2', /Service call addresses are not reliable references in queries - they break when ordering changes. Use an alias instead./],
-    ['@listing.@2', /Service call addresses are not reliable references/],
+    ['@@', {code: 'retired-key', message: /'@@' is retired/}],
+    ['@@@.naics', {code: 'retired-key'}],
+    ['@@item', {code: 'retired-key'}],
+    ['$listings.@1a2', {code: 'address-reference', message: /'\$listings\.@1a2' names a Service Call Address/}],
+    ['@listing.@2', {code: 'address-reference'}],
     ['$5.00', /must be supplied through given/],
     ['@acme corp', /must be supplied through given/],
     ['$a..b', /must be supplied through given/],

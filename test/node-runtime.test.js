@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import query, {plan, defineService, NodeRuntime, nodeRuntime, memoryRunStates} from '../index.js'
+import query, {plan, defineService, NodeRuntime, nodeRuntime, memoryStores} from '../index.js'
 
-// microql's query() and plan() run on the node runtime, which has one scope:
-// a Query brings its services, and query() files them with their config.
+// microql's query() and plan() run on the node runtime, whose scopes are Runs:
+// a Query brings its services, and query() files them with their config for
+// every Run.
 describe('the node runtime', () => {
   const shop = defineService({async '/total'() { return 1 }})
   const vault = defineService({config: {vault: ['string', {min: 1}]}, init(env) { this.vault = env.config.vault }, async '/where'() { return this.vault }})
@@ -38,15 +39,23 @@ describe('the node runtime', () => {
   it('runs a Query with only the config it brings', async () => {
     const runtime = new NodeRuntime()
     await query({...where, runtime, config: {vault: {vault: 'notes'}}})
-    await assert.rejects(query({...where, runtime}), {code: 'invalid-config', message: /No config is filed for 'vault'/})
+    await assert.rejects(query({...where, runtime}), {code: 'missing-config', message: /Service 'vault' declares config, and none is filed/})
   })
 
-  it('keeps a service\'s instance for later Queries that bring the same service and config', async () => {
+  it('makes each Run\'s instances afresh', async () => {
     const kept = counted()
     const runtime = new NodeRuntime()
     const run = {runtime, services: {service: kept.service}, phases: {a: ['[service]/run', {}]}}
     await query(run)
     await query(run)
+    assert.equal(kept.inits, 2)
+  })
+
+  it('keeps a named Run\'s instances for its later calls', async () => {
+    const kept = counted()
+    const runtime = new NodeRuntime()
+    await query({runtime, services: {service: kept.service}, phases: {a: ['[service]/run', {}]}}, {runId: 'named'})
+    await query({runtime, services: {service: kept.service}, phases: {b: ['[service]/run', {n: 2}]}}, {runId: 'named'})
     assert.equal(kept.inits, 1)
   })
 
@@ -66,13 +75,13 @@ describe('the node runtime', () => {
     await query(run, {runId: 'named'})
     assert.equal(await query(run, {runId: 'named'}), 1)
     const [{formHash}] = plan(run).calls
-    assert.equal((await runtime.runStates.list({}, 'named', formHash)).length, 1)
+    assert.equal((await runtime.runStates.list({runId: 'named'}, formHash)).length, 1)
   })
 
   it('releases the Run State of a Run it named itself, once it\'s done', async () => {
     const released = []
-    const runStates = memoryRunStates()
-    const runtime = new NodeRuntime({runStates: {...runStates, clear: (scope, runId) => { released.push(runId); return runStates.clear(scope, runId) }}})
+    const runStates = memoryStores()
+    const runtime = new NodeRuntime({runStates: {...runStates, clear: (run) => { released.push(run.runId); return runStates.clear(run) }}})
     await query({runtime, services: {shop}, phases: {a: ['[shop]/total', {}]}})
     assert.equal(released.length, 1)
   })
@@ -84,7 +93,7 @@ describe('the node runtime', () => {
     const slow = defineService({async '/wait'() { started(); await finished; return 'late' }})
 
     // Run States that note what's written after the Run is released
-    const runStates = memoryRunStates()
+    const runStates = memoryStores()
     let released = false
     const lateWrites = []
     const noting = {

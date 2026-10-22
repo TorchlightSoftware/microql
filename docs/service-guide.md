@@ -29,7 +29,7 @@ A service key has the format `METHOD [service]/resource`, and MicroQL hands a se
 
 In order to be recognized by MicroQL, a service must be presented as an object that commits to offering three methods:
 
-- **`lookup({method, service, resource, confined})`** returns the declaration of the service call the key names. It throws, with a message naming the key, when it refuses one: a resource it doesn't have, a method it doesn't expect, a missing method it needs, or a key whose custody it doesn't answer. Core calls it while compiling a Query, so it must answer synchronously.
+- **`lookup({method, service, resource, confined})`** returns the declaration of the service call the key names. It throws, with a message naming the key, when it refuses one: a resource it doesn't have, a method it doesn't expect, a missing method it needs, or a key whose custody it doesn't answer. `defineService` refuses each with its own error code; any other refusal is reported as `refused-key` ([Runtime Integration § Compile errors](runtime-integration.md#compile-errors)). Core calls it while compiling a Query, so it must answer synchronously.
 
 - **`supportedCalls()`** returns every service call the service supports, each as its `resource` and `method` with its declaration. This allows a catalog (autocomplete, et al.) to list what the service offers. A service with no listable calls (maybe they're dynamic or something) must return `[]`. Core never calls it.
 
@@ -204,7 +204,7 @@ A service that declares nothing about what its call fields receive gets `any`.  
 
 A service has one lifecycle function, and its instances may have another:
 
-- **`init(env)`** makes an instance of the service. It may be async, to log in or open a connection say: a Run waits for it before the service's first call. Core never keeps instances: it makes every call through its runtime, which makes an instance of a service on its first call in a scope (a tenant, say) and keeps it for every later Run there ([Runtime Integration § Service instances](runtime-integration.md#service-instances)). `env` is what the runtime gives its services: `log`, whatever more the runtime offers, and `config`, the service's own configuration ([Configuration](#configuration)). A service that writes output should use these rather than reaching for the environment itself (the file system, stdout), so it runs wherever MicroQL does. A service lists the `env` keys it uses in `requires`; a Query naming it doesn't compile on a runtime without them ([Runtime Integration § Capabilities beyond the standard](runtime-integration.md#capabilities-beyond-the-standard)).
+- **`init(env)`** makes an instance of the service. It may be async, to log in or open a connection say: a Run waits for it before the service's first call. Core never keeps instances: it makes every call through the scope it runs in, whose runtime makes an instance of a service on its first call in a scope (a tenant's Run, say) and keeps it for every later call there ([Runtime Integration § Service instances](runtime-integration.md#service-instances)). `env` is what the runtime gives its services: `log`, whatever more the runtime offers, and `config`, the service's own configuration ([Configuration](#configuration)). A service that writes output should use these rather than reaching for the environment itself (the file system, stdout), so it runs wherever MicroQL does. A service lists the `env` keys it uses in `requires`; a Query naming it doesn't compile on a runtime without them ([Runtime Integration § Capabilities beyond the standard](runtime-integration.md#capabilities-beyond-the-standard)).
 - **`tearDown()`**, on an instance, releases what it holds (a browser context, a connection pool). Core MicroQL never calls it; the runtime that made the instance does, when it is done with it: a server shutting down, a test's `after()` (`nodeRuntime.tearDown()`), new config for the service. Typically a process that's exiting anyway doesn't need to call this explicitly. It should do no harm when called twice.
 
 With `defineService`, `init` and `tearDown` in the definition run with the instance as `this`: an object of the instance's own, which inherits from the definition. So an instance can keep what `init` gave it, apart from every other instance:
@@ -230,7 +230,7 @@ const reporter = defineService({
 })
 ```
 
-**An instance belongs to one scope.** A runtime keeps an instance of each service per scope, such as a tenant, and makes it with that scope's config, so what an instance holds (a token, a browser context) is that tenant's. Several Runs may use one instance at once, so an instance keeps what `init` gave it and what its calls share by design (a connection pool, a client), never anything about the Run it's serving.
+**An instance belongs to one scope.** A runtime keeps an instance of each service per scope, such as a tenant's Run, and makes it with its tenant's config, so what an instance holds (a token, a browser context) is that tenant's. Several calls may use one instance at once, and a runtime whose scopes aren't Runs shares one instance between Runs, so an instance keeps what `init` gave it and what its calls share by design (a connection pool, a client), never anything about the call it's serving.
 
 **Keep nothing in module scope or on the definition.** Two instances share the definition and the module, and with them anything stored there, so that is how one tenant's data reaches another's instance. Store on `this`, which is the instance's own, and beware of mutating objects `this` inherits from the definition.
 
@@ -238,7 +238,7 @@ const reporter = defineService({
 
 ## Configuration
 
-A service that needs configuration, such as a base URL or an API key, declares it in `config`, a zodly document of the keys it reads, and reads them from `env.config` in `init`. Its runtime keeps each service's configuration by scope and name, and checks it against the service's config declaration as it's filed, so an instance is only ever made with config its service accepts. A service declares its keys plainly (`token`), never sees another service's configuration, and never knows which tenant it is configured for. One service under two names, such as two accounts, gets two instances, each with its own configuration. A service that declares config, with none filed, fails its first call with `invalid-config`.
+A service that needs configuration, such as a base URL or an API key, declares it in `config`, a zodly document of the keys it reads, and reads them from `env.config` in `init`. Its runtime keeps each service's configuration by scope and name (a tenant's, not a Run's), and checks it against the service's config declaration as it's filed, so an instance is only ever made with config its service accepts. A service declares its keys plainly (`token`), never sees another service's configuration, and never knows which tenant it is configured for. One service under two names, such as two accounts, gets two instances, each with its own configuration. A service that declares config, with none filed, fails its first call with `missing-config`.
 
 In node, a Query brings its services and their configuration, by service name:
 
@@ -361,10 +361,10 @@ describe('orders', () => {
 To test against a runtime of your own, capturing output or keeping the cache in memory, pass it as `runtime`. A `NodeRuntime` of the test's own keeps its own instances, too:
 
 ```javascript
-import query, {NodeRuntime, memoryCache} from 'microql'
+import query, {NodeRuntime, memoryStores} from 'microql'
 
 const logged = []
-const runtime = new NodeRuntime({cache: memoryCache()})
+const runtime = new NodeRuntime({cache: memoryStores()})
 runtime.env = {log: (text, {to} = {}) => logged.push({text, to})}
 await query({runtime, services: {orders}, phases: {...}})
 ```

@@ -6,6 +6,8 @@
  * order, and the phases of a column run in parallel.
  */
 
+import {errorOf} from '../common/error-catalog.js'
+
 // The phases' columns, in order. A cycle is a compile-time error.
 export function columnsOf(phases) {
   const columns = []
@@ -18,7 +20,7 @@ export function columnsOf(phases) {
 
     if (ready.length === 0) {
       const remaining = pending.filter(phase => !placed.has(phase.name)).map(phase => phase.name)
-      throw Object.assign(new Error(`Circular dependency detected at compile time: ${remaining.join(', ')}`), {code: 'circular-dependency', phases: remaining})
+      throw errorOf('circular-dependency', {phases: remaining})
     }
 
     ready.forEach(phase => placed.add(phase.name))

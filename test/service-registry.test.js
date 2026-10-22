@@ -4,7 +4,7 @@ import {ServiceRegistry, defineService, util} from '../core.js'
 
 const t1 = {tenantId: 't1'}
 const t2 = {tenantId: 't2'}
-const byTenant = () => new ServiceRegistry({tenantId: ['string']})
+const byTenant = () => new ServiceRegistry({scopeSchema: {tenantId: ['string']}})
 
 // A service, and how many of its instances have been made and torn down.
 const counted = () => {
@@ -101,7 +101,7 @@ describe('ServiceRegistry', () => {
     })
 
     it('refuses an instance of a service the scope doesn\'t have', async () => {
-      await assert.rejects(byTenant().instanceOf(t1, 'missing', make), /No service 'missing' in this scope/)
+      await assert.rejects(byTenant().instanceOf(t1, 'missing', make), {code: 'unknown-service'})
     })
 
     // [description, what tearDown is given, tearDowns of t1's shop, t1's notes, t2's shop]
@@ -122,6 +122,51 @@ describe('ServiceRegistry', () => {
         assert.deepEqual(held.map(([, , counts]) => counts.tearDowns), expected)
         await services.instanceOf(t1, 'shop', make)
         assert.equal(held[0][2].inits, 2)
+      })
+    }
+  })
+
+  // A registry whose scopes name their Run: services are filed by tenant,
+  // and each Run of a tenant has instances of its own.
+  describe('with run keys', () => {
+    const runOf = (scope, runId) => ({...scope, runId})
+    const byRun = () => new ServiceRegistry({scopeSchema: {tenantId: ['string'], runId: ['string']}, runKeys: ['runId']})
+
+    it('keeps services by the scope without its run fields', () => {
+      const shop = counted()
+      const services = byRun()
+      services.register(t1, 'shop', shop.service)
+      assert.equal(services.get(t1, 'shop'), shop.service)
+      assert.deepEqual(services.withoutRun(runOf(t1, 'r1')), t1)
+    })
+
+    it('makes one instance per Run, of the service its tenant has', async () => {
+      const shop = counted()
+      const services = byRun()
+      services.register(t1, 'shop', shop.service)
+      const first = await services.instanceOf(runOf(t1, 'r1'), 'shop', make)
+      assert.equal(await services.instanceOf(runOf(t1, 'r1'), 'shop', make), first)
+      await services.instanceOf(runOf(t1, 'r2'), 'shop', make)
+      assert.equal(shop.inits, 2)
+    })
+
+    // [description, what tearDown is given, tearDowns of t1's instances (Runs r1 and r2) and t2's (Run r1)]
+    const tearDowns = [
+      ['one Run\'s instances', [runOf(t1, 'r1')], [1, 0]],
+      ['the instances of every Run of a tenant', [t1], [2, 0]],
+      ['one name\'s instances in every Run of a tenant', [t1, 'shop'], [2, 0]],
+      ['every instance', [], [2, 1]]
+    ]
+
+    for (const [description, given, expected] of tearDowns) {
+      it(`tears down ${description}`, async () => {
+        const [first, second] = [counted(), counted()]
+        const services = byRun()
+        services.register(t1, 'shop', first.service)
+        services.register(t2, 'shop', second.service)
+        for (const scope of [runOf(t1, 'r1'), runOf(t1, 'r2'), runOf(t2, 'r1')]) await services.instanceOf(scope, 'shop', make)
+        await services.tearDown(...given)
+        assert.deepEqual([first.tearDowns, second.tearDowns], expected)
       })
     }
   })

@@ -21,14 +21,14 @@ import {READINGS} from './declaration.js'
 import {errorSchema, parseSchema} from '@tlsft/zodly'
 
 // The type of an argument: a literal's own type, or what its reference names.
-function typeOfArgument(value, context, env) {
+function typeOfArgument(value, context, typeGraph) {
   if (isReference(value)) {
     const ref = parseReference(value)
-    const root = ref.sigil === '$' ? (env.nodes[ref.name] ?? env.phases[ref.name]) : contextRoot(ref, context)
+    const root = ref.sigil === '$' ? (typeGraph.nodes[ref.name] ?? typeGraph.phases[ref.name]) : contextRoot(ref, context)
     return schemaAtPath(root ?? any, ref.path)
   }
-  if (Array.isArray(value)) return z.array(sharedSchema(value.map(v => typeOfArgument(v, context, env))))
-  if (isPlainObject(value)) return z.object(mapValues(value, v => typeOfArgument(v, context, env)))
+  if (Array.isArray(value)) return z.array(sharedSchema(value.map(v => typeOfArgument(v, context, typeGraph))))
+  if (isPlainObject(value)) return z.object(mapValues(value, v => typeOfArgument(v, context, typeGraph)))
   return widenedTypeOf(value)
 }
 
@@ -50,24 +50,24 @@ const MESSAGES = {
 // Each issue in how a field's actual type fits its expected one is an error in
 // the plan, at the field's address and the path inside it; run-time validation
 // still decides whether the call runs.
-function checkType(expected, actual, where, env) {
+function checkType(expected, actual, where, typeGraph) {
   for (const {code, path, expected: wanted, actual: given} of compare(expected, actual)) {
     const address = [where, ...path].join('.')
-    env.errors.push({address, code, message: `${address} ${MESSAGES[code](wanted, given)}`, expected: wanted, actual: given})
+    typeGraph.errors.push({address, code, message: `${address} ${MESSAGES[code](wanted, given)}`, expected: wanted, actual: given})
   }
 }
 
-function stepsTypes(steps, context, env) {
+function stepsTypes(steps, context, typeGraph) {
   let flow = context.flow
-  for (const step of steps) flow = callTypes(step, {...context, flow}, env)
+  for (const step of steps) flow = callTypes(step, {...context, flow}, typeGraph)
   return flow
 }
 
 // The type of a call's arguments: what flows into them, except the fields the
 // call's own precheck names, which take its types, since the call checks them
 // before it runs.
-function argumentsType(call, args, context, env) {
-  const flowing = typeOfArgument(args, context, env)
+function argumentsType(call, args, context, typeGraph) {
+  const flowing = typeOfArgument(args, context, typeGraph)
   const precheck = call.validators?.precheck?.call
   return precheck?.def.type === 'object' ? z.object({...flowing.shape, ...precheck.shape}) : flowing
 }
@@ -76,9 +76,9 @@ function argumentsType(call, args, context, env) {
 // field's type is what flows into it, or what its precheck says (for a call
 // field, what its nested call returns, or its catch does, once typed), or its
 // declared type when nothing known flows in.
-function fieldsOf(call, context, env) {
+function fieldsOf(call, context, typeGraph) {
   const args = setPaths(call.args, call.settingsArgs)
-  const argsType = argumentsType(call, args, context, env)
+  const argsType = argumentsType(call, args, context, typeGraph)
   const declared = (path) => call.declaration.fields.find(field => field.path === path)?.declaredType
   const returns = {}
   const typeOf = (path) => {
@@ -92,9 +92,9 @@ function fieldsOf(call, context, env) {
 
 // Each argument's expected and actual type; every declared data field is
 // checked at its path, and one the call doesn't supply is absent.
-function argumentTypes(call, fields, env) {
+function argumentTypes(call, fields, typeGraph) {
   const expected = expectedData(call, fields)
-  checkType(expected, fields.argsType, call.address, env)
+  checkType(expected, fields.argsType, call.address, typeGraph)
   return mapValues(fields.argsType.shape, (actual, field) => ({expected: schemaAtPath(expected, [field]), actual}))
 }
 
@@ -107,24 +107,24 @@ const itemOf = (received) => {
 
 // What a catch returns, given the error and the item whose call failed; none
 // when there is no catch.
-const catchType = (handler, context, item, env) =>
-  handler && stepsTypes(handler.steps, enterPosition(handler, context, errorSchema, item), env)
+const catchType = (handler, context, item, typeGraph) =>
+  handler && stepsTypes(handler.steps, enterPosition(handler, context, errorSchema, item), typeGraph)
 
 // Each call field's expected and actual return. `@` inside it is what the
 // declaration says it receives. A failed invocation returns what the call's
 // catch does, so a field returns its nested call's type or the catch's. A call
 // field's return, once typed, is its type for the fields typed after it.
-function positionTypes(call, context, fields, env) {
+function positionTypes(call, context, fields, typeGraph) {
   const {catch: handler, ...held} = call.positions
   // the call field's function type, with what's typed so far
   const signatureOf = (path) => unwrap(schemaAtPath(expectedInput(call, fields), parseFieldPath(path)))
-  const caught = catchType(handler, context, itemOf(Object.keys(held).map(path => receivedBy(signatureOf(path)))), env)
+  const caught = catchType(handler, context, itemOf(Object.keys(held).map(path => receivedBy(signatureOf(path)))), typeGraph)
   const types = mapValues(held, (position, path) => {
     const signature = signatureOf(path)
-    const returned = stepsTypes(position.steps, enterPosition(position, context, receivedBy(signature)), env)
+    const returned = stepsTypes(position.steps, enterPosition(position, context, receivedBy(signature)), typeGraph)
     const actual = caught ? union(returned, caught) : returned
     const expected = returnedBy(signature)
-    checkType(expected, actual, `${call.address}.${path}`, env)
+    checkType(expected, actual, `${call.address}.${path}`, typeGraph)
     fields.returns[path] = actual
     return {expected, actual}
   })
@@ -136,35 +136,36 @@ const returnType = (call, fields) =>
   call.validators?.postcheck?.call ?? expectedOutput(call, fields)
 
 // A call's types: its arguments', its call fields', and its return type.
-function callTypes(call, context, env) {
-  const fields = fieldsOf(call, context, env)
-  const args = argumentTypes(call, fields, env)
-  const positions = positionTypes(call, context, fields, env)
+function callTypes(call, context, typeGraph) {
+  const fields = fieldsOf(call, context, typeGraph)
+  const args = argumentTypes(call, fields, typeGraph)
+  const positions = positionTypes(call, context, fields, typeGraph)
   const returns = returnType(call, fields)
-  env.calls.set(call.address, {args, positions, returns})
+  typeGraph.calls.set(call.address, {args, positions, returns})
   return returns
 }
 
-// Expected and actual types for every call, by address, plus mismatch errors.
 // $trigger's type: the payload's own when there is one, else the Query's
 // trigger schema, else any.
 const triggerType = (payload, schema) =>
   payload !== undefined ? widenedTypeOf(payload) : schema ?? any
 
+// The type graph: the inferred type of every root node and phase, each
+// call's expected and actual types by address, and the mismatches found.
 // Each phase returns its steps' type, or what the Query's catch does.
 function inferTypes(compiled, columns, trigger) {
-  const env = {
+  const typeGraph = {
     nodes: {given: widenedTypeOf(compiled.given), trigger: triggerType(trigger, compiled.triggerSchema)},
     phases: {},
     calls: new Map(),
     errors: []
   }
-  const caught = catchType(compiled.settings.catch, rootContext, any, env)
+  const caught = catchType(compiled.settings.catch, rootContext, any, typeGraph)
   for (const name of columns.flat()) {
-    const returned = stepsTypes(compiled.phases[name].steps, {...rootContext, flow: any}, env)
-    env.phases[name] = caught ? union(returned, caught) : returned
+    const returned = stepsTypes(compiled.phases[name].steps, {...rootContext, flow: any}, typeGraph)
+    typeGraph.phases[name] = caught ? union(returned, caught) : returned
   }
-  return env
+  return typeGraph
 }
 
 /**
@@ -175,23 +176,23 @@ function inferTypes(compiled, columns, trigger) {
 export function plan(query, {trigger} = {}) {
   const compiled = compile(query)
   const columns = columnsOf(compiled.phases)
-  const forms = formsOf(compiled, {trigger})
-  const types = inferTypes(compiled, columns, trigger)
+  const formGraph = formsOf(compiled, {trigger})
+  const typeGraph = inferTypes(compiled, columns, trigger)
 
   const roots = [
-    compiled.given !== undefined && {name: 'given', type: types.nodes.given},
-    {name: 'trigger', type: types.nodes.trigger}
+    compiled.given !== undefined && {name: 'given', type: typeGraph.nodes.given},
+    {name: 'trigger', type: typeGraph.nodes.trigger}
   ].filter(Boolean)
 
   return {
-    queryHash: forms.queryHash,
+    queryHash: formGraph.queryHash,
     roots,
     columns,
     phases: Object.values(compiled.phases).map(phase => ({
       name: phase.name,
       dependencies: [...phase.dependencies],
-      formHash: forms.phases[phase.name],
-      returns: types.phases[phase.name]
+      formHash: formGraph.phases[phase.name],
+      returns: typeGraph.phases[phase.name]
     })),
     calls: compiled.calls.map(call => ({
       address: call.address,
@@ -199,11 +200,11 @@ export function plan(query, {trigger} = {}) {
       argsPath: call.argsPath,
       targetField: call.targetField,
       key: call.key,
-      formHash: forms.calls.get(call.address).hash,
-      form: forms.calls.get(call.address).form,
-      types: types.calls.get(call.address)
+      formHash: formGraph.calls.get(call.address).hash,
+      form: formGraph.calls.get(call.address).form,
+      types: typeGraph.calls.get(call.address)
     })),
     warnings: compiled.warnings,
-    errors: types.errors
+    errors: typeGraph.errors
   }
 }

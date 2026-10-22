@@ -1,3 +1,5 @@
+import {errorOf} from './error-catalog.js'
+
 // Arguments that configure a call rather than feed it data.
 const RESERVE_ARGS = ['timeout', 'retry', 'catch', 'precheck', 'postcheck', 'debug', 'cache']
 
@@ -68,7 +70,7 @@ const omitIn = (object, [key, ...rest]) => {
 const ESCAPED_DOT = '\u0000'
 const parseFieldPath = (path) => {
   const fields = path.replaceAll('..', ESCAPED_DOT).split('.').map(field => field.replaceAll(ESCAPED_DOT, '.'))
-  if (fields.includes('')) throw new Error(`Field path '${path}' names an empty field`)
+  if (fields.includes('')) throw errorOf('invalid-field-path', {path})
   return fields
 }
 

@@ -10,6 +10,7 @@
 import {isPlainObject, mapValues, pick} from '../common/common.js'
 import {canonical} from '../query/forms.js'
 import {defineService} from './define-service.js'
+import {errorOf} from '../common/error-catalog.js'
 import {format} from '../common/format.js'
 import {isErrorData, fromErrorData} from '../execute/errors.js'
 import {parseSchema} from '@tlsft/zodly'
@@ -59,11 +60,11 @@ const asError = (value) => isErrorData(value) ? fromErrorData(value) : new Error
 
 // Resources that are gone, with what replaced them.
 const RETIRED = {
-  '/print': 'Use [util]/inspect',
-  '/recordFailure': 'Use [util]/log with to:',
-  '/removeErrors': 'Use skip: [\'error\'] on the iteration',
-  '/removeNulls': 'Use skip: [\'null\'] on the iteration',
-  '/removeSuccesses': 'Use [util]/partitionErrors and take its failures'
+  '/print': 'Use [util]/inspect.',
+  '/recordFailure': 'Use [util]/log with to:.',
+  '/removeErrors': 'Use skip: [\'error\'] on the iteration.',
+  '/removeNulls': 'Use skip: [\'null\'] on the iteration.',
+  '/removeSuccesses': 'Use [util]/partitionErrors and take its failures.'
 }
 
 // MicroQL's builtin service, as a service definition (see define-service.js).
@@ -245,7 +246,7 @@ const definedService = defineService(serviceDefinition)
 const util = {
   ...definedService,
   lookup(key) {
-    if (Object.hasOwn(RETIRED, key.resource)) throw new Error(`[util]${key.resource} is retired. ${RETIRED[key.resource]}`)
+    if (Object.hasOwn(RETIRED, key.resource)) throw errorOf('retired-key', {retired: `[util]${key.resource}`, replacement: RETIRED[key.resource]})
     return definedService.lookup(key)
   }
 }

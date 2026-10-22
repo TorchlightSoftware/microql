@@ -2,7 +2,8 @@
  * @fileoverview MicroQL Query Engine - Main Entry Point
  *
  * Compiles a Query, executes it as a Run, and returns what `select`
- * names. Free of environment dependencies: the runtime arrives as `config.runtime`.
+ * names. Free of environment dependencies: the scope it runs in arrives as
+ * `config.scope`, from its runtime.
  */
 
 import {pick} from '../common/common.js'
@@ -20,8 +21,8 @@ export function applySelection(results, select) {
 /**
  * Run a Query.
  * @param {Object} config - the Query: {phases, given, trigger, select, settings}, with the
- *   runtime it runs on and the scope it runs in there: {runtime, scope}
- * @param {Object} options - the Run: {runId, trigger, target, signal, onUpdate}; see execute()
+ *   scope it runs in: {scope}, from runtime.scopeOf
+ * @param {Object} options - the Run: {trigger, target, signal, onUpdate}; see execute()
  * @returns {*} the selected results
  */
 async function query(config, options = {}) {

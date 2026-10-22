@@ -23,6 +23,8 @@
  * made with, apart from every other instance.
  */
 
+import {errorOf} from '../common/error-catalog.js'
+
 const isServiceCall = (entry) => typeof entry === 'function' || typeof entry?.call === 'function'
 
 // A service call as the service keeps it: its declaration, and its call.
@@ -41,20 +43,20 @@ function serviceCallsByResource(serviceDefinition) {
   }))
 }
 
-const methodsOf = (byMethod) => [...byMethod.keys()].join(', ')
+const methodsOf = (byMethod) => [...byMethod.keys()].filter(method => method !== null)
 const nameOf = ({service, resource, confined}) => `[${confined ? '@' : ''}${service}]${resource}`
 
-// Why a service refuses a key's custody, when it does.
+// The error refusing a key's custody, when the service refuses it.
 function custodyRefusal(confinedService, key) {
-  if (key.confined && !confinedService) return `${nameOf(key)} is confined, and this service answers no confined calls`
-  if (!key.confined && confinedService) return `${nameOf(key)} isn't confined, and this service answers only confined calls: ${nameOf({...key, confined: true})}`
+  if (key.confined && !confinedService) return errorOf('confined-key', {key: nameOf(key)})
+  if (!key.confined && confinedService) return errorOf('unconfined-key', {key: nameOf(key), confinedKey: nameOf({...key, confined: true})})
 }
 
-// Why a resource doesn't answer a key's method, when it doesn't.
+// The error refusing a key's method, when its resource doesn't answer it.
 function methodRefusal(byMethod, key) {
-  if (byMethod.has(null)) return key.method === null ? undefined : `${nameOf(key)} takes no method; got ${key.method}`
-  if (key.method === null) return `${nameOf(key)} needs a method: ${methodsOf(byMethod)}`
-  if (!byMethod.has(key.method)) return `${nameOf(key)} doesn't answer ${key.method} (answers ${methodsOf(byMethod)})`
+  const methods = methodsOf(byMethod)
+  if (key.method === null) return methods.length ? errorOf('method-required', {key: nameOf(key), methods}) : undefined
+  if (!byMethod.has(key.method)) return errorOf('method-not-allowed', {key: nameOf(key), method: key.method, methods})
 }
 
 /**
@@ -68,8 +70,8 @@ export function defineService(serviceDefinition) {
   function serviceCallAt(key) {
     const byMethod = resources.get(key.resource)
     const refusal = custodyRefusal(Boolean(serviceDefinition.confined), key)
-      ?? (byMethod ? methodRefusal(byMethod, key) : `${nameOf(key)} is not a resource of this service`)
-    if (refusal) throw new Error(refusal)
+      ?? (byMethod ? methodRefusal(byMethod, key) : errorOf('unknown-resource', {key: nameOf(key)}))
+    if (refusal) throw refusal
     return byMethod.get(key.method)
   }
 

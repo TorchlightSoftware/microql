@@ -11,7 +11,7 @@ import {mapValues} from '../src/common/common.js'
 // with, and its Run State's entries for a form.
 export const ownRun = () => {
   const id = randomUUID()
-  return {id, list: (form) => nodeRuntime.runStates.list({}, id, form)}
+  return {id, list: (form) => nodeRuntime.runStates.list({runId: id}, form)}
 }
 
 // Services by name, each written as a table of service calls.

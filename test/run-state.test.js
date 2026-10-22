@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import query, {memoryCache, NodeRuntime, plan, defineService} from '../index.js'
+import query, {memoryStores, NodeRuntime, plan, defineService} from '../index.js'
 import {ownRun} from './test-services.js'
 
 // A service that counts its calls by input, and fails the inputs it's told to.
@@ -120,7 +120,7 @@ describe('Cache', () => {
   })
 
   it('reuses a result across Runs only when the inputs match', async () => {
-    const runtime = new NodeRuntime({cache: memoryCache()})
+    const runtime = new NodeRuntime({cache: memoryStores()})
     const service = counting()
     await query({...cachedQuery(service, 1), runtime})
     await query({...cachedQuery(service, 1), runtime})
@@ -146,7 +146,7 @@ describe('Cache', () => {
 
   for (const [cache, settings, days, reused] of ttls) {
     it(`${reused ? 'reuses' : 'misses'} a ${days}-day-old entry for cache: ${JSON.stringify(cache)} with settings ${JSON.stringify(settings)}`, async () => {
-      const store = memoryCache()
+      const store = memoryStores()
       const service = counting()
       const config = {...cachedQuery(service, 1, cache), settings, runtime: new NodeRuntime({cache: store})}
 
@@ -158,7 +158,7 @@ describe('Cache', () => {
   }
 
   it('records when each entry expires', async () => {
-    const store = memoryCache()
+    const store = memoryStores()
     const config = {...cachedQuery(counting(), 1, {ttl: '2h'}), runtime: new NodeRuntime({cache: store})}
     await query(config)
 
@@ -168,7 +168,7 @@ describe('Cache', () => {
   })
 
   it('misses an entry older than its ttl', async () => {
-    const cache = memoryCache()
+    const cache = memoryStores()
     const runtime = new NodeRuntime({cache})
     const service = counting()
     const config = {...cachedQuery(service, 1, {ttl: '1h'}), runtime}
@@ -217,7 +217,7 @@ describe('the input of a call that holds calls', () => {
   }
 
   it('misses its Cache entry when a phase the calls it holds read has changed', async () => {
-    const cache = memoryCache()
+    const cache = memoryStores()
     const config = (label) => ({
       given: {label},
       services,

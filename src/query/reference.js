@@ -18,6 +18,7 @@
  */
 
 import {isPlainObject, mapValues, getIn} from '../common/common.js'
+import {errorOf} from '../common/error-catalog.js'
 
 const PATH = '((?:\\.[^.[\\]]+|\\[\\d+\\])*)'
 const REFERENCE = new RegExp(`^([$@])([A-Za-z_]\\w*)?${PATH}$`)
@@ -45,20 +46,18 @@ export const mapReferences = (value, replace) => {
   return value
 }
 
-// The reason a reference-shaped string is not a valid reference, or undefined.
+// The error a reference-shaped string makes when it is not a valid reference, or undefined.
 const malformation = (text, match) => {
-  if (text === '$') return 'Bare $ is not supported. Reference a phase by name: $name'
-  if (text.startsWith('$.')) return `The $.name form is replaced by $name. Use '$${text.slice(2)}'`
-  if (text.startsWith('@@')) return '@@ is removed. Name the iteration with as: and reference it as @name'
-  if (!match || (match[1] === '$' && !match[2])) {
-    return 'A literal string beginning with $ or @ must be supplied through given'
-  }
+  if (text === '$') return errorOf('bare-reference', {reference: text})
+  if (text.startsWith('$.')) return errorOf('retired-key', {retired: text, replacement: `The $.name form is replaced by $name: use '$${text.slice(2)}'.`})
+  if (text.startsWith('@@')) return errorOf('retired-key', {retired: text, replacement: '@@ is replaced by naming the iteration with as: and referencing it as @name.'})
+  if (!match || (match[1] === '$' && !match[2])) return errorOf('invalid-reference', {reference: text})
 }
 
 const pathOf = (text, dotted) => {
   const path = Array.from(dotted.matchAll(SEGMENT), ([, field, index]) => field ?? index)
   if (path.some(segment => ADDRESS_SEGMENT.test(segment))) {
-    throw new Error(`Invalid reference '${text}': Service call addresses are not reliable references in queries - they break when ordering changes. Use an alias instead.`)
+    throw errorOf('address-reference', {reference: text})
   }
   return path
 }
@@ -70,15 +69,15 @@ export function parseReference(text) {
   if (error) return {sigil: '@', name: 'err', depth: error[1].length, path: pathOf(text, error[2])}
 
   const match = text.match(REFERENCE)
-  const problem = malformation(text, match)
-  if (problem) throw new Error(`Invalid reference '${text}': ${problem}`)
+  const malformed = malformation(text, match)
+  if (malformed) throw malformed
 
   const [, sigil, name, dotted] = match
   return {sigil, name, path: pathOf(text, dotted)}
 }
 
 // Context: what an `@` reference can see — {flow, bindings, errors}. The same
-// shape holds runtime values (execute), forms (forms.js) and types (plan.js).
+// shape holds values at run time (execute), forms (forms.js) and types (plan.js).
 export const rootContext = {flow: null, bindings: {}, errors: []}
 
 // The context inside a position, for one input: a lone call receives the input

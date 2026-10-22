@@ -17,7 +17,7 @@ describe('Circular Dependency Detection Tests', () => {
             b: ['[test]/identity', {value: '$a'}]
           }
         }),
-        /Circular dependency detected at compile time: a, b/
+        /Phases 'a', 'b' depend on each other/
       )
     })
 
@@ -42,7 +42,7 @@ describe('Circular Dependency Detection Tests', () => {
             a: ['[test]/identity', {value: '$a'}]
           }
         }),
-        /Circular dependency detected at compile time: a/
+        /Phases 'a' depend on each other/
       )
     })
 
@@ -56,7 +56,7 @@ describe('Circular Dependency Detection Tests', () => {
             c: ['[test]/identity', {value: '$b'}]
           }
         }),
-        /Circular dependency detected at compile time: a, b, c/
+        /Phases 'a', 'b', 'c' depend on each other/
       )
     })
 
@@ -70,7 +70,7 @@ describe('Circular Dependency Detection Tests', () => {
             c: ['[test]/identity', {value: '$a'}]
           }
         }),
-        /Circular dependency detected at compile time: a, b, c/
+        /Phases 'a', 'b', 'c' depend on each other/
       )
     })
   })
@@ -91,7 +91,7 @@ describe('Circular Dependency Detection Tests', () => {
             external: ['[test]/identity', {value: '$chainA'}]
           }
         }),
-        /Circular dependency detected at compile time: chainA, external/
+        /Phases 'chainA', 'external' depend on each other/
       )
     })
 
@@ -115,7 +115,7 @@ describe('Circular Dependency Detection Tests', () => {
             result: ['[test]/identity', {value: '$deepNested'}]
           }
         }),
-        /Circular dependency detected at compile time: deepNested, result/
+        /Phases 'deepNested', 'result' depend on each other/
       )
     })
 
@@ -134,7 +134,7 @@ describe('Circular Dependency Detection Tests', () => {
             finalResult: ['[test]/identity', {value: '$processedData'}]
           }
         }),
-        /Circular dependency detected at compile time: processedData, multiplier, finalResult/
+        /Phases 'processedData', 'multiplier', 'finalResult' depend on each other/
       )
     })
 
@@ -150,7 +150,7 @@ describe('Circular Dependency Detection Tests', () => {
             validator: ['[test]/identity', {value: '$filtered'}] // Depends on filtered
           }
         }),
-        /Circular dependency detected at compile time: filtered, validator/
+        /Phases 'filtered', 'validator' depend on each other/
       )
     })
 
@@ -174,7 +174,7 @@ describe('Circular Dependency Detection Tests', () => {
             levelThree: ['[test]/double', {value: '$levelTwo'}]
           }
         }),
-        /Circular dependency detected at compile time: levelOne, levelTwo/
+        /Phases 'levelOne', 'levelTwo', 'levelThree' depend on each other/
       )
     })
   })
@@ -197,7 +197,7 @@ describe('Circular Dependency Detection Tests', () => {
             anotherValid: ['[math]/times10', {on: '$validQuery'}]
           }
         }),
-        /Circular dependency detected at compile time: circular1, circular2/
+        /Phases 'circular1', 'circular2' depend on each other/
       )
     })
 
@@ -225,7 +225,7 @@ describe('Circular Dependency Detection Tests', () => {
             cyclicDep: ['[test]/identity', {value: '$chainWithCycle'}]
           }
         }),
-        /Circular dependency detected at compile time: chainWithCycle, cyclicDep/
+        /Phases 'chainWithCycle', 'cyclicDep' depend on each other/
       )
     })
   })

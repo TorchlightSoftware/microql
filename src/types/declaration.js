@@ -31,6 +31,7 @@
 
 import {parseSchema, tagsOf} from '@tlsft/zodly'
 import {isPlainObject, writeFieldPath} from '../common/common.js'
+import {errorOf, reasonOf} from '../common/error-catalog.js'
 import {isAny, unwrap, returnedBy} from './types.js'
 import {checkedAsAny, resolvedIn} from './sources.js'
 
@@ -45,7 +46,7 @@ const asFunction = (form) => typeof form === 'string' ? 'function' : ['function'
 
 // A zodly preprocessor for `function`, which a declaration doesn't use.
 const refusedFunction = () => {
-  throw new Error('A service call is typed \'call\', not \'function\'')
+  throw errorOf('function-type')
 }
 
 /**
@@ -74,7 +75,7 @@ function readDocument(name, document, preprocess) {
   try {
     return parseSchema(document, {preprocess})
   } catch (error) {
-    throw new Error(`${error.message}, in ${name}`, {cause: error})
+    throw errorOf('malformed-document', {document: name, reason: reasonOf(error)}, {cause: error})
   }
 }
 
@@ -94,7 +95,7 @@ function fieldsIn(schema, segments = []) {
 
 function checkTags({path, tags}) {
   const unknown = tags.find(tag => !TAGS.includes(tag))
-  if (unknown !== undefined) throw new Error(`Unknown tag '${unknown}' on '${path}'`)
+  if (unknown !== undefined) throw errorOf('unknown-tag', {tag: unknown, path})
 }
 
 const tagged = (fields, tag) => fields.filter(field => field.tags.includes(tag))
@@ -111,7 +112,7 @@ function read({input, output}) {
   if (output !== undefined) readDocument('output', output, READINGS.declared)
   fields.forEach(checkTags)
   const targets = tagged(fields, 'target')
-  if (targets.length > 1) throw new Error(`Only one field can be the target: ${targets.map(f => `'${f.path}'`).join(' and ')}`)
+  if (targets.length > 1) throw errorOf('multiple-targets', {paths: targets.map(field => field.path)})
   return {
     input,
     output,

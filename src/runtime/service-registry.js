@@ -7,6 +7,11 @@
  * util, MicroQL's built-in service, unless the runtime registers another
  * service under that name.
  *
+ * A runtime whose scopes name their Run says which fields do, its run keys
+ * (such as ['runId']). Services are registered by the scope without them,
+ * since a service outlives any one Run; instances are kept by the whole
+ * scope, so each Run has its own. With no run keys, the two are the same.
+ *
  * An instance of a service is made on its first use in a scope, as its
  * runtime says, and kept for every later use until it's torn down: by the
  * runtime, by config filed for it (see config.js), or once another service
@@ -14,6 +19,8 @@
  */
 
 import {ScopedTable} from './table.js'
+import {omit} from '../common/common.js'
+import {errorOf} from '../common/error-catalog.js'
 import util from '../service/util.js'
 
 // The services every scope has.
@@ -27,10 +34,17 @@ export class ServiceRegistry {
   #services
   #instances
 
-  constructor(scopeSchema = {}) {
-    this.scopeSchema = scopeSchema
-    this.#services = new ScopedTable(scopeSchema)
+  constructor({scopeSchema = {}, runKeys = []} = {}) {
+    this.runKeys = runKeys
+    // the schema of the scopes services, and their config, are filed by
+    this.scopeSchema = omit(scopeSchema, runKeys)
+    this.#services = new ScopedTable(this.scopeSchema)
     this.#instances = new ScopedTable(scopeSchema)
+  }
+
+  // A scope without the fields that name its Run: the scope its services are filed by.
+  withoutRun(scope) {
+    return omit(scope, this.runKeys)
   }
 
   // Files a service under a name in a scope, in place of any there.
@@ -53,15 +67,15 @@ export class ServiceRegistry {
   }
 
   /**
-   * The instance of the service under a name in a scope: made by
-   * make(service) on first use, and kept for every later one. Uses that start
-   * together share one. An instance of a service another has since replaced
-   * is released before one of the new service is made; a make that fails is
-   * forgotten, so the next use tries again.
+   * The instance of the service under a name in a scope, the whole scope a
+   * Run has: made by make(service) on first use, and kept for every later
+   * one. Uses that start together share one. An instance of a service another
+   * has since replaced is released before one of the new service is made; a
+   * make that fails is forgotten, so the next use tries again.
    */
   instanceOf(scope, name, make) {
-    const service = this.get(scope, name)
-    if (!service) return Promise.reject(new Error(`No service '${name}' in this scope`))
+    const service = this.get(this.withoutRun(scope), name)
+    if (!service) return Promise.reject(errorOf('unknown-service', {service: name}))
     const held = this.#instances.get(scope, name)
     if (held?.service === service) return held.instance
 
@@ -74,7 +88,8 @@ export class ServiceRegistry {
     return instance
   }
 
-  // Releases instances: one name's in a scope, a scope's, or every one. The
+  // Releases instances: one name's, or all of them, in each scope the given
+  // scope's fields are in (a Run, a tenant's every Run), or every one. The
   // next use of a service makes a fresh instance.
   async tearDown(scope, name) {
     const held = this.#instances.remove(scope, name)

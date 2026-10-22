@@ -13,7 +13,7 @@
  */
 
 import {readDeclaration} from '../types/declaration.js'
-import {missingCapability} from '../runtime/runtime.js'
+import {missingCapability} from '../query/compile.js'
 import {configRefusal} from '../runtime/config.js'
 
 // The name the smoke tests give the service, as a runtime would register it.

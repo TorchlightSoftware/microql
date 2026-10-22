@@ -6,6 +6,19 @@ import js from '@eslint/js'
 // the tests, and tooling. Everything else is core, and must run on any platform.
 const NODE_FILES = ['index.js', 'src/runtime/file-stores.js', 'test/**', 'scripts/**', 'eslint.config.js']
 
+// The query engine: compile, execute and plan, which know only the scope a
+// Query runs in, never the runtime that made it.
+const ENGINE_FILES = ['src/query/**', 'src/execute/**', 'src/types/**']
+
+// Node built-ins, and what's built on them: never in core.
+const NODE_ONLY = {
+  paths: [...builtinModules, 'fs-extra'].map(name => ({
+    name,
+    message: 'Core runs on any platform; node-only code belongs in index.js'
+  })),
+  patterns: [{group: ['node:*'], message: 'Core runs on any platform; node-only code belongs in index.js'}]
+}
+
 const nodeGlobals = {
   process: 'readonly',
   Buffer: 'readonly',
@@ -95,12 +108,18 @@ export default [
       }],
 
       // Core is free of environment dependencies: no node built-ins, and nothing built on them
+      'no-restricted-imports': ['error', NODE_ONLY]
+    }
+  },
+  {
+    files: ENGINE_FILES,
+    rules: {
       'no-restricted-imports': ['error', {
-        paths: [...builtinModules, 'fs-extra'].map(name => ({
-          name,
-          message: 'Core runs on any platform; node-only code belongs in index.js'
-        })),
-        patterns: [{group: ['node:*'], message: 'Core runs on any platform; node-only code belongs in index.js'}]
+        ...NODE_ONLY,
+        patterns: [
+          ...NODE_ONLY.patterns,
+          {group: ['**/runtime/*'], message: 'The engine knows only the scope a Query runs in; how a runtime keys anything is its own'}
+        ]
       }]
     }
   },

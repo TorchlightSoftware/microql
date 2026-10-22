@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {describe, it, beforeEach} from 'node:test'
 import {rm, readdir} from 'node:fs/promises'
-import {fileStore, fileCache, fileRunStates, memoryStore, memoryCache, memoryRunStates} from '../index.js'
+import {fileStore, fileStores, memoryStore, memoryStores} from '../index.js'
 import {hashOf} from '../src/query/forms.js'
 
 const DIR = '.cache-test-file-store'
@@ -52,19 +52,19 @@ describe('fileStore', () => {
   })
 })
 
-describe('fileCache', () => {
+describe('fileStores', () => {
   beforeEach(() => rm(DIR, {recursive: true, force: true}))
 
   it('keeps a fileStore per scope, in a directory named by the scope\'s hash', async () => {
-    const cache = fileCache(DIR)
+    const cache = fileStores(DIR)
     await cache.set(t1, 'form-a', 'one', entry('one', hour))
     assert.deepEqual(await readdir(DIR), [hashOf(t1)])
     assert.deepEqual(await readdir(`${DIR}/${hashOf(t1)}/form-a`), ['one.json'])
   })
 
   it('clears every scope on disk, those this process hasn\'t used included', async () => {
-    await fileCache(DIR).set(t1, 'form-a', 'one', entry('one', hour))
-    const cache = fileCache(DIR)
+    await fileStores(DIR).set(t1, 'form-a', 'one', entry('one', hour))
+    const cache = fileStores(DIR)
     await cache.clear()
     assert.deepEqual(await cache.list(t1, 'form-a'), [])
   })
@@ -105,10 +105,11 @@ for (const [name, fresh] of stores) {
   })
 }
 
-// The Caches MicroQL ships, each emptied before a test.
+// The scoped stores MicroQL ships, which a runtime keeps the Cache and Run
+// States in, each emptied before a test.
 const caches = [
-  ['memoryCache', async () => memoryCache()],
-  ['fileCache', async () => { await rm(DIR, {recursive: true, force: true}); return fileCache(DIR) }]
+  ['memoryStores', async () => memoryStores()],
+  ['fileStores', async () => { await rm(DIR, {recursive: true, force: true}); return fileStores(DIR) }]
 ]
 
 for (const [name, fresh] of caches) {
@@ -150,56 +151,3 @@ for (const [name, fresh] of caches) {
     }
   })
 }
-
-// The Run States MicroQL ships, each emptied before a test.
-const runStateKinds = [
-  ['memoryRunStates', async () => memoryRunStates()],
-  ['fileRunStates', async () => { await rm(DIR, {recursive: true, force: true}); return fileRunStates(DIR) }]
-]
-
-for (const [name, fresh] of runStateKinds) {
-  describe(name, () => {
-    // Two Runs in one scope and one in another, with an entry each.
-    const filled = async () => {
-      const runStates = await fresh()
-      await runStates.set(t1, 'run-1', 'form-a', 'one', entry('one', hour))
-      await runStates.set(t1, 'run-2', 'form-a', 'one', entry('two', hour))
-      await runStates.set(t2, 'run-1', 'form-a', 'one', entry('three', hour))
-      return runStates
-    }
-
-    // What each Run holds in form-a: t1's run-1, t1's run-2, t2's run-1.
-    const held = (runStates) => Promise.all([[t1, 'run-1'], [t1, 'run-2'], [t2, 'run-1']]
-      .map(async ([scope, runId]) => (await runStates.list(scope, runId, 'form-a')).map(e => e.output)))
-
-    it('keeps each Run\'s entries apart, by scope and Run id', async () => {
-      const runStates = await filled()
-      assert.deepEqual(await held(runStates), [['one'], ['two'], ['three']])
-      assert.equal((await runStates.get(t1, 'run-2', 'form-a', 'one')).output, 'two')
-    })
-
-    // [description, what clear is given, what's left]
-    const clears = [
-      ['one Run', [t1, 'run-1'], [[], ['two'], ['three']]],
-      ['every Run, when given nothing', [], [[], [], []]]
-    ]
-
-    for (const [description, given, left] of clears) {
-      it(`clears ${description}`, async () => {
-        const runStates = await filled()
-        await runStates.clear(...given)
-        assert.deepEqual(await held(runStates), left)
-      })
-    }
-  })
-}
-
-describe('fileRunStates', () => {
-  beforeEach(() => rm(DIR, {recursive: true, force: true}))
-
-  it('keeps a fileStore per Run, in a directory named by its id, within one named by its scope\'s hash', async () => {
-    await fileRunStates(DIR).set(t1, 'run-1', 'form-a', 'one', entry('one', hour))
-    assert.deepEqual(await readdir(`${DIR}/${hashOf(t1)}`), ['run-1'])
-    assert.deepEqual(await readdir(`${DIR}/${hashOf(t1)}/run-1/form-a`), ['one.json'])
-  })
-})

@@ -17,12 +17,7 @@ describe('Function Arguments Tests', () => {
             }]
           }
         }),
-        (error) => {
-          // Check that the error message tells user not to use raw functions
-          return error.message.includes('Raw JavaScript functions are not supported') ||
-                 error.message.includes('Use service descriptors instead') ||
-                 error.message.includes('Functions must be service calls')
-        }
+        {code: 'raw-function'}
       )
     })
 
@@ -38,12 +33,7 @@ describe('Function Arguments Tests', () => {
             }]
           }
         }),
-        (error) => {
-          // Check that the error message tells user not to use raw functions
-          return error.message.includes('Raw JavaScript functions are not supported') ||
-                 error.message.includes('Use service descriptors instead') ||
-                 error.message.includes('Functions must be service calls')
-        }
+        {code: 'raw-function'}
       )
     })
 
@@ -58,11 +48,7 @@ describe('Function Arguments Tests', () => {
             }]
           }
         }),
-        (error) => {
-          return error.message.includes('Raw JavaScript functions are not supported') ||
-                 error.message.includes('Use service descriptors instead') ||
-                 error.message.includes('Functions must be service calls')
-        }
+        {code: 'raw-function'}
       )
     })
   })

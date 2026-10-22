@@ -88,7 +88,7 @@ Validation errors provide clear, detailed messages with full context:
 - userData.email: 'invalid-email' => Invalid email
 ```
 
-The error names which validation failed. A schema that can't be parsed fails before anything runs, named the same way: `Service Call Validation precheck schema parse error`.
+The error names which validation failed, with code `precheck-failed` or `postcheck-failed` ([Runtime Integration § Run errors](runtime-integration.md#run-errors)). A schema that can't be parsed fails before anything runs, with `malformed-schema`: `The Service Call Validation precheck schema is malformed`.
 
 ## Examples
 

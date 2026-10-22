@@ -10,8 +10,9 @@
  * Context: a call sees `{flow, bindings, errors}` — the value flowing in (`@`),
  * the values its enclosing iterations named with `as:` (`@name`), and the
  * errors of its enclosing catch handlers (`@err`, `@@err`).
- * Every service call is made through the runtime, which compile bound to
- * the Query's scope.
+ * Every service call is made through the scope the Query was compiled in,
+ * and every result is kept in its Run State: the runtime decides how both
+ * are keyed, and core never knows.
  *
  * A phase that fails fails the Run, unless the Query has a catch: then the
  * handler's result is the phase's, and the Run carries on.
@@ -26,6 +27,7 @@ import {concurrencyLimit} from './concurrency.js'
 import {mapValues, pick} from '../common/common.js'
 import {validate} from '@tlsft/zodly'
 import {format} from '../common/format.js'
+import {errorOf} from '../common/error-catalog.js'
 
 // Runs a phase or position's steps in order: each step's result flows into the next.
 async function runSteps(steps, context, run) {
@@ -122,9 +124,8 @@ function runPhase(name, run) {
 // The phase a target names: `$name`, which must be a phase of the Query.
 function targetPhase(compiled, target) {
   const name = target.match(/^\$?([A-Za-z_]\w*)/)?.[1]
-  if (!name) throw new Error(`Targets are phases, named '$phase': got '${target}'`)
-  if (target !== `$${name}`) throw new Error(`Targets are phases: use '$${name}'`)
-  if (!compiled.phases[name]) throw new Error(`Unknown target '${target}': no phase named '${name}'`)
+  if (target !== `$${name}`) throw errorOf('invalid-target', {target, phase: name}, {where: 'execute:'})
+  if (!compiled.phases[name]) throw errorOf('unknown-target', {target}, {where: 'execute:'})
   return name
 }
 
@@ -140,38 +141,36 @@ function extentOfRun(compiled, target) {
   }
 }
 
-// What a Run needs from its caller, which core never supplies itself, and a
-// trigger payload that fits the Query's trigger schema, if it declares one.
-// The runtime came with the Query, which compile checked.
-function checkRunInputs(compiled, {runId, trigger}) {
-  if (runId === undefined) throw new Error('execute needs a runId: the Run whose Run State the runtime keeps, in runtime.runStates')
+// What a Run needs from its caller, which core never supplies itself: a
+// scope with a Run State, scope.run, to run in, and a trigger payload
+// that fits the Query's trigger schema, if it declares one.
+function checkRunInputs(compiled, {trigger}) {
+  if (!compiled.scope.run) throw errorOf('missing-run-state', {}, {where: 'execute:'})
   try {
     validate(compiled.triggerSchema, trigger, format)
   } catch (error) {
-    error.message = `$trigger validation failed:\n${error.message}`
-    throw error
+    throw errorOf('invalid-trigger', {details: error.message}, {where: 'execute:'})
   }
 }
 
 /**
- * Execute a compiled Query as one Run, in the Run State its runtime keeps for it.
+ * Execute a compiled Query as one Run, in the Run State of the scope it was compiled in.
  * @param {Object} compiled - from compile()
- * @param {Object} options - {runId, trigger, target, signal, onUpdate}: the
- *   Run, whose Run State the runtime keeps, the trigger payload, the phase to run up to (default: all),
- *   an AbortSignal that stops the Run, and a callback receiving each phase's
- *   updates
+ * @param {Object} options - {trigger, target, signal, onUpdate}: the trigger
+ *   payload, the phase to run up to (default: all), an AbortSignal that stops
+ *   the Run, and a callback receiving each phase's updates
  * @returns {Object} each executed phase's result, by name
  */
-export async function execute(compiled, {runId, trigger, target, signal, onUpdate = () => {}} = {}) {
-  checkRunInputs(compiled, {runId, trigger})
-  const {runtime, settings} = compiled
+export async function execute(compiled, {trigger, target, signal, onUpdate = () => {}} = {}) {
+  checkRunInputs(compiled, {trigger})
+  const {scope, settings} = compiled
   const {phases, rerun} = extentOfRun(compiled, target)
 
   const run = {
     compiled,
-    runtime,
-    runState: runtime.runStateOf(runId),
-    forms: formsOf(compiled, {trigger}),
+    scope,
+    runState: scope.run,
+    formGraph: formsOf(compiled, {trigger}),
     nodes: {given: compiled.given, trigger},
     resultHashes: {},
     inflight: new Map(),

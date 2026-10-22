@@ -28,6 +28,7 @@ import {hashOf} from '../query/forms.js'
 import {validate} from '@tlsft/zodly'
 import {format} from '../common/format.js'
 import {toErrorData} from './errors.js'
+import {errorOf, locate} from '../common/error-catalog.js'
 
 
 // A call's label in errors and logs: its address and service key.
@@ -77,9 +78,9 @@ const withDebug = (next) => async (args, inv) => {
   const show = (value) => format(value, settings.inspect)
   const startTime = Date.now()
 
-  run.runtime.env.log(`${labelOf(call)} Called with args:\n${show(inv.inputs)}`, {color})
+  run.scope.env.log(`${labelOf(call)} Called with args:\n${show(inv.inputs)}`, {color})
   const result = await next(args, inv)
-  run.runtime.env.log(`${labelOf(call)} Completed in ${Date.now() - startTime}ms returning:\n${show(result)}`, {color})
+  run.scope.env.log(`${labelOf(call)} Completed in ${Date.now() - startTime}ms returning:\n${show(result)}`, {color})
   return result
 }
 
@@ -89,11 +90,11 @@ const withDebug = (next) => async (args, inv) => {
 function labelError(error, inv) {
   if (error.address) return
   const {call, run} = inv
-  error.message = `${labelOf(call)} ${error.message}`
+  locate(error, labelOf(call))
   error.address = call.address
   error.key = call.key
-  error.queryHash = run.forms.queryHash
-  error.formHash = run.forms.calls.get(call.address).hash
+  error.queryHash = run.formGraph.queryHash
+  error.formHash = run.formGraph.calls.get(call.address).hash
   error.args = inv.inputs
 }
 
@@ -106,7 +107,7 @@ const withErrorLabel = (next) => (args, inv) => next(args, inv).catch(error => {
 // Reuses a result the Run State already holds for this form and input —
 // unless the Run reruns this call — and runs identical calls in flight once.
 const withRunState = (next, call, run) => {
-  const form = run.forms.calls.get(call.address).hash
+  const form = run.formGraph.calls.get(call.address).hash
   const rerun = run.rerun(call)
   return async (args, inv) => {
     const stored = rerun ? undefined : await run.runState.get(form, inv.input)
@@ -140,7 +141,7 @@ async function recordResult(next, args, inv, form) {
 
 const parseTimeUnit = (timeStr) => {
   const match = timeStr.match(/^(\d+)([smhDM])$/)
-  if (!match) throw new Error(`Invalid time format: ${timeStr}`)
+  if (!match) throw errorOf('invalid-ttl', {ttl: timeStr})
   const [, amount, unit] = match
   const multipliers = {s: 1000, m: 60000, h: 3600000, D: 86400000, M: 2592000000}
   return parseInt(amount) * multipliers[unit]
@@ -152,9 +153,9 @@ const DEFAULT_TTL = '7D'
 // Reuses a result across Runs while it is younger than the call's ttl. Each
 // entry records when it expires, so a store can prune without knowing ttls.
 const withCache = (next, call, run) => {
-  const form = run.forms.calls.get(call.address).hash
+  const form = run.formGraph.calls.get(call.address).hash
   return async (args, inv) => {
-    const store = run.runtime.cache
+    const store = run.scope.cache
     const ttl = parseTimeUnit(call.settings.cache.ttl ?? run.compiled.settings.cache?.ttl ?? DEFAULT_TTL)
     const cached = await store.get(form, inv.input)
     if (cached && Date.now() - Date.parse(cached.created) < ttl) return cached.output
@@ -167,6 +168,9 @@ const withCache = (next, call, run) => {
   }
 }
 
+// What a failed check is, by its order.
+const CHECK_FAILED = {precheck: 'precheck-failed', postcheck: 'postcheck-failed'}
+
 // Validates a value against the call's schemas for one order (precheck or
 // postcheck), in the given designations' order.
 function check(value, order, designations, {call}) {
@@ -177,8 +181,7 @@ function check(value, order, designations, {call}) {
     try {
       validate(schema, value, show)
     } catch (error) {
-      error.message = `${VALIDATION_NAMES[designation]} ${order} failed:\n${error.message}`
-      throw error
+      throw errorOf(CHECK_FAILED[order], {validation: VALIDATION_NAMES[designation], details: error.message})
     }
   }
 }
@@ -220,7 +223,7 @@ const withTimeout = (next) => async (args, inv) => {
   const {timeout} = inv.call.settings
   let timeoutId
   const timedOut = new Promise((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error(`Timed out after ${timeout}ms`)), timeout)
+    timeoutId = setTimeout(() => reject(errorOf('timeout', {timeout})), timeout)
   })
   try {
     return await Promise.race([next(args, inv), timedOut])
@@ -256,9 +259,9 @@ function wrappersFor(call, run) {
   ].filter(Boolean)
 }
 
-// The call, made through the runtime, wrapped in its behaviour: a step
+// The call, made through the scope, wrapped in its behaviour: a step
 // `(args, invocation) => result`.
 export function wrap(call, run) {
-  const serviceCall = (fields) => run.runtime.call(call.parts, fields)
+  const serviceCall = (fields) => run.scope.call(call.parts, fields)
   return wrappersFor(call, run).reduceRight((next, wrapper) => wrapper(next, call, run), serviceCall)
 }

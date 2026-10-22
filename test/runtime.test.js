@@ -5,20 +5,17 @@ import coreQuery, {defineService, Runtime} from '../core.js'
 import query from '../index.js'
 import {ownRun} from './test-services.js'
 
-// Core, as a platform calls it: a Run of its own.
-const runCore = (config, options) => coreQuery(config, {runId: randomUUID(), ...options})
-
 const t1 = {tenantId: 't1'}
 const t2 = {tenantId: 't2'}
 
-// A runtime scoped by tenant, which keeps what it logs and the calls core
-// makes through it.
+// A runtime scoped by tenant and Run, which keeps what it logs and the calls
+// core makes through it.
 class RecordingRuntime extends Runtime {
   logged = []
   calls = []
 
   constructor() {
-    super({tenantId: ['string']})
+    super({scopeSchema: {tenantId: ['string'], runId: ['string']}, runKeys: ['runId']})
     this.env = {log: (text, options) => this.logged.push({text, ...options})}
   }
 
@@ -28,10 +25,16 @@ class RecordingRuntime extends Runtime {
   }
 }
 
-// A runtime with services registered in a scope.
-const runtimeWith = (scope, services) => {
+// A tenant's scope for one Run: a Run of its own, unless one is named.
+const runIn = (tenant, runId = randomUUID()) => ({...tenant, runId})
+
+// Core, as a platform calls it: the Query in the scope of a Run.
+const runCore = (runtime, scope, config, options) => coreQuery({...config, scope: runtime.scopeOf(scope)}, options)
+
+// A runtime with services registered for a tenant.
+const runtimeWith = (tenant, services) => {
   const runtime = new RecordingRuntime()
-  for (const [name, service] of Object.entries(services)) runtime.services.register(scope, name, service)
+  for (const [name, service] of Object.entries(services)) runtime.services.register(tenant, name, service)
   return runtime
 }
 
@@ -46,42 +49,41 @@ const counted = () => {
   return counts
 }
 
-const runOf = (scope, runtime) => runCore({runtime, scope, phases: {a: ['[service]/run', {n: 1}]}, select: '$a'})
+const runOf = (runtime, scope, n = 1) => runCore(runtime, scope, {phases: {a: ['[service]/run', {n}]}, select: '$a'})
 
-describe('core on a runtime', () => {
+describe('core in a scope', () => {
   const shop = defineService({async '/total'({on}) { return on.length }})
 
-  it('makes each service call through runtime.call, with the scope the Query runs in and the call\'s key and fields', async () => {
+  it('makes each service call through runtime.call, with the whole scope it runs in and the call\'s key and fields', async () => {
     const runtime = runtimeWith(t1, {shop})
-    await runCore({runtime, scope: t1, phases: {a: ['[shop]/total', {on: [1, 2]}]}})
-    assert.deepEqual(runtime.calls, [{scope: t1, key: {method: null, service: 'shop', resource: '/total', confined: false}, fields: {on: [1, 2]}}])
+    const scope = runIn(t1)
+    await runCore(runtime, scope, {phases: {a: ['[shop]/total', {on: [1, 2]}]}})
+    assert.deepEqual(runtime.calls, [{scope, key: {method: null, service: 'shop', resource: '/total', confined: false}, fields: {on: [1, 2]}}])
   })
 
-  it('looks each key\'s service up in the scope the Query runs in', async () => {
+  it('looks each key\'s service up among its tenant\'s', async () => {
     const runtime = runtimeWith(t1, {shop})
-    await assert.rejects(runCore({runtime, scope: t2, phases: {a: ['[shop]/total', {on: []}]}}), {code: 'unknown-service', address: '$a.@1'})
+    await assert.rejects(runCore(runtime, runIn(t2), {phases: {a: ['[shop]/total', {on: []}]}}), {code: 'unknown-service', address: '$a.@1'})
   })
 
   it('refuses a scope that doesn\'t fit the runtime\'s scope schema', async () => {
-    await assert.rejects(runCore({runtime: runtimeWith(t1, {shop}), scope: {tenant: 't1'}, phases: {a: ['[shop]/total', {on: []}]}}), /Invalid scope/)
+    await assert.rejects(runCore(runtimeWith(t1, {shop}), {tenant: 't1', runId: 'r1'}, {phases: {a: ['[shop]/total', {on: []}]}}), {code: 'invalid-scope'})
   })
 
   it('refuses a service that requires a key env lacks, while compiling', async () => {
     const mailer = defineService({requires: ['send'], async '/mail'() { return 'sent' }})
     const runtime = runtimeWith(t1, {mailer})
-    await assert.rejects(runCore({runtime, scope: t1, phases: {a: ['[mailer]/mail', {}]}}), {
+    await assert.rejects(runCore(runtime, runIn(t1), {phases: {a: ['[mailer]/mail', {}]}}), {
       code: 'missing-capability',
       address: '$a.@1',
-      message: '[$a.@1] Service \'mailer\' requires env.send, which this runtime doesn\'t provide'
+      message: '[$a.@1] Service \'mailer\' requires env.send, which this runtime doesn\'t provide.'
     })
     assert.deepEqual(runtime.calls, [])
   })
 
   it('hands util the env\'s log, for inspect and log', async () => {
     const runtime = new RecordingRuntime()
-    await runCore({
-      runtime,
-      scope: t1,
+    await runCore(runtime, runIn(t1), {
       phases: {
         shown: ['[util]/inspect', {on: 'hello', color: 'blue'}],
         failed: ['[util]/try', {
@@ -100,44 +102,38 @@ describe('core on a runtime', () => {
 })
 
 describe('Runtime', () => {
-  it('makes a service\'s instance on its first call, with env and the config filed for it', async () => {
+  it('makes a service\'s instance on its first call, with env and the config filed for its tenant', async () => {
     const vault = defineService({config: {vault: ['string']}, init(env) { this.env = env }, async '/where'() { return this.env }})
     const runtime = runtimeWith(t1, {vault})
     await runtime.config.set(t1, 'vault', {vault: 'notes'})
-    const env = await runCore({runtime, scope: t1, phases: {a: ['[vault]/where', {}]}, select: '$a'})
+    const env = await runCore(runtime, runIn(t1), {phases: {a: ['[vault]/where', {}]}, select: '$a'})
     assert.equal(env.log, runtime.env.log)
     assert.deepEqual(env.config, {vault: 'notes'})
   })
 
-  it('keeps the instance for later Runs in its scope, and makes another for another scope', async () => {
+  it('keeps an instance for every call of its Run, and makes another for another Run', async () => {
     const {service, inits} = counted()
-    const runtime = new RecordingRuntime()
-    for (const scope of [t1, t2]) runtime.services.register(scope, 'service', service)
-    await runOf(t1, runtime)
-    await runOf(t1, runtime)
-    await runOf(t2, runtime)
+    const runtime = runtimeWith(t1, {service})
+    const run = runIn(t1)
+    await runCore(runtime, run, {phases: {a: ['[service]/run', {n: 1}], b: ['[service]/run', {n: 2}]}})
+    await runOf(runtime, run, 3)
+    assert.equal(inits.length, 1)
+    await runOf(runtime, runIn(t1))
     assert.equal(inits.length, 2)
   })
 
-  it('makes one instance for Runs that start together', async () => {
-    const {service, inits} = counted()
-    const runtime = runtimeWith(t1, {service})
-    await Promise.all([runOf(t1, runtime), runOf(t1, runtime)])
-    assert.equal(inits.length, 1)
-  })
-
-  it('waits for an async init, once, before the calls of Runs that start together', async () => {
+  it('waits for an async init, once, before the calls of a Run that start together', async () => {
     let logins = 0
     const service = defineService({
       async init() {
         await new Promise(resolve => setTimeout(resolve, 5))
         this.token = `token ${++logins}`
       },
-      async '/whoami'() { return this.token }
+      async '/whoami'({who}) { return `${who}: ${this.token}` }
     })
     const runtime = runtimeWith(t1, {service})
-    const whoami = {runtime, scope: t1, phases: {a: ['[service]/whoami', {}]}, select: '$a'}
-    assert.deepEqual(await Promise.all([runCore(whoami), runCore(whoami)]), ['token 1', 'token 1'])
+    const whoami = {phases: {a: ['[service]/whoami', {who: 'a'}], b: ['[service]/whoami', {who: 'b'}]}}
+    assert.deepEqual(await runCore(runtime, runIn(t1), whoami), {a: 'a: token 1', b: 'b: token 1'})
     assert.equal(logins, 1)
   })
 
@@ -145,11 +141,12 @@ describe('Runtime', () => {
     let attempts = 0
     const service = defineService({init() { if (++attempts === 1) throw new Error('not yet') }, async '/run'({n}) { return n }})
     const runtime = runtimeWith(t1, {service})
-    await assert.rejects(runOf(t1, runtime), /not yet/)
-    assert.equal(await runOf(t1, runtime), 1)
+    const run = runIn(t1)
+    await assert.rejects(runOf(runtime, run), /not yet/)
+    assert.equal(await runOf(runtime, run), 1)
   })
 
-  it('makes a fresh instance once a service\'s config changes, releasing the old one', async () => {
+  it('releases the instances of every Run of a tenant once its config changes', async () => {
     let tearDowns = 0
     const vault = defineService({
       config: {vault: ['string']},
@@ -158,63 +155,93 @@ describe('Runtime', () => {
       async '/where'() { return this.vault }
     })
     const runtime = runtimeWith(t1, {vault})
-    const where = () => runCore({runtime, scope: t1, phases: {a: ['[vault]/where', {}]}, select: '$a'})
+    const run = runIn(t1)
+    const where = (scope) => runCore(runtime, scope, {phases: {a: ['[vault]/where', {}]}, select: '$a'})
     await runtime.config.set(t1, 'vault', {vault: 'a'})
-    assert.equal(await where(), 'a')
+    assert.equal(await where(run), 'a')
     await runtime.config.set(t1, 'vault', {vault: 'b'})
-    assert.equal(await where(), 'b')
     assert.equal(tearDowns, 1)
+    assert.equal(await where(runIn(t1)), 'b')
   })
 
-  it('fails a service\'s first call, with invalid-config, when nothing is filed for a service that declares config', async () => {
+  it('fails a service\'s first call, with missing-config, when nothing is filed for a service that declares config', async () => {
     const vault = defineService({config: {vault: ['string']}, async '/where'() {}})
-    await assert.rejects(runCore({runtime: runtimeWith(t1, {vault}), scope: t1, phases: {a: ['[vault]/where', {}]}}), {
-      code: 'invalid-config',
+    await assert.rejects(runCore(runtimeWith(t1, {vault}), runIn(t1), {phases: {a: ['[vault]/where', {}]}}), {
+      code: 'missing-config',
       address: '$a.@1',
-      message: /No config is filed for 'vault', whose service declares config/
+      message: /Service 'vault' declares config, and none is filed for it in this scope/
     })
   })
 
-  // [description, what tearDown is given, tearDowns of t1's instance and t2's]
+  // [description, what tearDown is given, tearDowns of t1's instances (two Runs) and t2's (one Run)]
   const tearDowns = [
-    ['a scope\'s instances', [t1], [1, 0]],
-    ['every scope\'s instances', [], [1, 1]]
+    ['a Run\'s instances', [runIn(t1, 'r1')], [1, 0]],
+    ['a tenant\'s instances, in every Run', [t1], [2, 0]],
+    ['every scope\'s instances', [], [2, 1]]
   ]
 
   for (const [description, given, expected] of tearDowns) {
-    it(`tears down ${description}, which the next Run makes afresh`, async () => {
+    it(`tears down ${description}, which the next call makes afresh`, async () => {
       const [one, other] = [counted(), counted()]
       const runtime = new RecordingRuntime()
       runtime.services.register(t1, 'service', one.service)
       runtime.services.register(t2, 'service', other.service)
-      await runOf(t1, runtime)
-      await runOf(t2, runtime)
+      for (const scope of [runIn(t1, 'r1'), runIn(t1, 'r2'), runIn(t2, 'r1')]) await runOf(runtime, scope)
       await runtime.tearDown(...given)
       assert.deepEqual([one.tearDowns, other.tearDowns], expected)
-      await runOf(t1, runtime)
-      assert.equal(one.inits.length, 2)
+      await runOf(runtime, runIn(t1, 'r1'), 2)
+      assert.equal(one.inits.length, 3)
     })
   }
+
+  // A service that counts its calls.
+  const tally = () => {
+    const counts = {calls: 0}
+    counts.service = defineService({async '/run'() { return ++counts.calls }})
+    return counts
+  }
+
+  it('keeps a Run\'s results for that Run alone: running it again reuses them, another Run doesn\'t', async () => {
+    const counts = tally()
+    const runtime = runtimeWith(t1, {service: counts.service})
+    const run = runIn(t1)
+    assert.equal(await runOf(runtime, run), 1)
+    assert.equal(await runOf(runtime, run), 1)
+    assert.equal(await runOf(runtime, runIn(t1)), 2)
+    assert.equal(counts.calls, 2)
+  })
+
+  it('keeps the Cache by tenant: another Run reuses a cached result, another tenant doesn\'t', async () => {
+    const counts = tally()
+    const runtime = runtimeWith(t1, {service: counts.service})
+    runtime.services.register(t2, 'service', counts.service)
+    const cached = {phases: {a: ['[service]/run', {cache: true}]}, select: '$a'}
+    assert.equal(await runCore(runtime, runIn(t1), cached), 1)
+    assert.equal(await runCore(runtime, runIn(t1), cached), 1)
+    assert.equal(await runCore(runtime, runIn(t2), cached), 2)
+  })
+
+  it('gives a scope without its run keys no Run State: one to plan in, not to run in', () => {
+    const runtime = new RecordingRuntime()
+    assert.equal(runtime.scopeOf(t1).run, undefined)
+    assert.equal(typeof runtime.scopeOf(runIn(t1)).run.get, 'function')
+  })
 })
 
 describe('what core requires of its caller', () => {
   const config = {given: {xs: [1, 2]}, phases: {n: ['[util]/length', {value: '$given.xs'}]}, select: '$n'}
 
-  it('runs with a runtime and a Run id', async () => {
-    assert.equal(await runCore({...config, runtime: new RecordingRuntime(), scope: t1}), 2)
+  it('runs in a scope with its run keys', async () => {
+    assert.equal(await runCore(new RecordingRuntime(), runIn(t1), config), 2)
   })
 
-  // [missing, the Query's additions, options, error]
-  const missing = [
-    ['a runtime', {}, {runId: 'run'}, /needs a runtime/],
-    ['a Run id', {runtime: new RecordingRuntime(), scope: t1}, {}, /needs a runId/]
-  ]
+  it('refuses to compile without a scope', async () => {
+    await assert.rejects(coreQuery(config), {code: 'missing-scope', message: /^compile: 'scope' is missing\./})
+  })
 
-  for (const [what, extra, options, error] of missing) {
-    it(`refuses to run without ${what}`, async () => {
-      await assert.rejects(coreQuery({...config, ...extra}, options), error)
-    })
-  }
+  it('refuses to run in a scope without a Run State', async () => {
+    await assert.rejects(runCore(new RecordingRuntime(), t1, config), /execute: 'scope.run' does not contain a valid RunState/)
+  })
 })
 
 describe('$trigger', () => {
@@ -258,7 +285,7 @@ describe('$trigger', () => {
     it(`refuses a payload with ${why}, before any call runs`, async () => {
       let calls = 0
       const counting = {...greeting, services: {echo: defineService({async '/echo'({on}) { calls++; return on }})}}
-      await assert.rejects(query(counting, {trigger: payload}), /\$trigger validation failed/)
+      await assert.rejects(query(counting, {trigger: payload}), {code: 'invalid-trigger', message: /^execute: The trigger payload doesn't fit the trigger schema/})
       assert.equal(calls, 0)
     })
   }

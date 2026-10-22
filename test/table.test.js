@@ -60,9 +60,18 @@ describe('ScopedTable', () => {
     })
   }
 
+  it('removes the values of every scope a partial scope\'s fields are in', () => {
+    const table = new ScopedTable({tenantId: ['string'], runId: ['string']})
+    table.set({tenantId: 't1', runId: 'r1'}, 'github', 1)
+    table.set({tenantId: 't1', runId: 'r2'}, 'github', 2)
+    table.set({tenantId: 't2', runId: 'r1'}, 'github', 3)
+    assert.deepEqual(table.remove({tenantId: 't1'}), [1, 2])
+    assert.deepEqual(table.list({tenantId: 't2', runId: 'r1'}), {github: 3})
+  })
+
   it('refuses a scope that doesn\'t fit its schema', () => {
     const table = byTenant()
-    assert.throws(() => table.set({tenant: 't1'}, 'github', 1), /Invalid scope/)
-    assert.throws(() => table.get({tenantId: 1}, 'github'), /Invalid scope/)
+    assert.throws(() => table.set({tenant: 't1'}, 'github', 1), {code: 'invalid-scope'})
+    assert.throws(() => table.get({tenantId: 1}, 'github'), {code: 'invalid-scope'})
   })
 })

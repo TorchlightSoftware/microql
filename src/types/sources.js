@@ -26,11 +26,12 @@
  */
 
 import {isPlainObject} from '../common/common.js'
+import {errorOf} from '../common/error-catalog.js'
 import {isReference} from '../query/reference.js'
 import {any, elementOf, fieldValueOf, literalTypeOf, schemaOfDescriptor, pick, merge, difference} from './types.js'
 
 const refuse = (kind, takes) => {
-  throw new Error(`${kind} takes ${takes}`)
+  throw errorOf('malformed-source-operand', {kind, takes})
 }
 
 // What each kind of source takes: a check of its value that throws what's
@@ -69,7 +70,7 @@ const SOURCES = {
 export function checkSource(source, parse) {
   const keys = isPlainObject(source) ? Object.keys(source) : []
   if (keys.length !== 1 || !Object.hasOwn(SOURCES, keys[0])) {
-    throw new Error(`A source has exactly one of ${Object.keys(SOURCES).join(', ')}. Got: ${JSON.stringify(source)}`)
+    throw errorOf('malformed-source', {source: JSON.stringify(source), kinds: Object.keys(SOURCES)})
   }
   const [kind] = keys
   TAKES[SOURCES[kind].takes](kind, source[kind], parse)

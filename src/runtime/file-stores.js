@@ -1,13 +1,13 @@
 /**
  * @fileoverview The entry stores the node runtime keeps on disk: fileStore,
- * and the Cache and Run States made of them, one directory per scope (and
- * per Run). Node only, like index.js, which exports them.
+ * and fileStores, one per scope, which the Cache and Run States are made of.
+ * Node only, like index.js, which exports them.
  */
 
 import path from 'node:path'
 import {mkdir, readFile, readdir, rm, writeFile} from 'node:fs/promises'
 import {hashOf} from '../query/forms.js'
-import {scopedCache, scopedRunStates} from './runtime.js'
+import {scopedStores} from './runtime.js'
 
 const readJson = async (file) => {
   try {
@@ -70,17 +70,14 @@ export function fileStore(dir) {
   }
 }
 
-// Scoped stores on disk, whose clearing with no scope empties the whole
-// directory, scopes this process hasn't used included.
-const clearingDir = (dir, stores) => ({
-  ...stores,
-  clear: (scope, ...rest) => scope === undefined ? rm(dir, {recursive: true, force: true}) : stores.clear(scope, ...rest)
-})
-
-// A Cache on disk: a fileStore per scope, in a directory named by the
-// scope's hash.
-export const fileCache = (dir) => clearingDir(dir, scopedCache(scope => fileStore(path.join(dir, hashOf(scope)))))
-
-// Run States on disk: a fileStore per Run, in a directory named by the Run's
-// id, within one named by its scope's hash.
-export const fileRunStates = (dir) => clearingDir(dir, scopedRunStates((scope, runId) => fileStore(path.join(dir, hashOf(scope), runId))))
+// Entry stores on disk, one fileStore per scope, in a directory named by the
+// scope's hash: the Cache by tenant, or Run States by Run, as the runtime
+// keys them. Clearing with no scope empties the whole directory, scopes this
+// process hasn't used included.
+export function fileStores(dir) {
+  const stores = scopedStores(scope => fileStore(path.join(dir, hashOf(scope))))
+  return {
+    ...stores,
+    clear: (scope, form) => scope === undefined ? rm(dir, {recursive: true, force: true}) : stores.clear(scope, form)
+  }
+}

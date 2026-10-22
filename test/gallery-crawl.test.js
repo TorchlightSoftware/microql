@@ -7,7 +7,7 @@
  */
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import query, {plan, defineService, Runtime} from '../index.js'
+import query, {plan, defineService, NodeRuntime, memoryStores} from '../index.js'
 import {ownRun} from './test-services.js'
 
 const GALLERY_PAGES = {
@@ -63,9 +63,9 @@ const stubServices = () => {
   return {calls, services: {crawler, assistant, catalogue}}
 }
 
-// What the Query logs to a destination: its failures, which this runtime keeps.
+// What the Query logs to a destination: its failures, which this node runtime keeps.
 const failureLog = []
-const runtime = Object.assign(new Runtime(), {env: {log: (text, {to} = {}) => { if (to) failureLog.push({to, text}) }}})
+const runtime = Object.assign(new NodeRuntime({cache: memoryStores()}), {env: {log: (text, {to} = {}) => { if (to) failureLog.push({to, text}) }}})
 
 // Logs a failure to a destination, keeping it as data in the failed item's place.
 const logTo = (to) => ['@err', '[util]/log', {to}]
