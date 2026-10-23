@@ -60,7 +60,7 @@ describe('Validation Integration Tests', () => {
         validInput: {numerator: 10, denominator: 2},
         expectedResult: 5,
         invalidInput: {numerator: -10, denominator: 2},
-        expectedError: /Validation postcheck failed/
+        expectedError: {code: 'postcheck-failed'}
       },
       {
         name: 'enum validation',
@@ -226,7 +226,7 @@ describe('Validation Integration Tests', () => {
         services: {testService: service},
         phases: {result: ['[testService]/process', {value: 9}]} // doubled = 18, exceeds max
       }
-      await assert.rejects(query(config2), /Validation postcheck failed/)
+      await assert.rejects(query(config2), {code: 'postcheck-failed'})
     })
 
     it('should accept date with constraints', async () => {
@@ -349,7 +349,7 @@ describe('Validation Integration Tests', () => {
           services: {testService: defineService({'/test': {input, call: async (args) => args.value}})},
           phases: {result: ['[testService]/test', {value: 'hello'}]}
         }
-        await assert.rejects(query(config), /The declaration of \[testService\]\/test is malformed/)
+        await assert.rejects(query(config), {code: 'malformed-declaration', key: '[testService]/test'})
       })
     }
   })
@@ -456,7 +456,7 @@ describe('Validation Integration Tests', () => {
 
       await assert.rejects(
         query(config),
-        /Validation postcheck failed/
+        {code: 'postcheck-failed'}
       )
     })
 

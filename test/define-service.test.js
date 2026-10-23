@@ -45,11 +45,11 @@ describe('defineService', () => {
 
   // [description, key, the refusal]
   const refused = [
-    ['a resource it lacks', keyOf(null, '/missing'), /\[shop\]\/missing is not a resource of this service/],
-    ['a method on a service call that takes none', keyOf('GET', '/total'), /\[shop\]\/total takes no method, and got GET\./],
-    ['no method on a resource that needs one', keyOf(null, '/orders'), /\[shop\]\/orders needs a method\.\n\nIt answers GET, POST\./],
-    ['a method the resource lacks', keyOf('DELETE', '/orders'), /\[shop\]\/orders doesn't answer DELETE\.\n\nIt answers GET, POST\./],
-    ['a confined key, on a service that isn\'t confined', keyOf(null, '/total', true), /\[@shop\]\/total is confined, and this service answers no confined calls/]
+    ['a resource it lacks', keyOf(null, '/missing'), {code: 'unknown-resource', key: '[shop]/missing'}],
+    ['a method on a service call that takes none', keyOf('GET', '/total'), {code: 'method-not-allowed', key: '[shop]/total', method: 'GET', methods: []}],
+    ['no method on a resource that needs one', keyOf(null, '/orders'), {code: 'method-required', key: '[shop]/orders', methods: ['GET', 'POST']}],
+    ['a method the resource lacks', keyOf('DELETE', '/orders'), {code: 'method-not-allowed', key: '[shop]/orders', method: 'DELETE', methods: ['GET', 'POST']}],
+    ['a confined key, on a service that isn\'t confined', keyOf(null, '/total', true), {code: 'confined-key', key: '[@shop]/total'}]
   ]
 
   for (const [description, key, error] of refused) {
@@ -72,7 +72,7 @@ describe('defineService', () => {
     })
 
     it('refuses a key that isn\'t confined', () => {
-      assert.throws(() => vault.lookup(keyOf(null, '/secret')), /\[shop\]\/secret isn't confined, and this service answers only confined calls\.\n\nUse \[@shop\]\/secret\./)
+      assert.throws(() => vault.lookup(keyOf(null, '/secret')), {code: 'unconfined-key', key: '[shop]/secret', confinedKey: '[@shop]/secret'})
     })
   })
 

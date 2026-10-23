@@ -146,18 +146,21 @@ describe('target', () => {
     assert.deepEqual(source.calls, {1: 2, 2: 2})
   })
 
-  // [target, error pattern]
+  // execute's errors are placed at it.
+  const atExecute = /^execute: /
+
+  // [target, the error: its code and details]
   const invalid = [
-    ['$nope', {code: 'unknown-target', message: /^execute: Target '\$nope' names no phase\.$/}],
-    ['$listings.@1', {code: 'invalid-target', message: /Use '\$listings'/}],
-    ['$listings.result', {code: 'invalid-target', message: /Use '\$listings'/}],
-    ['listings', {code: 'invalid-target', message: /Use '\$listings'/}],
-    ['@item', {code: 'invalid-target', message: /^execute: Target '@item' is not a phase reference\.\n\nName a phase as '\$phase'\.$/}]
+    ['$nope', {code: 'unknown-target', target: '$nope', message: atExecute}],
+    ['$listings.@1', {code: 'invalid-target', target: '$listings.@1', phase: 'listings', message: atExecute}],
+    ['$listings.result', {code: 'invalid-target', target: '$listings.result', phase: 'listings'}],
+    ['listings', {code: 'invalid-target', target: 'listings', phase: 'listings'}],
+    ['@item', {code: 'invalid-target', target: '@item', phase: undefined}]
   ]
 
-  for (const [target, pattern] of invalid) {
+  for (const [target, error] of invalid) {
     it(`refuses the target ${target}`, async () => {
-      await assert.rejects(query(pipeline(counting()), {target}), pattern)
+      await assert.rejects(query(pipeline(counting()), {target}), error)
     })
   }
 })

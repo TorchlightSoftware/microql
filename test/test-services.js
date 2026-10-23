@@ -2,9 +2,10 @@
  * Shared test services for MicroQL tests
  */
 
+import assert from 'node:assert/strict'
 import {randomUUID} from 'node:crypto'
 import {defineService} from '../src/service/define-service.js'
-import {nodeRuntime} from '../index.js'
+import {nodeRuntime, NodeRuntime, fileStores} from '../index.js'
 import {mapValues} from '../src/common/common.js'
 
 // A Run of a test's own on the node runtime: its id, to run or resume it
@@ -12,6 +13,20 @@ import {mapValues} from '../src/common/common.js'
 export const ownRun = () => {
   const id = randomUUID()
   return {id, list: (form) => nodeRuntime.runStates.list({runId: id}, form)}
+}
+
+// The node runtime with its Cache kept in a test's own directory.
+export const runtimeCachingIn = (dir) => new NodeRuntime({cache: fileStores(dir)})
+
+// The error at the end of an error's cause chain.
+const rootCause = (error) => error.cause === undefined ? error : rootCause(error.cause)
+
+// A check for assert.throws: the error at the end of the thrown error's cause
+// chain matches what's expected, as assert.throws matches one. A library such
+// as zodly wraps the catalogued error a preprocessor raises.
+export const causedBy = (expected) => (error) => {
+  assert.throws(() => { throw rootCause(error) }, expected)
+  return true
 }
 
 // Services by name, each written as a table of service calls.

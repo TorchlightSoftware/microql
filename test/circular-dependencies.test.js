@@ -17,7 +17,7 @@ describe('Circular Dependency Detection Tests', () => {
             b: ['[test]/identity', {value: '$a'}]
           }
         }),
-        /Phases 'a', 'b' depend on each other/
+        {code: 'circular-dependency', phases: ['a', 'b']}
       )
     })
 
@@ -42,7 +42,7 @@ describe('Circular Dependency Detection Tests', () => {
             a: ['[test]/identity', {value: '$a'}]
           }
         }),
-        /Phases 'a' depend on each other/
+        {code: 'circular-dependency', phases: ['a']}
       )
     })
 
@@ -56,7 +56,7 @@ describe('Circular Dependency Detection Tests', () => {
             c: ['[test]/identity', {value: '$b'}]
           }
         }),
-        /Phases 'a', 'b', 'c' depend on each other/
+        {code: 'circular-dependency', phases: ['a', 'b', 'c']}
       )
     })
 
@@ -70,7 +70,7 @@ describe('Circular Dependency Detection Tests', () => {
             c: ['[test]/identity', {value: '$a'}]
           }
         }),
-        /Phases 'a', 'b', 'c' depend on each other/
+        {code: 'circular-dependency', phases: ['a', 'b', 'c']}
       )
     })
   })
@@ -91,7 +91,7 @@ describe('Circular Dependency Detection Tests', () => {
             external: ['[test]/identity', {value: '$chainA'}]
           }
         }),
-        /Phases 'chainA', 'external' depend on each other/
+        {code: 'circular-dependency', phases: ['chainA', 'external']}
       )
     })
 
@@ -115,7 +115,7 @@ describe('Circular Dependency Detection Tests', () => {
             result: ['[test]/identity', {value: '$deepNested'}]
           }
         }),
-        /Phases 'deepNested', 'result' depend on each other/
+        {code: 'circular-dependency', phases: ['deepNested', 'result']}
       )
     })
 
@@ -134,7 +134,7 @@ describe('Circular Dependency Detection Tests', () => {
             finalResult: ['[test]/identity', {value: '$processedData'}]
           }
         }),
-        /Phases 'processedData', 'multiplier', 'finalResult' depend on each other/
+        {code: 'circular-dependency', phases: ['processedData', 'multiplier', 'finalResult']}
       )
     })
 
@@ -150,7 +150,7 @@ describe('Circular Dependency Detection Tests', () => {
             validator: ['[test]/identity', {value: '$filtered'}] // Depends on filtered
           }
         }),
-        /Phases 'filtered', 'validator' depend on each other/
+        {code: 'circular-dependency', phases: ['filtered', 'validator']}
       )
     })
 
@@ -174,7 +174,7 @@ describe('Circular Dependency Detection Tests', () => {
             levelThree: ['[test]/double', {value: '$levelTwo'}]
           }
         }),
-        /Phases 'levelOne', 'levelTwo', 'levelThree' depend on each other/
+        {code: 'circular-dependency', phases: ['levelOne', 'levelTwo', 'levelThree']}
       )
     })
   })
@@ -197,7 +197,7 @@ describe('Circular Dependency Detection Tests', () => {
             anotherValid: ['[math]/times10', {on: '$validQuery'}]
           }
         }),
-        /Phases 'circular1', 'circular2' depend on each other/
+        {code: 'circular-dependency', phases: ['circular1', 'circular2']}
       )
     })
 
@@ -225,7 +225,7 @@ describe('Circular Dependency Detection Tests', () => {
             cyclicDep: ['[test]/identity', {value: '$chainWithCycle'}]
           }
         }),
-        /Phases 'chainWithCycle', 'cyclicDep' depend on each other/
+        {code: 'circular-dependency', phases: ['chainWithCycle', 'cyclicDep']}
       )
     })
   })

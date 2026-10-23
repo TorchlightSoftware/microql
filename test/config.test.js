@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
 import {configSchemaOf, ConfigRegistry, ServiceRegistry, defineService} from '../core.js'
 import {tagsOf} from '@tlsft/zodly'
+import {causedBy} from './test-services.js'
 
 const GITHUB_OAUTH = {authorizeUrl: 'https://github.com/login/oauth/authorize', tokenUrl: 'https://github.com/login/oauth/access_token', scopes: ['repo']}
 
@@ -44,7 +45,7 @@ describe('configSchemaOf', () => {
     const malformed = [
       ['no token URL', {authorizeUrl: GITHUB_OAUTH.authorizeUrl}, /tokenUrl/],
       ['a URL that isn\'t one', {...GITHUB_OAUTH, authorizeUrl: 'nope'}, /authorizeUrl/],
-      ['no details at all', undefined, /oauth takes \{authorizeUrl, tokenUrl, scopes\}/]
+      ['no details at all', undefined, causedBy({code: 'malformed-oauth'})]
     ]
 
     for (const [description, params, error] of malformed) {
@@ -88,20 +89,19 @@ describe('ConfigRegistry', () => {
     assert.deepEqual(await config.get(scope, 'notes'), {vault: '/home/notes'})
   })
 
-  // [description, name, value, the error's code, its message]
+  // config.set's errors are placed at it.
+  const atSet = /^config\.set: /
+
+  // [description, name, value, the error: its code and details]
   const refused = [
-    ['config that doesn\'t fit', 'notes', {vault: ''}, 'invalid-config', /^config\.set: Service 'notes' can't use this config:\n/],
-    ['config for a service the scope doesn\'t have', 'github', {token: 'a'}, 'unknown-service', /^config\.set: Service 'github' is not registered in this scope\.$/]
+    ['config that doesn\'t fit', 'notes', {vault: ''}, {code: 'invalid-config', service: 'notes', message: atSet}],
+    ['config for a service the scope doesn\'t have', 'github', {token: 'a'}, {code: 'unknown-service', service: 'github', message: atSet}]
   ]
 
-  for (const [description, name, value, code, error] of refused) {
+  for (const [description, name, value, error] of refused) {
     it(`refuses ${description}, filing nothing`, async () => {
       const {config} = registries()
-      await assert.rejects(config.set(scope, name, value), (thrown) => {
-        assert.match(thrown.message, error)
-        assert.equal(thrown.code, code)
-        return true
-      })
+      await assert.rejects(config.set(scope, name, value), error)
       assert.equal(await config.get(scope, name), undefined)
     })
   }
@@ -109,7 +109,7 @@ describe('ConfigRegistry', () => {
   it('refuses config for a service with a malformed config declaration', async () => {
     const {services, config} = registries()
     services.register(scope, 'broken', defineService({config: {vault: ['nope']}, async '/x'() {}}))
-    await assert.rejects(config.set(scope, 'broken', {}), {code: 'malformed-config-declaration', message: /^config\.set: Service 'broken' has a malformed config declaration: Unknown type name 'nope'/})
+    await assert.rejects(config.set(scope, 'broken', {}), {code: 'malformed-config-declaration', service: 'broken', reason: /Unknown type name 'nope'/, message: atSet})
   })
 
   it('releases the service\'s instance when its config changes, so its next use makes one with the new config', async () => {

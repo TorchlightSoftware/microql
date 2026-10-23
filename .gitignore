@@ -3,3 +3,4 @@ node_modules
 tmp
 temp-zod-repo
 .cache*
+function-names.md

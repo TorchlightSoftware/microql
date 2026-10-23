@@ -40,7 +40,7 @@ describe('Timeout Tests', () => {
             result: ['[slow]/delay', {input: '$given.value'}]
           }
         }),
-        /\[\$result\.@1 - \[slow\]\/delay\] Timed out after 100ms/
+        {code: 'timeout', timeout: 100, address: '$result.@1', key: '[slow]/delay'}
       )
     })
 
@@ -94,7 +94,7 @@ describe('Timeout Tests', () => {
             result: ['[slow]/delay', {input: '$given.value', timeout: 100}]
           }
         }),
-        /\[\$result\.@1 - \[slow\]\/delay\] Timed out after 100ms/
+        {code: 'timeout', timeout: 100, address: '$result.@1', key: '[slow]/delay'}
       )
     })
   })
@@ -162,7 +162,7 @@ describe('Timeout Tests', () => {
             ]
           }
         }),
-        /\[\$chained\.@2 - \[step2\]\/delay\] Timed out after 100ms/
+        {code: 'timeout', timeout: 100, address: '$chained.@2', key: '[step2]/delay'}
       )
     })
   })

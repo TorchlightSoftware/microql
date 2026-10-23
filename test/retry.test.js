@@ -257,7 +257,7 @@ describe('Retry Tests', () => {
       const {table, service} = writer(5)
       await assert.rejects(
         query({services: {writer: service}, phases: {draft: draft(2)}}),
-        /Service Call Validation postcheck failed/
+        {code: 'postcheck-failed', validation: 'Service Call Validation'}
       )
       assert.strictEqual(table.calls, 3)
     })
@@ -266,7 +266,7 @@ describe('Retry Tests', () => {
       const {table, service} = writer(0)
       await assert.rejects(
         query({services: {writer: service}, phases: {draft: ['[writer]/write', {topic: 5, retry: 3, precheck: {topic: ['string']}}]}}),
-        /Service Call Validation precheck failed/
+        {code: 'precheck-failed', validation: 'Service Call Validation'}
       )
       assert.strictEqual(table.calls, 0)
     })

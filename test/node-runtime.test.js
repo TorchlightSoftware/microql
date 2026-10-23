@@ -27,7 +27,7 @@ describe('the node runtime', () => {
   })
 
   it('refuses config a service doesn\'t accept, before any call', async () => {
-    await assert.rejects(query({...where, runtime: new NodeRuntime(), config: {vault: {vault: ''}}}), {code: 'invalid-config', message: /Service 'vault' can't use this config/})
+    await assert.rejects(query({...where, runtime: new NodeRuntime(), config: {vault: {vault: ''}}}), {code: 'invalid-config', service: 'vault'})
   })
 
   it('runs a Query with only the services it brings', async () => {
@@ -39,7 +39,7 @@ describe('the node runtime', () => {
   it('runs a Query with only the config it brings', async () => {
     const runtime = new NodeRuntime()
     await query({...where, runtime, config: {vault: {vault: 'notes'}}})
-    await assert.rejects(query({...where, runtime}), {code: 'missing-config', message: /Service 'vault' declares config, and none is filed/})
+    await assert.rejects(query({...where, runtime}), {code: 'missing-config', service: 'vault'})
   })
 
   it('makes each Run\'s instances afresh', async () => {

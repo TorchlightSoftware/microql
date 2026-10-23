@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
-import {plan, addressToPath, pathToAddress, defineService} from '../index.js'
+import {plan, addressToPath, pathToAddress, defineService, toErrorData, isErrorData} from '../index.js'
 import {describeSchema, receivedBy} from '../src/types/types.js'
+import {pick} from '../src/common/common.js'
+
+// What a plan error says, as a program reads it: where, which issue, and the types described.
+const issueOf = (error) => pick(error, ['address', 'code', 'expects', 'receives'])
 
 // A service whose resource takes two calls, to exercise field lettering.
 const branch = defineService({
@@ -207,11 +211,21 @@ describe('type inference', () => {
   it('reports a mismatch as an error, kept apart from compile warnings', () => {
     const mismatched = {...query, phases: {a: ['[branch]/extract', {url: '$given.ids'}]}}
     const {errors, warnings} = plan(mismatched)
-    assert.deepEqual(errors.map(({address, code, message}) => ({address, code, message})),
-      [{address: '$a.@1.url', code: 'type-mismatch', message: '$a.@1.url expects string but receives array of number'}])
+    assert.deepEqual(errors.map(issueOf), [{address: '$a.@1.url', code: 'type-mismatch', expects: 'string', receives: 'array of number'}])
     assert.equal(describeSchema(errors[0].expected), 'string')
     assert.equal(describeSchema(errors[0].actual), 'array of number')
     assert.deepEqual(warnings, [])
+  })
+
+  it('reports an issue as a catalogued Error, placed at its field, which is data once converted', () => {
+    const [error] = plan({...query, phases: {a: ['[branch]/extract', {url: '$given.ids'}]}}).errors
+    assert.ok(error instanceof Error)
+    assert.ok(error.message.startsWith('[$a.@1.url] '))
+    assert.equal(error.status, undefined)
+    const data = toErrorData(error)
+    assert.ok(isErrorData(data))
+    assert.deepEqual(issueOf(data), issueOf(error))
+    assert.equal(data.message, error.message)
   })
 
   it('checks a call field against the return type it declares', () => {
@@ -220,8 +234,8 @@ describe('type inference', () => {
       services: {branch},
       phases: {kept: ['$given.xs', '[util]/filter', {service: ['[branch]/extract', {url: '@'}]}]}
     })
-    assert.deepEqual(errors.map(({address, code, message}) => ({address, code, message})),
-      [{address: '$kept.@1.service', code: 'type-mismatch', message: '$kept.@1.service expects boolean but receives {url: string, images?: array of {src: string}}'}])
+    assert.deepEqual(errors.map(issueOf),
+      [{address: '$kept.@1.service', code: 'type-mismatch', expects: 'boolean', receives: '{url: string, images?: array of {src: string}}'}])
   })
 
   const person = {name: 'Ada', age: 36, tags: ['math']}
@@ -312,8 +326,7 @@ describe('type inference', () => {
 
   it('requires the calls flattenEach holds to return lists', () => {
     const {errors} = plan({given: {urls: ['a']}, services: {branch}, phases: {a: ['$given.urls', '[util]/flattenEach', {service: ['[branch]/extract', {url: '@'}]}]}})
-    assert.deepEqual(errors.map(e => e.address), ['$a.@1.service'])
-    assert.match(errors[0].message, /expects array of any but receives \{url: string/)
+    assert.deepEqual(errors.map(issueOf), [{address: '$a.@1.service', code: 'type-mismatch', expects: 'array of any', receives: '{url: string, images?: array of {src: string}}'}])
   })
 
   it('composes zodly with sources: a record of the items of a list', () => {

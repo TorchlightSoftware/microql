@@ -227,7 +227,7 @@ describe('MicroQL Comprehensive Tests', () => {
             result: ['[nonexistent]/action', {value: '$given.x'}]
           }
         }),
-        /Service 'nonexistent' is not registered in this scope/
+        {code: 'unknown-service', service: 'nonexistent', address: '$result.@1'}
       )
     })
 
@@ -246,7 +246,7 @@ describe('MicroQL Comprehensive Tests', () => {
             result: ['[test]/invalidMethod', {value: '$given.x'}]
           }
         }),
-        /\[test\]\/invalidMethod is not a resource of this service/
+        {code: 'unknown-resource', key: '[test]/invalidMethod', address: '$result.@1'}
       )
     })
 
@@ -265,7 +265,7 @@ describe('MicroQL Comprehensive Tests', () => {
             result: ['[test]/increment', {value: '$nonexistent'}]
           }
         }),
-        /\[\$result.@1\] '\$nonexistent' names no phase or node/
+        {code: 'unknown-reference', reference: '$nonexistent', address: '$result.@1'}
       )
     })
 
@@ -280,7 +280,7 @@ describe('MicroQL Comprehensive Tests', () => {
             result: ['[invalid]/action', {value: '$given.data'}]
           }
         }),
-        /Service 'invalid' lacks lookup\(key\), supportedCalls\(\) or init\(env\)/
+        {code: 'not-a-service', service: 'invalid', address: '$result.@1'}
       )
     })
   })

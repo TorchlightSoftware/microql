@@ -90,7 +90,7 @@ describe('parseFieldPath', () => {
 
   for (const path of ['', '.a', 'a.', 'a.b.']) {
     it(`refuses '${path}', which names an empty field`, () => {
-      assert.throws(() => parseFieldPath(path), /empty field/)
+      assert.throws(() => parseFieldPath(path), {code: 'invalid-field-path', path})
     })
   }
 })

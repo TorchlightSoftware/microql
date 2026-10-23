@@ -348,7 +348,7 @@ It is zodly's `error` type: a JSON-LD node of type Error, recognised by `@type`,
 
 ### Plan errors
 
-Each of `plan().errors` is `{address, code, message, expected, actual}`. `address` is the field's, followed by the path inside its value where the issue is (`$a.@1.data.name`; `*` stands for any item of a list or value of a record). `expected` and `actual` are the zod schemas there. They're reported, not raised, so they have no status.
+Each of `plan().errors` is an Error from the catalog, like any MicroQL raises, carrying `{address, code, expected, actual, expects, receives}`. `address` is the field's, followed by the path inside its value where the issue is (`$a.@1.data.name`; `*` stands for any item of a list or value of a record), and the message is placed there (`[$a.@1.data.name] Expects string but receives number.`). `expected` and `actual` are the zod schemas there, and `expects` and `receives` describe them. They're reported, not raised, so they have no status; `toErrorData` makes one data, as it does any error.
 
 | Code | Means | Will the call run? |
 |---|---|---|

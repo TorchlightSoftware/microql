@@ -76,7 +76,8 @@ describe('core in a scope', () => {
     await assert.rejects(runCore(runtime, runIn(t1), {phases: {a: ['[mailer]/mail', {}]}}), {
       code: 'missing-capability',
       address: '$a.@1',
-      message: '[$a.@1] Service \'mailer\' requires env.send, which this runtime doesn\'t provide.'
+      service: 'mailer',
+      capability: 'send'
     })
     assert.deepEqual(runtime.calls, [])
   })
@@ -97,7 +98,7 @@ describe('core in a scope', () => {
     const failed = runtime.logged.find(entry => entry.to)
     assert.deepEqual(shown, {text: 'hello', color: 'blue', to: undefined})
     assert.equal(failed.to, 'failures/eq')
-    assert.match(failed.text, /^Error: \[\$failed\.@1a1 - \[util\]\/eq\] Service Call Validation precheck failed/)
+    assert.match(failed.text, /^Error: \[\$failed\.@1a1 - \[util\]\/eq\] /)
   })
 })
 
@@ -169,7 +170,7 @@ describe('Runtime', () => {
     await assert.rejects(runCore(runtimeWith(t1, {vault}), runIn(t1), {phases: {a: ['[vault]/where', {}]}}), {
       code: 'missing-config',
       address: '$a.@1',
-      message: /Service 'vault' declares config, and none is filed for it in this scope/
+      service: 'vault'
     })
   })
 
@@ -236,11 +237,11 @@ describe('what core requires of its caller', () => {
   })
 
   it('refuses to compile without a scope', async () => {
-    await assert.rejects(coreQuery(config), {code: 'missing-scope', message: /^compile: 'scope' is missing\./})
+    await assert.rejects(coreQuery(config), {code: 'missing-scope', message: /^compile: /})
   })
 
   it('refuses to run in a scope without a Run State', async () => {
-    await assert.rejects(runCore(new RecordingRuntime(), t1, config), /execute: 'scope.run' does not contain a valid RunState/)
+    await assert.rejects(runCore(new RecordingRuntime(), t1, config), {code: 'missing-run-state', message: /^execute: /})
   })
 })
 
@@ -285,7 +286,7 @@ describe('$trigger', () => {
     it(`refuses a payload with ${why}, before any call runs`, async () => {
       let calls = 0
       const counting = {...greeting, services: {echo: defineService({async '/echo'({on}) { calls++; return on }})}}
-      await assert.rejects(query(counting, {trigger: payload}), {code: 'invalid-trigger', message: /^execute: The trigger payload doesn't fit the trigger schema/})
+      await assert.rejects(query(counting, {trigger: payload}), {code: 'invalid-trigger', message: /^execute: /})
       assert.equal(calls, 0)
     })
   }

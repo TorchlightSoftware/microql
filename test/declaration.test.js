@@ -4,6 +4,7 @@ import {z} from 'zod'
 import {parseSchema} from '@tlsft/zodly'
 import {readDeclaration, READINGS} from '../src/types/declaration.js'
 import {compile, defineService} from '../index.js'
+import {causedBy} from './test-services.js'
 
 describe('readDeclaration', () => {
   it('reads the roles of input fields from their tags and types, by path', () => {
@@ -79,28 +80,38 @@ describe('readDeclaration', () => {
     assert.equal(parseSchema('call', {preprocess: READINGS.declared}).def.type, 'function')
   })
 
-  // [description, declaration, error]
+  // A document zodly can't read, as MicroQL reports it: the document, and
+  // the error behind it, zodly's own or the catalogued one a MicroQL
+  // preprocessor raised.
+  const inDocument = (document, because) => (error) => {
+    assert.deepEqual([error.code, error.document], ['malformed-document', document])
+    return causedBy(because)(error)
+  }
+  const malformedSource = (source) => ({code: 'malformed-source', source: JSON.stringify(source)})
+  const functionType = {code: 'function-type'}
+
+  // [description, declaration, the error: its code and details]
   const malformed = [
-    ['an unknown tag', {input: {on: ['any', 'optional', {tags: ['targte']}]}}, /Unknown tag 'targte' on 'on'/],
-    ['the retired reserve tag', {input: {skip: ['any', {tags: ['reserve']}]}}, /Unknown tag 'reserve' on 'skip'/],
-    ['two targets', {input: {a: ['any', 'optional', {tags: ['target']}], b: ['any', 'optional', {tags: ['target']}]}}, /Fields 'a', 'b' are each tagged target\.\n\nOnly one field can be the target\./],
-    ['the retired tag lists', {input: {on: ['target']}}, /Unknown type name 'target' on \["target"\], at on, in input/],
-    ['type without a source', {input: {on: ['type']}}, /is not a source, which has exactly one of/],
-    ['a source with two keys', {input: {on: ['type', {fromField: 'a', fromList: 'b'}]}}, /is not a source, which has exactly one of/],
-    ['an unknown source', {input: {on: ['type', {fromWhere: 'a'}]}}, /is not a source, which has exactly one of/],
-    ['a retired source', {output: ['type', {toList: {fromField: 'a'}}]}, /is not a source, which has exactly one of/],
-    ['an operator without a pair of sources', {output: ['type', {without: [{fromField: 'a'}]}]}, /without takes \[source, source\]/],
-    ['an operator with a malformed source in its pair', {output: ['type', {merged: [{fromField: 'a'}, 'b']}]}, /is not a source, which has exactly one of/],
-    ['fromZodly with a malformed descriptor', {output: ['type', {fromZodly: ['strng']}]}, /Unknown type name 'strng' on \["strng"\], in output/],
-    ['fromZodly with a malformed source', {output: ['type', {fromZodly: {fromWhere: 'a'}}]}, /is not a source, which has exactly one of/],
-    ['fromList without a path', {input: {on: ['type', {fromList: {fromField: 'a'}}]}}, /fromList takes a field path/],
-    ['a check on a dynamic type', {input: {on: ['type', {fromField: 'a'}, {min: 1}]}}, /unknown modifier 'min'/],
-    ['a malformed source in a call field\'s input', {input: {service: ['call', {input: ['type', {fromWhere: 'a'}]}]}}, /is not a source, which has exactly one of/],
-    ['a field typed function', {input: {service: ['function', {input: ['string']}]}}, /A service call is typed 'call', not 'function' on \["function",\{"input":\["string"\]\}\], at service, in input/],
-    ['a bare function', {input: {service: 'function'}}, /A service call is typed 'call', not 'function'/],
-    ['a function in the output', {output: ['array', ['function']]}, /A service call is typed 'call', not 'function'.*in output/],
-    ['a malformed zodly type', {input: {on: ['strng']}}, /Unknown type name 'strng' on \["strng"\], at on, in input/],
-    ['an unknown zodly modifier', {output: ['string', 'optinal']}, /'string' has an unknown modifier 'optinal' on \["string","optinal"\], in output/]
+    ['an unknown tag', {input: {on: ['any', 'optional', {tags: ['targte']}]}}, {code: 'unknown-tag', tag: 'targte', path: 'on'}],
+    ['the retired reserve tag', {input: {skip: ['any', {tags: ['reserve']}]}}, {code: 'unknown-tag', tag: 'reserve', path: 'skip'}],
+    ['two targets', {input: {a: ['any', 'optional', {tags: ['target']}], b: ['any', 'optional', {tags: ['target']}]}}, {code: 'multiple-targets', paths: ['a', 'b']}],
+    ['the retired tag lists', {input: {on: ['target']}}, inDocument('input', /Unknown type name 'target' on \["target"\], at on$/)],
+    ['type without a source', {input: {on: ['type']}}, inDocument('input', malformedSource(undefined))],
+    ['a source with two keys', {input: {on: ['type', {fromField: 'a', fromList: 'b'}]}}, inDocument('input', malformedSource({fromField: 'a', fromList: 'b'}))],
+    ['an unknown source', {input: {on: ['type', {fromWhere: 'a'}]}}, inDocument('input', malformedSource({fromWhere: 'a'}))],
+    ['a retired source', {output: ['type', {toList: {fromField: 'a'}}]}, inDocument('output', malformedSource({toList: {fromField: 'a'}}))],
+    ['an operator without a pair of sources', {output: ['type', {without: [{fromField: 'a'}]}]}, inDocument('output', {code: 'malformed-source-operand', kind: 'without', takes: '[source, source]'})],
+    ['an operator with a malformed source in its pair', {output: ['type', {merged: [{fromField: 'a'}, 'b']}]}, inDocument('output', malformedSource('b'))],
+    ['fromZodly with a malformed descriptor', {output: ['type', {fromZodly: ['strng']}]}, inDocument('output', /Unknown type name 'strng' on \["strng"\]$/)],
+    ['fromZodly with a malformed source', {output: ['type', {fromZodly: {fromWhere: 'a'}}]}, inDocument('output', malformedSource({fromWhere: 'a'}))],
+    ['fromList without a path', {input: {on: ['type', {fromList: {fromField: 'a'}}]}}, inDocument('input', {code: 'malformed-source-operand', kind: 'fromList', takes: 'a field path'})],
+    ['a check on a dynamic type', {input: {on: ['type', {fromField: 'a'}, {min: 1}]}}, inDocument('input', /unknown modifier 'min'/)],
+    ['a malformed source in a call field\'s input', {input: {service: ['call', {input: ['type', {fromWhere: 'a'}]}]}}, inDocument('input', malformedSource({fromWhere: 'a'}))],
+    ['a field typed function', {input: {service: ['function', {input: ['string']}]}}, inDocument('input', functionType)],
+    ['a bare function', {input: {service: 'function'}}, inDocument('input', functionType)],
+    ['a function in the output', {output: ['array', ['function']]}, inDocument('output', functionType)],
+    ['a malformed zodly type', {input: {on: ['strng']}}, inDocument('input', /Unknown type name 'strng' on \["strng"\], at on$/)],
+    ['an unknown zodly modifier', {output: ['string', 'optinal']}, inDocument('output', /'string' has an unknown modifier 'optinal' on \["string","optinal"\]$/)]
   ]
 
   for (const [description, declaration, error] of malformed) {

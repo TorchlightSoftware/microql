@@ -29,25 +29,25 @@ describe('Reference grammar', () => {
     })
   }
 
-  // [string, error pattern]
+  // [string, the error: its code and details]
   const invalid = [
-    ['$', {code: 'bare-reference'}],
-    ['$.given.x', /\$\.name form is replaced by \$name.*'\$given\.x'/],
-    ['$.', /\$\.name form is replaced/],
-    ['@@', {code: 'retired-key', message: /'@@' is retired/}],
-    ['@@@.naics', {code: 'retired-key'}],
-    ['@@item', {code: 'retired-key'}],
-    ['$listings.@1a2', {code: 'address-reference', message: /'\$listings\.@1a2' names a Service Call Address/}],
-    ['@listing.@2', {code: 'address-reference'}],
-    ['$5.00', /must be supplied through given/],
-    ['@acme corp', /must be supplied through given/],
-    ['$a..b', /must be supplied through given/],
-    ['$a[x]', /must be supplied through given/]
+    ['$', {code: 'bare-reference', reference: '$'}],
+    ['$.given.x', {code: 'retired-key', retired: '$.given.x', replacement: /'\$given\.x'/}],
+    ['$.', {code: 'retired-key', retired: '$.'}],
+    ['@@', {code: 'retired-key', retired: '@@'}],
+    ['@@@.naics', {code: 'retired-key', retired: '@@@.naics'}],
+    ['@@item', {code: 'retired-key', retired: '@@item'}],
+    ['$listings.@1a2', {code: 'address-reference', reference: '$listings.@1a2'}],
+    ['@listing.@2', {code: 'address-reference', reference: '@listing.@2'}],
+    ['$5.00', {code: 'invalid-reference', reference: '$5.00'}],
+    ['@acme corp', {code: 'invalid-reference', reference: '@acme corp'}],
+    ['$a..b', {code: 'invalid-reference', reference: '$a..b'}],
+    ['$a[x]', {code: 'invalid-reference', reference: '$a[x]'}]
   ]
 
-  for (const [text, pattern] of invalid) {
+  for (const [text, error] of invalid) {
     it(`rejects ${text}`, () => {
-      assert.throws(() => parseReference(text), pattern)
+      assert.throws(() => parseReference(text), error)
     })
   }
 

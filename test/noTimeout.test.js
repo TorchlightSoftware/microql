@@ -57,7 +57,7 @@ describe('NoTimeout Tests', () => {
           },
           select: '$results'
         }),
-        /Timed out after 50ms/
+        {code: 'timeout', timeout: 50}
       )
     })
 
@@ -121,7 +121,7 @@ describe('NoTimeout Tests', () => {
           },
           select: '$results'
         }),
-        /\[\$results\.@1 - \[serial\]\/run\] Timed out after 50ms/
+        {code: 'timeout', timeout: 50, address: '$results.@1', key: '[serial]/run'}
       )
     })
   })
@@ -138,7 +138,7 @@ describe('NoTimeout Tests', () => {
           },
           select: '$result'
         }),
-        /Timed out after 50ms/
+        {code: 'timeout', timeout: 50}
       )
     })
   })

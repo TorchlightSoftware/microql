@@ -19,6 +19,7 @@ import {any, isAny, unwrap, widenedTypeOf, schemaAtPath, sharedSchema, compare, 
 import {isPlainObject, mapValues, getIn, setPaths, parseFieldPath} from '../common/common.js'
 import {READINGS} from './declaration.js'
 import {errorSchema, parseSchema} from '@tlsft/zodly'
+import {errorOf} from '../common/error-catalog.js'
 
 // The type of an argument: a literal's own type, or what its reference names.
 function typeOfArgument(value, context, typeGraph) {
@@ -40,20 +41,14 @@ const expectedData = (call, fields) => plannedDocument(call.declaration.input, R
 const expectedInput = (call, fields) => plannedDocument(call.declaration.input, READINGS.planned(fields))
 const expectedOutput = (call, fields) => plannedDocument(call.declaration.output, READINGS.planned(fields))
 
-// What each kind of issue says, in a plan error's message.
-const MESSAGES = {
-  'type-mismatch': (expected, actual) => `expects ${describeSchema(expected)} but receives ${describeSchema(actual)}`,
-  'maybe-missing': (expected, actual) => `expects ${describeSchema(expected)} but may receive nothing: ${describeSchema(actual)}`,
-  'type-narrowing': (expected, actual) => `expects ${describeSchema(expected)} but receives ${describeSchema(actual)}, which is only checked when it runs`
-}
-
 // Each issue in how a field's actual type fits its expected one is an error in
-// the plan, at the field's address and the path inside it; run-time validation
-// still decides whether the call runs.
+// the plan, from the catalog, at the field's address and the path inside it;
+// run-time validation still decides whether the call runs.
 function checkType(expected, actual, where, typeGraph) {
   for (const {code, path, expected: wanted, actual: given} of compare(expected, actual)) {
     const address = [where, ...path].join('.')
-    typeGraph.errors.push({address, code, message: `${address} ${MESSAGES[code](wanted, given)}`, expected: wanted, actual: given})
+    const details = {address, expected: wanted, actual: given, expects: describeSchema(wanted), receives: describeSchema(given)}
+    typeGraph.errors.push(errorOf(code, details, {where: `[${address}]`}))
   }
 }
 

@@ -1,12 +1,12 @@
 import assert from 'node:assert'
 import {describe, it} from 'node:test'
-import query, {NodeRuntime, fileStores, defineService} from '../index.js'
+import query, {defineService} from '../index.js'
+import {runtimeCachingIn} from './test-services.js'
 import {hashOf} from '../src/query/forms.js'
 import {readdir, rm} from 'fs/promises'
 
 const CACHEDIR = '.cache-test-cache'
-// the node runtime with its Cache kept in a test directory
-const runtime = new NodeRuntime({cache: fileStores(CACHEDIR)})
+const runtime = runtimeCachingIn(CACHEDIR)
 
 describe('Cache Tests', () => {
   // Clean up cache before tests

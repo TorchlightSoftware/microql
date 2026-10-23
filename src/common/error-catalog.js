@@ -1,10 +1,13 @@
 /**
- * @fileoverview The error catalog — every error MicroQL raises, by code.
+ * @fileoverview The error catalog — every error MicroQL raises or reports,
+ * by code.
  *
  * Each entry is a template: the HTTP status a platform answers with, the
  * cause (what went wrong, specifically), and a hint (what to do about it)
  * when there is one. Both are functions of the error's details, which the
- * error also carries as fields, for programs to read.
+ * error also carries as fields, for programs to read. An error that's
+ * reported rather than raised, such as plan()'s type issues, has no status:
+ * nothing fails with it.
  *
  * An error's message is everything a person should read:
  *
@@ -86,6 +89,11 @@ export const ERRORS = {
   'malformed-oauth': {status: 500, cause: () => 'oauth takes {authorizeUrl, tokenUrl, scopes}'},
   'missing-config': {status: 500, cause: ({service}) => `Service '${service}' declares config, and none is filed for it in this scope.`},
 
+  // plan: type issues, reported at the field they're in, never raised
+  'type-mismatch': {cause: ({expects, receives}) => `Expects ${expects} but receives ${receives}.`},
+  'maybe-missing': {cause: ({expects, receives}) => `Expects ${expects} but may receive nothing: ${receives}.`},
+  'type-narrowing': {cause: ({expects, receives}) => `Expects ${expects} but receives ${receives}, which is only checked when it runs.`},
+
   // execute
   'missing-run-state': {status: 500, cause: () => '\'scope.run\' does not contain a valid RunState.'},
   'invalid-target': {status: 400, cause: ({target}) => `Target '${target}' is not a phase reference.`, hint: ({phase}) => phase ? `Use '$${phase}'.` : 'Name a phase as \'$phase\'.'},
@@ -110,7 +118,7 @@ export function errorOf(code, details = {}, {where, cause} = {}) {
   const hint = hintOf?.(details) ?? cause?.hint
   const baseMessage = where ? `${where} ${causeOf(details)}` : causeOf(details)
   const error = new Error(messageOf(baseMessage, hint), cause === undefined ? undefined : {cause})
-  return Object.assign(error, details, {code, status, baseMessage}, hint && {hint})
+  return Object.assign(error, details, {code}, status && {status}, {baseMessage}, hint && {hint})
 }
 
 /**

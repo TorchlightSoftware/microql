@@ -239,16 +239,16 @@ describe('Util Service Tests', () => {
     })
 
     it('refuses to look up a method', () => {
-      assert.throws(() => util.lookup(utilKey('/each', {method: 'GET'})), /\[util\]\/each takes no method, and got GET/)
+      assert.throws(() => util.lookup(utilKey('/each', {method: 'GET'})), {code: 'method-not-allowed', key: '[util]/each', method: 'GET', methods: []})
     })
 
     it('refuses to call with a method', async () => {
       const instance = await util.init({})
-      await assert.rejects(instance.call({...utilKey('/each', {method: 'GET'}), fields: {}}), /\[util\]\/each takes no method, and got GET/)
+      await assert.rejects(instance.call({...utilKey('/each', {method: 'GET'}), fields: {}}), {code: 'method-not-allowed', key: '[util]/each', method: 'GET'})
     })
 
     it('refuses a confined key: util is no service of the caller\'s own custody', () => {
-      assert.throws(() => util.lookup(utilKey('/each', {confined: true})), /\[@util\]\/each is confined, and this service answers no confined calls/)
+      assert.throws(() => util.lookup(utilKey('/each', {confined: true})), {code: 'confined-key', key: '[@util]/each'})
     })
   })
 
@@ -575,25 +575,20 @@ describe('Util Service Tests', () => {
     const failures = [
       ['without a catch, a failed item fails the call holding it',
         ['$given.items', '[util]/each', {service: ['[items]/process', {item: '@'}]}],
-        /\[\$result\.@1a1 - \[items\]\/process\] Failed 2/],
+        {address: '$result.@1a1', key: '[items]/process', message: '[$result.@1a1 - [items]/process] Failed 2'}],
       ['a catch doesn\'t handle the failure of the call it sits on',
         ['[util]/each', {on: 'not a list', service: ['[items]/process', {item: '@'}], catch: keepError}],
-        /\[\$result\.@1 - \[util\]\/each\] Service Defined Validation precheck failed/],
+        {code: 'precheck-failed', validation: 'Service Defined Validation', address: '$result.@1', key: '[util]/each'}],
       ['throw fails with the error it is given, as it was raised',
         ['$given.items', '[util]/each', {service: ['[items]/process', {item: '@'}], catch: ['@err', '[util]/throw']}],
-        /^Error: \[\$result\.@1a1 - \[items\]\/process\] Failed 2$/],
+        {name: 'Error', message: '[$result.@1a1 - [items]/process] Failed 2'}],
       ['a catch that fails fails the call holding it',
         ['$given.items', '[util]/each', {service: ['[items]/process', {item: '@'}], catch: ['[util]/gt', {l: 'not a number', r: 1}]}],
-        /\[\$result\.@1e1 - \[util\]\/gt\] Service Defined Validation precheck failed/]
+        {code: 'precheck-failed', validation: 'Service Defined Validation', address: '$result.@1e1', key: '[util]/gt'}]
     ]
 
     for (const [description, phase, error] of failures) {
-      it(description, async () => {
-        await assert.rejects(run(phase), (thrown) => {
-          assert.match(String(thrown), error)
-          return true
-        })
-      })
+      it(description, () => assert.rejects(run(phase), error))
     }
 
     it('throw keeps the address and key of the call that first failed', async () => {
@@ -647,7 +642,7 @@ describe('Util Service Tests', () => {
 
     for (const [resource, replacement] of retired) {
       it(`refuses ${resource}, naming its replacement`, () => {
-        assert.throws(() => util.lookup(utilKey(resource)), replacement)
+        assert.throws(() => util.lookup(utilKey(resource)), {code: 'retired-key', retired: `[util]${resource}`, replacement})
       })
     }
   })

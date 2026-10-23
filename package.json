@@ -59,8 +59,8 @@
   "dependencies": {
     "@noble/hashes": "^2.4.0",
     "@tlsft/service-key": "^0.5.0",
-    "zod": "^4.0.5",
-    "@tlsft/zodly": "^0.3.0"
+    "@tlsft/zodly": "^0.3.1",
+    "zod": "^4.0.5"
   },
   "engines": {
     "node": ">=22"

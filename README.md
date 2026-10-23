@@ -371,11 +371,11 @@ npm test
 
 ## Generated docs
 
-[performance.md](performance.md) and [function-names.md](function-names.md) mix prose with generated sections, marked `<!-- generated:name -->` … `<!-- /generated:name -->`. The scripts rewrite only the text between their markers:
+[performance.md](performance.md) mixes prose with a generated section, marked `<!-- generated:name -->` … `<!-- /generated:name -->`; the script rewrites only the text between its markers. `function-names.md`, an index of every named function in core, is generated whole and kept out of git, since every edit to core moves its line numbers:
 
 ```bash
 npm run docs:bench       # performance.md results: this checkout vs 0.6.6, about a minute
-npm run docs:functions   # function-names.md tables: after changing core
+npm run docs:functions   # function-names.md: whenever you want the index
 ```
 
 ## Questions
