@@ -43,7 +43,6 @@ describe('Settings Override Tests', () => {
           {
             on: '$given',
             color: 'blue',
-            ts: false,
             settings: {
               inspect: {
                 maxArrayLength: 10 // Override just this setting
@@ -94,7 +93,6 @@ describe('Settings Override Tests', () => {
           '[util]/inspect',
           {
             on: '$given',
-            ts: false,
             settings: {
               inspect: {
                 maxArrayLength: 20 // Override only this
@@ -134,7 +132,6 @@ describe('Settings Override Tests', () => {
           '[util]/inspect',
           {
             on: '$given',
-            ts: false,
             settings: {
               inspect: {
                 maxStringLength: 100 // Override nested setting
@@ -165,7 +162,6 @@ describe('Settings Override Tests', () => {
           '[util]/inspect',
           {
             on: '$given',
-            ts: false,
             settings: {
               inspect: {
                 depth: 1, // Keep existing

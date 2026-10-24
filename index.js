@@ -9,6 +9,13 @@
  * every Run before it runs. Each Run has its own instances: query() releases
  * those of a Run it named itself once it's done, and `nodeRuntime.tearDown()`
  * releases those of the Runs a caller named.
+ *
+ * The node runtime has a browser, for handles of kind browser: the one at the
+ * CDP endpoint it's given, `new NodeRuntime({browser: 'ws://…'})`; or, given
+ * none, a headless Chrome that Puppeteer (an optional peer dependency)
+ * launches on first use, when it's installed, and tearDown() closes. query()
+ * closes a Run's browser sessions once it's done, whether the caller named
+ * the Run or not.
  */
 
 import path from 'node:path'
@@ -34,31 +41,81 @@ export const ANSI_COLORS = {
   reset: '\x1b[0m'
 }
 
-// A line to stdout, in colour; or appended to the file `to` names, relative
-// to the working directory.
-async function log(text, {color, to} = {}) {
+// Where a line of each OpenTelemetry severity goes, and its colour unless the
+// log names one: warnings and worse to stderr, the rest (trace, debug, info,
+// or none) to stdout.
+const SEVERITIES = {
+  warn: {stream: 'stderr', color: 'yellow'},
+  error: {stream: 'stderr', color: 'red'},
+  fatal: {stream: 'stderr', color: 'red'}
+}
+
+// A line to stdout or stderr by its level, in colour; or appended to the
+// file `to` names, relative to the working directory.
+async function log(text, {color, to, level} = {}) {
   if (to) {
     await mkdir(path.dirname(to), {recursive: true})
     await appendFile(to, `${text}\n`)
     return
   }
-  const colorCode = ANSI_COLORS[color] || ''
+  const severity = SEVERITIES[level] ?? {stream: 'stdout'}
+  const colorCode = ANSI_COLORS[color ?? severity.color] || ''
   const resetCode = colorCode ? ANSI_COLORS.reset : ''
-  process.stdout.write(`${colorCode}${text}${resetCode}\n`)
+  process[severity.stream].write(`${colorCode}${text}${resetCode}\n`)
+}
+
+// Whether Puppeteer is installed, where this module can import it from.
+function canImport(specifier) {
+  try {
+    import.meta.resolve(specifier)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// A CDP transport over a WebSocket to a browser's endpoint, once it's open;
+// closing it closes the socket, or does what close does instead.
+function socketTransport(url, close) {
+  const socket = new WebSocket(url)
+  const transport = {send: (text) => socket.send(text), close: close ?? (() => socket.close())}
+  socket.addEventListener('message', (event) => transport.onmessage?.(event.data))
+  socket.addEventListener('close', () => transport.onclose?.())
+  return new Promise((resolve, reject) => {
+    socket.addEventListener('open', () => resolve(transport), {once: true})
+    socket.addEventListener('error', reject, {once: true})
+  })
+}
+
+// A headless Chrome that Puppeteer launches for each connection to it, and
+// closes with the connection.
+async function launchedChrome() {
+  const {default: puppeteer} = await import('puppeteer')
+  const chrome = await puppeteer.launch({headless: true})
+  return socketTransport(chrome.wsEndpoint(), () => chrome.close())
+}
+
+// The node runtime's browser, as a way to connect to it: the one at the
+// endpoint it's given, or one Puppeteer launches, when it's installed.
+function browserAt(endpoint) {
+  if (endpoint) return () => socketTransport(endpoint)
+  if (canImport('puppeteer')) return launchedChrome
 }
 
 // The node runtime: scopes that are Runs, {runId}, logging to stdout or
 // files, a Cache on disk and Run States in memory, unless it's given others.
 // Services and their config are filed in the empty scope, {}, which every Run
-// shares. tearDown() releases the service instances it keeps: for a server
-// shutting down, or a test's after(). A script that's done may simply exit
-// instead.
+// shares. Its browser is at the CDP endpoint it's given, or else one
+// Puppeteer launches. tearDown() releases the service instances it keeps and
+// lets go of its browser: for a server shutting down, or a test's after(). A
+// script that's done may simply exit instead.
 export class NodeRuntime extends Runtime {
-  constructor({cache = fileStores('.cache'), runStates} = {}) {
+  constructor({cache = fileStores('.cache'), runStates, browser} = {}) {
     super({scopeSchema: {runId: ['string']}, runKeys: ['runId']})
     this.env = {log}
     this.cache = cache
     if (runStates) this.runStates = runStates
+    this.browser = browserAt(browser)
   }
 }
 
@@ -105,7 +162,8 @@ async function release(runtime, run) {
 // A Query run with its services and config, on the node runtime unless it
 // brings its own. The caller names the Run with runId, to resume it or read
 // its Run State afterwards; given none, it's a Run of its own, released once
-// it's done.
+// it's done. Either way, the Run's handles are closed once it's done: a Run
+// resumed starts on fresh ones.
 export default async function query(config, {runId, ...options} = {}) {
   const runtime = config.runtime ?? nodeRuntime
   const run = {runId: runId ?? randomUUID()}
@@ -114,6 +172,7 @@ export default async function query(config, {runId, ...options} = {}) {
   try {
     return await coreQuery(inRun, options)
   } finally {
+    await runtime.closeHandles(run)
     if (runId === undefined) await release(runtime, run)
   }
 }

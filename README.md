@@ -6,9 +6,9 @@ MicroQL is a declarative JSON-based query language for composing and orchestrati
 import query from 'microql'
 import {scraper, claude, hubspot} from './services/index.js'
 
-// Find manufacturers in the chamber of commerce directory and put them in the CRM
+// Find manufacturers in a business directory and put them in the CRM
 const leads = await query({
-  given: {directory: 'https://chamber.example.org/member-directory'},
+  given: {directory: 'https://directory.example.com/members'},
   services: {scraper, claude, hubspot},
   phases: {
     members: ['[scraper]/listings', {url: '$given.directory', cache: true}],
@@ -221,10 +221,12 @@ The `util` service is always available:
 
 | Resource | Does |
 |---|---|
-| `/each` | Run a call for every item; `skip` leaves out the results that fit a schema |
+| `/each` | Run a call for every item, all at once or one at a time (`sequential: true`); `skip` leaves out the results that fit a schema |
 | `/flattenEach` | Run a call that returns a list for every item, and concatenate the lists; `skip` too |
 | `/filter` | Keep the items a service is truthy for; `mode: 'remove'` removes them |
 | `/try` | Run one call, so a `catch` can handle its failure |
+| `/waitFor` | Run a call until it succeeds and its result fits `expect`: at most `tries` times (10), every `interval` ms (200); fails with `gave-up` |
+| `/repeat` | Run a call `times` times (10), every `interval` ms, or until its result fits `until`; returns `{passes, stoppedBy}`, every pass's result and `'until'` or `'times'` |
 | `/throw` | Fail with the error given (as data), or with an error saying what was given; `cause` attaches the error behind it |
 | `/when` | `then` when `test` is truthy, otherwise `otherwise` |
 | `/partitionErrors` | Split a list into `{successes, failures}` |
@@ -277,7 +279,7 @@ import query, {NodeRuntime, fileStores} from 'microql'
 import {scraper, claude, hubspot} from '../services/index.js'
 
 const today = new Date().toISOString().split('T')[0]
-const directory = process.argv[2] ?? 'https://chamber.example.org/member-directory'
+const directory = process.argv[2] ?? 'https://directory.example.com/members'
 
 const created = await query({
   runtime: new NodeRuntime({runStates: fileStores('runs')}),
@@ -295,7 +297,7 @@ Each Run has service instances of its own. `query()` releases those of a Run it 
 
 ```bash
 chmod +x queries/lead-gen.js
-./queries/lead-gen.js https://www.example-chamber.org/directory
+./queries/lead-gen.js https://directory.example.com/members
 ```
 
 Run it again the same day and every finished call is read back from `runs/`; start a new run by using a new directory. Failures a `catch` logs `to:` a file are there to inspect.

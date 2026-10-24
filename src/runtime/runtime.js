@@ -15,7 +15,7 @@
  * Core never sees the runtime, nor how it keys anything: it runs a Query in
  * the scope scopeOf(scope) gives it, whose members are
  *   services.get(name)   the service a key names, while compiling
- *   env                  the environment's utilities: log(text, {color, to}),
+ *   env                  the environment's utilities: log(text, {color, to, level}),
  *                        and whatever more the runtime offers. Debug output
  *                        uses log; each service instance receives env, with
  *                        its own config
@@ -24,8 +24,23 @@
  *   run                  the entry store of the Run's results, in a scope
  *                        with every run key; one without is for planning,
  *                        not running
+ *   handles[kind](request)  the handle a call names, while running: a
+ *                        resource of that kind outside the Query, such as a
+ *                        browser session (see query/handles.js). A request
+ *                        is {service, kind, name, phase}; the handle is
+ *                        {service, kind, name} and what the kind gives the
+ *                        service to work on it with. How long a resource is
+ *                        kept is the runtime's to decide
  * A service lists the env keys it uses in its `requires`, and a Query naming
- * a service whose keys env lacks doesn't compile (missing-capability).
+ * a service whose keys env lacks, or a kind of handle its scope doesn't
+ * offer, doesn't compile (missing-capability). Services never see a scope,
+ * so they reach a resource only through the handle they're given.
+ *
+ * A runtime with a browser offers handles of kind browser: `browser()` opens
+ * a CDP transport to it (see cdp.js), whose closing lets go of the browser.
+ * Each handle is a page of its own, in a browser context of its own, opened
+ * on the scope's first request for it and kept until closeHandles(scope);
+ * it gives its service `send` and `on`, CDP confined to that page.
  *
  * Runtime is the base a runtime extends: it keeps the services and their
  * config (see service-registry.js and config.js), and makes each service's
@@ -42,6 +57,8 @@ import {canonical} from '../query/forms.js'
 import {ServiceRegistry} from './service-registry.js'
 import {ConfigRegistry} from './config.js'
 import {errorOf} from '../common/error-catalog.js'
+import {ScopedTable} from './table.js'
+import {cdpConnection, openPage, closePage, confinedTo} from './cdp.js'
 
 // An entry store held in memory.
 export function memoryStore() {
@@ -108,12 +125,24 @@ const storeIn = (stores, scope) => ({
 })
 
 export class Runtime {
+  // the CDP connection to the runtime's browser, made on first use
+  #connection
+  // each scope's browser sessions, by the handle they are: a page's ids
+  #pages
+
   constructor({scopeSchema = {}, runKeys = []} = {}) {
     this.services = new ServiceRegistry({scopeSchema, runKeys})
     this.config = new ConfigRegistry(this.services)
     this.env = {}
     this.cache = memoryStores()
     this.runStates = memoryStores()
+    this.#pages = new ScopedTable(scopeSchema)
+  }
+
+  // The handles a scope offers, by kind: browser sessions, when the runtime
+  // has a browser.
+  handlesOf(scope) {
+    return this.browser ? {browser: (request) => this.#browserHandle(scope, request)} : {}
   }
 
   /**
@@ -128,6 +157,7 @@ export class Runtime {
     return {
       services: {get: (name) => this.services.get(outlivingRun, name)},
       env: this.env,
+      handles: this.handlesOf(scope),
       call: (key, fields) => this.call(scope, key, fields),
       cache: storeIn(this.cache, outlivingRun),
       ...(namesRun && {run: storeIn(this.runStates, scope)})
@@ -146,10 +176,40 @@ export class Runtime {
     return instance.call({...key, fields})
   }
 
-  // Releases the service instances of each scope the given scope's fields
-  // are in (a Run, or every Run of a tenant), or of every scope.
-  tearDown(scope) {
-    return this.services.tearDown(scope)
+  // Closes the resources of the handles of each scope the given scope's
+  // fields are in (a Run, or every Run of a tenant), or of every scope.
+  async closeHandles(scope) {
+    const pages = this.#pages.remove(scope)
+    await Promise.all(pages.map(page => closePage(this.#connected(), page)))
+  }
+
+  // Releases the service instances and the handles of each scope the given
+  // scope's fields are in, or of every scope, and then the browser too.
+  async tearDown(scope) {
+    await Promise.all([this.services.tearDown(scope), this.closeHandles(scope)])
+    if (scope === undefined) await this.#closeBrowser()
+  }
+
+  // A browser handle: the scope's page for it, opened on its first request.
+  // Calls on one handle take turns, so its page is never opened twice.
+  async #browserHandle(scope, {service, kind, name}) {
+    const key = canonical([service, name])
+    if (!this.#pages.get(scope, key)) this.#pages.set(scope, key, await openPage(this.#connected()))
+    return {service, kind, name, ...confinedTo(this.#connected(), this.#pages.get(scope, key).sessionId)}
+  }
+
+  // The CDP connection to the runtime's browser: one, made on first use, and
+  // dialled on its first command.
+  #connected() {
+    this.#connection ??= cdpConnection(this.browser)
+    return this.#connection
+  }
+
+  // Closes the connection to the browser, letting go of it.
+  async #closeBrowser() {
+    const connection = this.#connection
+    this.#connection = undefined
+    await connection?.close()
   }
 
   // A service's instance, made with env and the config filed for it: config

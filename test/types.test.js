@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
 import {z} from 'zod'
-import {any, isAny, widenedTypeOf, schemaAtPath, elementOf, fieldValueOf, compare, describeSchema, union, difference, literalTypeOf, isLiteral, valueOfLiteral, schemaOfDescriptor, pick, merge} from '../src/types/types.js'
+import {any, isAny, widenedTypeOf, schemaAtPath, elementOf, fieldValueOf, compare, describeSchema, union, difference, literalTypeOf, isLiteral, valueOfLiteral, schemaOfDescriptor, pick, merge, opened} from '../src/types/types.js'
 import {errorSchema} from '../src/execute/errors.js'
 
 describe('describeSchema', () => {
@@ -300,4 +300,51 @@ describe('merge', () => {
       assert.equal(describeSchema(merge(on, withSchema)), merged)
     })
   }
+})
+
+describe('opened', () => {
+  // A tree of named nodes: a recursive schema.
+  const tree = z.lazy(() => z.object({name: z.string(), children: z.array(tree)}))
+
+  // [description, schema, value, what parsing the opened schema returns]
+  const cases = [
+    ['keeps an object\'s unnamed fields', z.object({a: z.number()}), {a: 1, b: 2}, {a: 1, b: 2}],
+    ['keeps them in a nested object', z.object({p: z.object({a: z.number()})}), {p: {a: 1, b: 2}}, {p: {a: 1, b: 2}}],
+    ['keeps them in a list\'s items', z.array(z.object({a: z.number()})), [{a: 1, b: 2}], [{a: 1, b: 2}]],
+    ['keeps them inside optional, nullable and default', z.object({o: z.object({}).optional(), n: z.object({}).nullable(), d: z.object({}).default({})}), {o: {x: 1}, n: {x: 2}, d: {x: 3}}, {o: {x: 1}, n: {x: 2}, d: {x: 3}}],
+    ['keeps them in a union\'s members', z.union([z.object({a: z.number()}), z.string()]), {a: 1, b: 2}, {a: 1, b: 2}],
+    ['keeps them in a tuple\'s items', z.tuple([z.object({})]), [{x: 1}], [{x: 1}]],
+    ['keeps them in a record\'s values', z.record(z.string(), z.object({})), {k: {x: 1}}, {k: {x: 1}}],
+    ['keeps them in an intersection', z.intersection(z.object({a: z.number()}), z.object({b: z.number()})), {a: 1, b: 2, c: 3}, {a: 1, b: 2, c: 3}],
+    ['keeps them through a transform', z.object({a: z.number()}).transform(value => value), {a: 1, b: 2}, {a: 1, b: 2}],
+    ['keeps them at every depth of a recursive schema', tree, {name: 'a', x: 1, children: [{name: 'b', y: 2, children: []}]}, {name: 'a', x: 1, children: [{name: 'b', y: 2, children: []}]}],
+    ['still fills defaults', z.object({mode: z.string().default('keep')}), {other: 1}, {mode: 'keep', other: 1}],
+    ['still applies transforms', z.object({name: z.string().trim()}), {name: ' Ada '}, {name: 'Ada'}],
+    ['leaves a loose object as it is', z.looseObject({a: z.number()}), {a: 1, b: 2}, {a: 1, b: 2}],
+    ['leaves a type that holds no object as it is', z.string(), 'x', 'x']
+  ]
+
+  for (const [description, schema, value, parsed] of cases) {
+    it(description, () => {
+      assert.deepEqual(opened(schema).parse(value), parsed)
+    })
+  }
+
+  // [description, schema, value]: what the opened schema still refuses
+  const refused = [
+    ['a strict object refuses unnamed fields, as its author wrote', z.strictObject({a: z.number()}), {a: 1, b: 2}],
+    ['a field still checks its type', z.object({a: z.number()}), {a: 'one'}],
+    ['a list keeps its checks', z.array(z.object({})).min(1), []]
+  ]
+
+  for (const [description, schema, value] of refused) {
+    it(description, () => {
+      assert.equal(opened(schema).safeParse(value).success, false)
+    })
+  }
+
+  it('opens a schema once, however often it is asked', () => {
+    const schema = z.object({a: z.number()})
+    assert.equal(opened(schema), opened(schema))
+  })
 })

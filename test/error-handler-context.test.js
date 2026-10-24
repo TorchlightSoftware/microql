@@ -17,7 +17,7 @@ describe('Error Handler Context Tests', () => {
     }),
     recorder: defineService({
       '/record': {
-        input: {on: ['error', {tags: ['target']}]},
+        input: {on: ['error', {tags: ['target']}], location: ['string', 'optional']},
         async call({on, location}) {
           captured.push({on, location})
           return {recorded: true}

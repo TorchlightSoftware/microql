@@ -49,7 +49,9 @@ export const ERRORS = {
   'invalid-select': {status: 400, cause: ({select}) => `select takes references, not '${select}'.`, hint: ({select}) => `Use '$${select}'.`},
   'circular-dependency': {status: 400, cause: ({phases}) => `Phases ${quoted(phases)} depend on each other.`},
   'malformed-schema': {status: 400, cause: ({validation, order, details}) => `The ${validation} ${order} schema is malformed:\n${details}`},
+  'shared-handle': {status: 400, cause: ({key, field, value, phases}) => `${field} '${value}' of ${key} is in ${phases.join(' and ')}: what it names belongs to one phase.`, hint: () => 'A phase replays as a whole, so a later one can\'t count on the state an earlier one left: give each phase its own.'},
   'no-target': {status: 400, cause: ({key}) => `Method syntax was used for ${key}, which declares no target field.`},
+  'unknown-field': {status: 400, cause: ({key, field}) => `'${field}' is not a field of ${key}.`, hint: ({declared}) => declared.length ? `It takes ${quoted(declared)}.` : 'It takes no fields.'},
 
   // compile: references
   'invalid-reference': {status: 400, cause: ({reference}) => `'${reference}' is not a reference.`, hint: () => 'A literal string beginning with $ or @ must be supplied through given.'},
@@ -63,7 +65,7 @@ export const ERRORS = {
   // compile: services and their keys
   'unknown-service': {status: 404, cause: ({service}) => `Service '${service}' is not registered in this scope.`},
   'not-a-service': {status: 500, cause: ({service}) => `Service '${service}' lacks lookup(key), supportedCalls() or init(env).`, hint: () => 'A service definition gets them from defineService.'},
-  'missing-capability': {status: 501, cause: ({service, capability}) => `Service '${service}' requires env.${capability}, which this runtime doesn't provide.`},
+  'missing-capability': {status: 501, cause: ({service, capability, handle}) => handle ? `Service '${service}' works on handles of kind ${capability}, which this runtime doesn't offer.` : `Service '${service}' requires env.${capability}, which this runtime doesn't provide.`},
   'unknown-resource': {status: 404, cause: ({key}) => `${key} is not a resource of this service.`},
   'confined-key': {status: 400, cause: ({key}) => `${key} is confined, and this service answers no confined calls.`},
   'unconfined-key': {status: 400, cause: ({key}) => `${key} isn't confined, and this service answers only confined calls.`, hint: ({confinedKey}) => `Use ${confinedKey}.`},
@@ -76,6 +78,7 @@ export const ERRORS = {
   'malformed-document': {status: 500, cause: ({document, reason}) => `${reason}, in ${document}`},
   'function-type': {status: 500, cause: () => 'A service call is typed \'call\', not \'function\''},
   'unknown-tag': {status: 500, cause: ({tag, path}) => `Unknown tag '${tag}' on '${path}'.`},
+  'unnamed-handle': {status: 500, cause: ({path}) => `'${path}' is a handle without a kind.`, hint: () => 'A handle names the kind of resource it is, one a runtime offers: [\'handle\', \'browser\'].'},
   'multiple-targets': {status: 500, cause: ({paths}) => `Fields ${quoted(paths)} are each tagged target.`, hint: () => 'Only one field can be the target.'},
   'malformed-source': {status: 500, cause: ({source, kinds}) => `${source} is not a source, which has exactly one of ${kinds.join(', ')}`},
   'malformed-source-operand': {status: 500, cause: ({kind, takes}) => `${kind} takes ${takes}`},
@@ -102,7 +105,8 @@ export const ERRORS = {
   'invalid-ttl': {status: 400, cause: ({ttl}) => `Cache ttl '${ttl}' is not a duration.`, hint: () => 'Write a number and a unit, s, m, h, D or M, as in \'7D\'.'},
   'precheck-failed': {status: 422, cause: ({validation, details}) => `${validation} precheck failed:\n${details}`},
   'postcheck-failed': {status: 502, cause: ({validation, details}) => `${validation} postcheck failed:\n${details}`},
-  timeout: {status: 504, cause: ({timeout}) => `Timed out after ${timeout}ms.`}
+  timeout: {status: 504, cause: ({timeout}) => `Timed out after ${timeout}ms.`},
+  'gave-up': {status: 504, cause: ({tries, miss}) => `Gave up after ${tries} tries. The last:\n${miss}`}
 }
 
 // A message: the base, then the hint after a blank line, when there's one.

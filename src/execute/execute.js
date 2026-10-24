@@ -174,6 +174,7 @@ export async function execute(compiled, {trigger, target, signal, onUpdate = () 
     nodes: {given: compiled.given, trigger},
     resultHashes: {},
     inflight: new Map(),
+    handles: new Map(),
     pending: new Map(),
     signal,
     aborted: abortion(signal),

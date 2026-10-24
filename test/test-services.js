@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict'
 import {randomUUID} from 'node:crypto'
 import {defineService} from '../src/service/define-service.js'
-import {nodeRuntime, NodeRuntime, fileStores} from '../index.js'
+import {nodeRuntime, NodeRuntime, fileStores, memoryStores} from '../index.js'
 import {mapValues} from '../src/common/common.js'
 
 // A Run of a test's own on the node runtime: its id, to run or resume it
@@ -17,6 +17,28 @@ export const ownRun = () => {
 
 // The node runtime with its Cache kept in a test's own directory.
 export const runtimeCachingIn = (dir) => new NodeRuntime({cache: fileStores(dir)})
+
+// A node runtime that offers handles of kind queue, with nothing behind them:
+// each handle is the request it answers, without its phase. It keeps the
+// requests it's asked, and what it logs.
+export class QueueRuntime extends NodeRuntime {
+  requests = []
+  logged = []
+
+  constructor() {
+    super({cache: memoryStores()})
+    this.env = {log: async (text, options) => { this.logged.push({text, ...options}) }}
+  }
+
+  handlesOf(scope) {
+    const queue = async (request) => {
+      this.requests.push(request)
+      const {phase: _phase, ...handle} = request
+      return handle
+    }
+    return {...super.handlesOf(scope), queue}
+  }
+}
 
 // The error at the end of an error's cause chain.
 const rootCause = (error) => error.cause === undefined ? error : rootCause(error.cause)

@@ -24,6 +24,7 @@ The platform is yours. [A suggested architecture](#a-suggested-architecture) at 
 |---|---|
 | `services.get(name)` | the service a key names, synchronously; compile looks up each key's service here. Every scope has `util` unless the runtime registers another service under that name |
 | `env` | the environment's utilities, which debug output uses and each service instance receives ([The runtime API](#the-runtime-api)) |
+| `handles[kind](request)` | the handle a call names, a resource outside the Query of a kind the runtime offers, such as a browser session ([Handles](#handles)). Services never see it |
 | `call(key, fields)` | a service call's result. Core makes every call through it, with the key's fields, `{method, service, resource, confined}`, and the call's resolved fields |
 | `cache` | the [entry store](#entry-stores) whose entries outlive a Run: the [Cache](#the-cache) |
 | `run` | the entry store of the Run's results: its [Run State](#runs). Only a scope with every run key has one: a scope without, which `plan()` and `compile()` are content with, can't be executed |
@@ -211,6 +212,7 @@ Pass `trigger` only to look up results from a Run that had that payload. Form ha
 | `columns` | the phases that run together, in order |
 | `phases` | each phase's `name`, `dependencies`, `formHash` and return type |
 | `calls` | every call's `address`, `path`, `key`, `formHash`, readable `form`, and `types` |
+| `handles` | the [handles](#handles) the Query's calls name as written, literally or by default: `{service, kind, name, phase}`. A name built from data is known only as the Run reaches it |
 | `errors` | type issues, by address and [code](#plan-errors) |
 | `warnings` | compile warnings, such as a binding that shares a phase's name |
 
@@ -300,10 +302,12 @@ It is zodly's `error` type: a JSON-LD node of type Error, recognised by `@type`,
 |---|---|---|
 | `invalid-descriptor` | 400 | a call isn't `['[METHOD] [service]/resource', {...}]` |
 | `invalid-arguments` | 400 | a call's arguments aren't an object |
+| `unknown-field` | 400 | a call is given a field its service call doesn't declare; a call receives only the fields it declares, unless its input takes any (no input, or a loose object) |
 | `retired-key` | 400 | a key uses the retired `service:action` form; a call or the Query's settings use a retired argument (`onError`, `ignoreErrors`, `skipInputErrors`, `skipOutputErrors`); a reference uses a retired form (`$.name`, `@@`); or a key names a retired `[util]` resource. The hint names its replacement |
 | `raw-function` | 400 | a JavaScript function where a call was expected |
 | `unreachable-input` | 400 | a chain in a call field, without `as:` to reach its input |
 | `misplaced-as` | 400 | `as:` on a call that holds no nested call |
+| `shared-handle` | 400 | two phases name one handle (a browser session): what it names belongs to one phase. A literal name is refused when the Query compiles, one built from data when the second phase reaches it as the Run goes |
 | `misplaced-catch` | 400 | `catch:` on a call that holds no nested call; hold a single call in `[util]/try` to catch it |
 | `reserved-name` | 400 | a phase named `given` or `trigger`, or an iteration named `err` |
 | `duplicate-binding` | 400 | an iteration name used twice in a Query |
@@ -320,7 +324,7 @@ It is zodly's `error` type: a JSON-LD node of type Error, recognised by `@type`,
 | `nothing-flows` | 400 | `@` where nothing flows into the call |
 | `unknown-service` | 404 | no service is registered under the key's name in the Query's scope |
 | `not-a-service` | 500 | the service lacks one of `lookup`, `supportedCalls` and `init` |
-| `missing-capability` | 501 | the service `requires` an `env` key the runtime doesn't provide ([Capabilities beyond the standard](#capabilities-beyond-the-standard)) |
+| `missing-capability` | 501 | the service `requires` an `env` key the runtime doesn't provide ([Capabilities beyond the standard](#capabilities-beyond-the-standard)), or the call names a handle of a kind its scope doesn't offer ([Handles](#handles)) |
 
 **A service's `lookup` refuses a key it won't take.** A service made with `defineService` refuses with these codes; any other refusal is the service's own, reported as `refused-key`:
 
@@ -341,6 +345,7 @@ It is zodly's `error` type: a JSON-LD node of type Error, recognised by `@type`,
 | `malformed-document` | 500 | its input or output document isn't zodly that core reads |
 | `function-type` | 500 | a field typed `function`, where a service call field is typed `call` |
 | `unknown-tag` | 500 | a field tagged with a tag core doesn't know |
+| `unnamed-handle` | 500 | a handle field without a kind: `['handle', kind]` names the kind of resource it is |
 | `multiple-targets` | 500 | more than one field tagged `target` |
 | `malformed-source` | 500 | a dynamic type's source isn't exactly one of the kinds of source |
 | `malformed-source-operand` | 500 | a source's operand isn't what its kind takes |
@@ -374,6 +379,7 @@ A call field with a `catch` returns its nested call's type or the `catch`'s, as 
 | `precheck-failed` | 422 | a call's arguments don't fit its Service Call Validation or Service Defined Validation |
 | `postcheck-failed` | 502 | a call's result doesn't fit them |
 | `timeout` | 504 | a call outlasted its `timeout` |
+| `gave-up` | 504 | `[util]/waitFor` ran out of tries without a result that fits `expect`; names the tries and the last miss |
 | `invalid-ttl` | 400 | a cache `ttl` that isn't a duration, such as `'7D'` |
 
 ### Runtime and config errors
@@ -396,7 +402,7 @@ What a runtime offers through a scope:
 | Member | Node runtime |
 |---|---|
 | `services.get(name)` | the services the Query brings, filed for every Run |
-| `env` | `log(text, {color, to})` writes a line of text, shown in the named colour if any, or kept at the destination `to`, which the runtime interprets; it may be async. A runtime may offer more ([Capabilities beyond the standard](#capabilities-beyond-the-standard)). The node runtime's `log` writes to stdout in colour; with `to`, it appends to that file |
+| `env` | `log(text, {color, to, level})` writes a line of text, shown in the named colour if any, or kept at the destination `to`, which the runtime interprets; it may be async. `level` is an OpenTelemetry severity (`trace`, `debug`, `info`, `warn`, `error`, `fatal`): core logs its warnings at `warn`, as `[address] message`, and collects nothing itself, so the runtime persists, filters and alerts on them. A runtime may offer more ([Capabilities beyond the standard](#capabilities-beyond-the-standard)). The node runtime's `log` writes to stdout in colour, warnings and worse to stderr; with `to`, it appends to that file |
 | `call(key, fields)` | `Runtime`'s: the instance of the key's service in the scope, made on its first call ([Service instances](#service-instances)) |
 | `cache` | `fileStores('.cache')`, by the empty scope: every Run's |
 | `run` | `memoryStores()`, by Run; `fileStores(dir)` keeps them on disk |
@@ -410,9 +416,12 @@ And these, which core never calls, are its owner's:
 | `config` | a `ConfigRegistry`: each service's config, by the scope without its run fields and name, checked as it's filed ([Config](#config)) |
 | `cache`, `runStates` | entry stores by scope ([Entry stores](#entry-stores)): the Cache by the scope without its run fields, Run States by the whole scope |
 | `register(scope)` | the runtime's own: registers a scope's services with `services.register(scope, name, service)`, for its owner to call before the scope's Queries run, or its config is set. It must be cheap to repeat: registering the same service again keeps its instance, and an instance is made on a service's first call, not here. The node runtime has none: its `query()` files a Query's services |
-| `tearDown(scope)` | releases the service instances of each scope the given scope's fields are in: one Run's (`{tenantId, runId}`), every Run of a tenant (`{tenantId}`), or every scope's (none). For tests, a server shutting down, a runtime unloading tenants that have gone quiet |
+| `handlesOf(scope)` | the handles a scope offers core, by kind: its `handles` ([Handles](#handles)). `Runtime` offers `browser` when it has a browser; a runtime offering other kinds overrides it |
+| `closeHandles(scope)` | closes the resources of the handles of each scope the given scope's fields are in, or of every scope: the browser sessions `Runtime` keeps |
+| `tearDown(scope)` | releases the service instances, and closes the handles, of each scope the given scope's fields are in: one Run's (`{tenantId, runId}`), every Run of a tenant (`{tenantId}`), or every scope's (none, which also lets go of the browser). For tests, a server shutting down, a runtime unloading tenants that have gone quiet |
+| `browser` | the runtime's own, when it has a browser: `browser()` resolves to a CDP transport to it, in the shape Puppeteer calls a `ConnectionTransport` (`send(text)`, `close()`, and the `onmessage(text)` and `onclose()` it calls); closing the transport lets go of the browser. With one, the runtime offers handles of kind `browser` ([Handles](#handles)) |
 
-**`Runtime` is the base a runtime extends.** `new Runtime({scopeSchema, runKeys})` holds a `ServiceRegistry` and a `ConfigRegistry` keyed by its scope schema, `memoryStores()` for the Cache and Run States, an empty `env`, `call` and `scopeOf`. A runtime gives it its scope schema and run keys, its `env`, its stores, a config registry that stores elsewhere if it needs one, and `register`. The node runtime, `NodeRuntime`, is `Runtime` scoped by Run, with `log` and a Cache on disk. A platform on Cloudflare Workers might look like this:
+**`Runtime` is the base a runtime extends.** `new Runtime({scopeSchema, runKeys})` holds a `ServiceRegistry` and a `ConfigRegistry` keyed by its scope schema, `memoryStores()` for the Cache and Run States, an empty `env`, `call` and `scopeOf`, and browser handles when it has a `browser`. A runtime gives it its scope schema and run keys, its `env`, its stores, a config registry that stores elsewhere if it needs one, and `register`. The node runtime, `NodeRuntime`, is `Runtime` scoped by Run, with `log` and a Cache on disk. A platform on Cloudflare Workers might look like this:
 
 ```javascript
 import query, {Runtime, scopedStores} from 'microql/core'
@@ -452,6 +461,30 @@ A Query should run on any runtime that has the services it names, without change
 - **A service that uses a key lists it in `requires`** (`defineService` takes it from the service definition). A Query naming a service whose keys the runtime's `env` lacks doesn't compile: `missing-capability`, at the first call to it, before anything runs.
 - **Name a platform-specific service for what it does, not for the platform**: `[store]`, not `[otto]`. Another platform can then implement the same service, and Queries using it move with it.
 - **To make a key standard, bring it back to the MicroQL maintainers**, with the services that use it. A key every runtime provides is one Queries can rely on everywhere. Avoid vendor prefixes (`x-fs`): renaming one when it becomes standard breaks everything that used it.
+
+### Handles
+
+**A handle is a resource outside the Query that a call works on**, such as a browser session ([Service Guide § Handles](service-guide.md#handles)). The service declares the field and its kind, `['handle', 'browser']`; the Query names it; core decides which phase owns it, and runs the calls on it one at a time; the runtime provides it. A runtime makes two commitments:
+
+- **To core: `scope.handles[kind](request)` answers a handle**, for each kind it offers. A request is `{service, kind, name, phase}`, where `phase` is the phase that owns the handle, as its calls' addresses start: `$a`, or `settings.catch` for the Query's catch. Core asks on each call on the handle, in the call's turn, so calls on one handle never ask at once; the runtime keeps one resource per handle for as long as it sees fit. A Query naming a kind its scope doesn't offer doesn't compile (`missing-capability`).
+- **To the service: each kind's handle**, `{service, kind, name}` and what the kind adds, documented and kept stable, since the services written for that kind depend on it. Services never see a scope, so the handle is all of the resource they reach.
+
+**How long a resource lives is the runtime's to decide.** It knows each handle's phase from the request, and before a Run from `plan().handles`, which lists the handles whose names are written; and how the phases go from [progress updates](#progress-updates). It might close a phase's resources once the phase is done, or a Run's once the Run is.
+
+```mermaid
+flowchart LR
+  P[Platform] -- "a browser to connect to" --> R[Runtime]
+  R -- "scope.handles" --> C[Core]
+  C -- "request: service, kind, name, phase" --> R
+  R -- "handle: service, kind, name, send, on" --> C
+  C -- "the handle, in place of its name" --> S[Service]
+  C -- "progress updates" --> O["the runtime's owner"]
+  O -- "closeHandles(scope)" --> R
+```
+
+**Browser sessions are the handles `Runtime` offers, of kind `browser`, when a runtime has a browser** (`browser()`, in [The runtime API](#the-runtime-api)). `Runtime` keeps one Chrome DevTools Protocol connection to it, dialled on its first command, and each handle is a page of its own, in a browser context of its own (its own cookies and storage), opened on its scope's first request for it and kept until `closeHandles(scope)`. A browser handle gives its service `send(method, params)` and `on(method, handler)`: CDP confined to its page, with no library between, so a service that speaks it runs wherever a runtime offers a browser. The connection stays the runtime's.
+
+**The node runtime's browser is the one at the CDP endpoint it's given**, `new NodeRuntime({browser: 'ws://…'})`: a Chrome started with `--remote-debugging-port`, a container, a hosted browser. Given none, it's a headless Chrome that Puppeteer launches on first use, when Puppeteer is installed (an optional peer dependency), and `tearDown()` closes. Its `query()` closes a Run's sessions once the Run is done, whether the caller named the Run or not, so a Run resumed starts on fresh pages. A platform supplies `browser` from whatever it reaches a browser with, such as a hosted browser's binding, or offers kinds of its own by overriding `handlesOf(scope)`.
 
 ### Runtime environments
 

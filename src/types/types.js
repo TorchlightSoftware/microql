@@ -57,6 +57,42 @@ const enumValues = (schema) => Object.values(schema.def.entries)
 // A value of this schema is never there: undefined, or null.
 const isAbsent = (schema) => ['undefined', 'null'].includes(typeOf(schema))
 
+// How each type that holds schemas is rebuilt with what it holds opened: the
+// parts of its def that change.
+const wrapped = (def) => ({innerType: opened(def.innerType)})
+const OPENINGS = {
+  ...Object.fromEntries(WRAPPERS.map(type => [type, wrapped])),
+  // an object that strips (no catchall) keeps its other fields as they are;
+  // a strict one (never) still refuses them, as its author wrote
+  object: (def) => ({shape: mapValues(def.shape, opened), catchall: def.catchall ? opened(def.catchall) : z.unknown()}),
+  array: (def) => ({element: opened(def.element)}),
+  union: (def) => ({options: def.options.map(opened)}),
+  tuple: (def) => ({items: def.items.map(opened), rest: def.rest && opened(def.rest)}),
+  record: (def) => ({valueType: opened(def.valueType)}),
+  map: (def) => ({valueType: opened(def.valueType)}),
+  set: (def) => ({valueType: opened(def.valueType)}),
+  intersection: (def) => ({left: opened(def.left), right: opened(def.right)}),
+  pipe: (def) => ({in: opened(def.in), out: opened(def.out)}),
+  lazy: (def) => ({getter: () => opened(def.getter())})
+}
+
+// Schemas opened so far, so each is opened once and a recursive one (lazy)
+// meets itself again.
+const openedSchemas = new WeakMap()
+
+/**
+ * A schema that drops nothing: every object in it that would strip the
+ * fields it doesn't name keeps them, at any depth, however the schema was
+ * written (zod, zodly or zodex). Its checks, defaults and transforms stay.
+ * Parsing with it hands on everything a value holds.
+ */
+export function opened(schema) {
+  const opening = OPENINGS[schema.def.type]
+  if (!opening) return schema
+  if (!openedSchemas.has(schema)) openedSchemas.set(schema, schema.clone({...schema.def, ...opening(schema.def)}))
+  return openedSchemas.get(schema)
+}
+
 /**
  * A schema as text, for messages: `string`, `array of number`,
  * `{url: string, tags?: array of string}`, `enum (a | b)`, `record of number`,

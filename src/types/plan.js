@@ -5,7 +5,8 @@
  * Returns the phases, their dependencies and the columns that run together;
  * `$given` and `$trigger` as root nodes ahead of the first column; and every
  * call's address, JSON path, form and form hash, and inferred types, as zod
- * schemas. A view
+ * schemas; and the handles its calls name as written, each with the phase it
+ * belongs to, for a runtime deciding how long to keep their resources. A view
  * finds a call's results by looking up its form hash in the Run State. Two
  * addresses sharing one form hash are identical calls that run once.
  */
@@ -199,6 +200,7 @@ export function plan(query, {trigger} = {}) {
       form: formGraph.calls.get(call.address).form,
       types: typeGraph.calls.get(call.address)
     })),
+    handles: compiled.handles,
     warnings: compiled.warnings,
     errors: typeGraph.errors
   }

@@ -113,6 +113,10 @@ const orders = defineService({
 
 A service call's `input` and `output` are [zodly](validation.md) schemas: `input` an object schema, one field per argument, and `output` the type of what the service call returns.
 
+**Service implementations will only receive, and should only interact with fields that they explicitly declare.** A Query that gives a call a field its `input` doesn't name fails to compile (`unknown-field`). A call that takes fields it can't list, as `[util]/template` does, declares its input open: `[{on: ['any', {tags: ['target']}]}, 'loose']`, or `['object']`; one that declares no `input` takes any fields.
+
+**A call receives what its `input` parses, and returns what its `output` parses:** defaults filled in (`['string', {default: 'keep'}]`) and transforms applied (`'trim'`). Parsing never drops a field from a value: an object nested in an input or an output keeps the fields its schema doesn't name, however the schema was written (zodly or zod), unless it's written `strict`, which refuses them.
+
 ```javascript
 '/each': {
   input: {
@@ -132,6 +136,20 @@ In order to provide a fully ergonomic experience to query writers, you will want
 |---|---|
 | `'target'` | this field supports infix notation, that is you can put the target field to the left of it: `['$items', '[orders]/total']`. At most one per service call. |
 | `'settings'` | the field receives the call's settings which are normally reserved for microql use (`inspect`, `timeout`, ...) |
+
+### Handles
+
+A call that works on a resource outside the Query, such as a browser session, declares a handle field: `['handle', kind, ...modifiers]`, such as `session: ['handle', 'browser', {default: 'default'}]`. The kind names a resource the runtime offers (`browser`); the Query writes a name, and the call is given the handle in its place:
+
+- **A handle is `{service, kind, name}`, and what its kind adds**: the way to work on the resource, which the runtime commits to for that kind, and keeps stable. The field's declared type describes what the Query writes, a name; the handle is what the call receives.
+- **A browser handle adds `send(method, params)` and `on(method, handler)`**: the [Chrome DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/), confined to the session's page, a page of its own in a browser context of its own. `send` resolves to the command's result; `on` hands each such event's params to the handler, and returns what stops it.
+- **The runtime keeps the resource**: it opens it when a call first asks for it, and decides how long it lives ([Runtime Integration § Handles](runtime-integration.md#handles)). A service holds no state of its own about it; the handle is all of the resource it reaches.
+- **A handle belongs to one phase**: a phase replays as a whole, so a later phase can't count on the state an earlier one left. Naming one handle in two phases fails (`shared-handle`).
+- **A handle is the service's own, by kind and name**, whatever field holds it: two fields of one kind holding one name are one handle, and two services never share one.
+- **Calls on one handle run one at a time**, in the order they came, with a warning in the log when one has to wait; `sequential: true` on a `[util]/each` says it's meant.
+- **Such a call is never reused within a Run**: its answer may differ each time, so it always runs, and is only recorded.
+
+A zod schema declares one the same way, as a string with its kind in its meta: `z.string().meta({handle: 'browser'})`. A Query naming a call whose handle's kind the runtime doesn't offer doesn't compile (`missing-capability`), so a service needn't list it in `requires`; a handle without a kind is a malformed declaration (`unnamed-handle`).
 
 ### Reserve args
 

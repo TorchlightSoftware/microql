@@ -33,6 +33,7 @@ import {readDeclaration} from '../types/declaration.js'
 import {isReference, parseReference, readOf, readsOutside} from './reference.js'
 import {parseSchema} from '@tlsft/zodly'
 import {fieldPathOf} from './addresses.js'
+import {claimWritten} from './handles.js'
 
 // Nodes resolved before the first phase runs; never valid phase names.
 const ROOT_NODES = ['given', 'trigger']
@@ -62,6 +63,14 @@ const RETIRED_ARGS = {
 function checkRetired(site, keys) {
   const retired = keys.find(key => Object.hasOwn(RETIRED_ARGS, key))
   if (retired) fail(site, 'retired-key', {retired, replacement: `${RETIRED_ARGS[retired]}.`})
+}
+
+// Fails on the first argument the declaration doesn't name, unless it takes
+// any: a call receives only the fields it declares, so another would be lost.
+function checkFields(site, args, declaration, key) {
+  if (!declaration.fieldNames) return
+  const field = Object.keys(args).find(name => !declaration.fieldNames.includes(name) && !RESERVE_ARGS.includes(name) && name !== 'as')
+  if (field !== undefined) fail(site, 'unknown-field', {key, field, declared: declaration.fieldNames})
 }
 
 // A compile-time error at its site: its message starts with the address, and
@@ -100,8 +109,11 @@ function parseDescriptor(site, descriptor) {
 const SERVICE_METHODS = ['lookup', 'supportedCalls', 'init']
 const isService = (service) => SERVICE_METHODS.every(method => typeof service?.[method] === 'function')
 
+// The first of some keys that what a scope offers lacks, if any.
+const lacking = (keys, offered) => keys.find(key => !(key in offered))
+
 // The first key a service requires that an env lacks, if any.
-export const missingCapability = (service, env) => service.requires?.find(key => !(key in env))
+export const missingCapability = (service, env) => lacking(service.requires ?? [], env)
 
 // The service a key names among the scope's, once it's known to be a service
 // whose env keys the scope has.
@@ -135,6 +147,13 @@ function declarationAt(site, service, parsed) {
   } catch (error) {
     fail(site, 'malformed-declaration', {key: parsed.key, reason: reasonOf(error)}, error)
   }
+}
+
+// Fails on the first kind of handle a call names that the scope doesn't
+// offer in its handles.
+function checkHandles(site, {scope}, parts, declaration) {
+  const missing = lacking(declaration.handles.map(field => field.handle.kind), scope.handles)
+  if (missing) fail(site, 'missing-capability', {service: parts.service, capability: missing, handle: true})
 }
 
 // Method syntax puts its target in the field the declaration tags target.
@@ -295,6 +314,7 @@ function compileCall(descriptor, site, context, query) {
   const parsed = parseDescriptor(site, descriptor)
   const service = serviceAt(site, query, parsed.parts)
   const declaration = declarationAt(site, service, parsed)
+  checkHandles(site, query, parsed.parts, declaration)
   if (!isPlainObject(parsed.args)) fail(site, 'invalid-arguments', {key: parsed.key})
 
   const call = {
@@ -310,6 +330,7 @@ function compileCall(descriptor, site, context, query) {
 
   const args = parsed.hasTarget ? setIn(parsed.args, declaration.target.segments, parsed.target) : parsed.args
   checkRetired(site, Object.keys(args))
+  checkFields(site, args, declaration, parsed.key)
   const {as} = args
   const fields = positionFields(site, args, declaration, parsed.key)
   const holdsCalls = fields.some(f => f.path !== 'catch')
@@ -372,8 +393,9 @@ function compileSelect(select, query) {
 
 /**
  * Compile a Query into its tree of phases and calls, for the scope it runs in.
- * @returns {Object} {phases, calls, given, trigger, triggerSchema, select, settings, scope, warnings},
- *   where scope is the one the Query was compiled in, which execute runs it in
+ * @returns {Object} {phases, calls, given, trigger, triggerSchema, select, settings, scope, handles, warnings},
+ *   where scope is the one the Query was compiled in, which execute runs it in,
+ *   and handles are the requests for the handles its calls name as written
  */
 export function compile(config) {
   const {phases = {}, given, trigger, settings = {}, scope} = config
@@ -391,6 +413,8 @@ export function compile(config) {
   }
 
   const compiledPhases = mapValues(phases, (descriptor, name) => compilePhase(name, descriptor, query))
+  const globalCatch = settings.catch ? compileGlobalCatch(settings.catch, query) : undefined
+  const handles = claimWritten(query.calls, atSite)
 
   return {
     phases: compiledPhases,
@@ -401,9 +425,10 @@ export function compile(config) {
     select: compileSelect(config.select, query),
     settings: {
       ...settings,
-      catch: settings.catch ? compileGlobalCatch(settings.catch, query) : undefined
+      catch: globalCatch
     },
     scope,
+    handles,
     warnings: query.warnings
   }
 }

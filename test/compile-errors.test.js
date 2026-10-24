@@ -11,7 +11,8 @@ const echo = defineService({
     async GET() { return [] },
     async POST({on}) { return on }
   },
-  '/broken': {input: {on: ['any', 'optional', {tags: ['targte']}]}, call: async () => null}
+  '/broken': {input: {on: ['any', 'optional', {tags: ['targte']}]}, call: async () => null},
+  '/open': {input: [{on: ['any', 'optional', {tags: ['target']}]}, 'loose'], call: async (args) => args}
 })
 
 const compileQuery = (query) => compile({...query, services: {echo, ...query.services}})
@@ -141,6 +142,12 @@ describe('Compile-time errors', () => {
     ['a bare name in select',
       {phases: {a: ['[echo]/echo', {on: 1}]}, select: 'a'},
       {code: 'invalid-select', address: 'select', select: 'a'}],
+    ['a field the declaration does not name',
+      {phases: {a: ['[echo]/echo', {on: 1, extra: 2}]}},
+      {code: 'unknown-field', address: '$a.@1', key: '[echo]/echo', field: 'extra', declared: ['on']}],
+    ['a field the declaration does not name, beside a target given by method syntax',
+      {given: {x: 1}, phases: {a: ['$given.x', '[echo]/echo', {extra: 2}]}},
+      {code: 'unknown-field', address: '$a.@1', field: 'extra'}]
   ]
 
   for (const [name, query, error] of cases) {
@@ -150,6 +157,19 @@ describe('Compile-time errors', () => {
   it('places an error\'s message at its address', () => {
     assert.throws(() => compileQuery({phases: {a: ['[echo]/echo', {on: '$missing'}]}}), {message: /^\[\$a\.@1\] '\$missing'/})
   })
+
+  // [description, query]: the fields a call may be given
+  const fieldsTaken = [
+    ['reserve args beside the declared fields', {phases: {a: ['[echo]/echo', {on: 1, timeout: 5, retry: 1, debug: false, cache: false, precheck: {on: ['number']}}]}}],
+    ['as: and catch: on a call that holds calls', {given: {xs: [1]}, phases: {a: ['$given.xs', '[util]/each', {as: 'x', service: ['[echo]/echo', {on: '@x'}], catch: ['[echo]/echo', {on: '@err'}]}]}}],
+    ['any field, by a call that declares no input', {phases: {a: ['POST [echo]/items', {on: 1, anything: 2}]}}],
+    ['any field, by a call whose input is loose', {phases: {a: ['[echo]/open', {on: 1, anything: 2}]}}],
+    ['any field, by [util]/template', {phases: {a: ['[util]/template', {on: 1, anything: 2}]}}]
+  ]
+
+  for (const [description, query] of fieldsTaken) {
+    it(`accepts ${description}`, () => assert.doesNotThrow(() => compileQuery(query)))
+  }
 
   it('accepts a literal reference-like string supplied through given', () => {
     assert.doesNotThrow(() => compileQuery({given: {price: '$5.00'}, phases: {a: ['[echo]/echo', {on: '$given.price'}]}}))
@@ -176,6 +196,7 @@ describe('error codes', () => {
     'execute/wrappers.js',
     'query/compile.js',
     'query/graph.js',
+    'query/handles.js',
     'query/reference.js',
     'runtime/config.js',
     'runtime/runtime.js',

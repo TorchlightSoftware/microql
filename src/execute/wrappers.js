@@ -8,7 +8,8 @@
  * They are applied in canonical order, outermost first:
  *
  *   arguments → debug → error label → run state → cache → precheck
- *   → rate limit → concurrency → retry → postcheck → timeout → the service call
+ *   → handles → rate limit → concurrency → retry → postcheck → timeout
+ *   → the service call
  *
  * A failure is thrown, labelled with the innermost call that raised it, until
  * a catch handles it. A call's catch wraps each invocation of the calls it
@@ -25,10 +26,11 @@
 import {mapReferences, parseReference, resolveReference, resolveRead} from '../query/reference.js'
 import {VALIDATION_NAMES, getServiceColorName, mapValues, defaults, setPaths} from '../common/common.js'
 import {hashOf} from '../query/forms.js'
-import {validate} from '@tlsft/zodly'
+import {formatError} from '@tlsft/zodly'
 import {format} from '../common/format.js'
 import {toErrorData} from './errors.js'
 import {errorOf, locate} from '../common/error-catalog.js'
+import {onHandles} from '../query/handles.js'
 
 
 // A call's label in errors and logs: its address and service key.
@@ -106,8 +108,11 @@ const withErrorLabel = (next) => (args, inv) => next(args, inv).catch(error => {
 
 // Reuses a result the Run State already holds for this form and input —
 // unless the Run reruns this call — and runs identical calls in flight once.
+// A call on outside state (a handle) is never reused, since its answer may
+// differ each time: it's only recorded.
 const withRunState = (next, call, run) => {
   const form = run.formGraph.calls.get(call.address).hash
+  if (call.declaration.handles.length) return (args, inv) => recordResult(next, args, inv, form)
   const rerun = run.rerun(call)
   return async (args, inv) => {
     const stored = rerun ? undefined : await run.runState.get(form, inv.input)
@@ -171,31 +176,37 @@ const withCache = (next, call, run) => {
 // What a failed check is, by its order.
 const CHECK_FAILED = {precheck: 'precheck-failed', postcheck: 'postcheck-failed'}
 
-// Validates a value against the call's schemas for one order (precheck or
-// postcheck), in the given designations' order.
-function check(value, order, designations, {call}) {
-  const show = (shown) => format(shown, call.settings.inspect)
-  for (const designation of designations) {
-    const schema = call.validators[order][designation]
-    if (!schema) continue
-    try {
-      validate(schema, value, show)
-    } catch (error) {
-      throw errorOf(CHECK_FAILED[order], {validation: VALIDATION_NAMES[designation], details: error.message})
-    }
+// A value checked by one of the call's validations for an order (precheck or
+// postcheck). The Service Defined Validation hands on what it parses the value
+// into, its defaults filled in; the Query's own Service Call Validation only
+// checks, so it never drops a field it doesn't name.
+function check(value, order, designation, {call}) {
+  const schema = call.validators[order][designation]
+  if (!schema) return value
+  const result = schema.safeParse(value)
+  if (!result.success) {
+    const show = (shown) => format(shown, call.settings.inspect)
+    throw errorOf(CHECK_FAILED[order], {validation: VALIDATION_NAMES[designation], details: formatError(result.error, value, show)})
   }
+  return designation === 'schema' ? result.data : value
 }
 
 const withPrecheck = (next) => async (args, inv) => {
-  check(args, 'precheck', ['call', 'schema'], inv)
-  return next(args, inv)
+  check(args, 'precheck', 'call', inv)
+  return next(check(args, 'precheck', 'schema', inv), inv)
 }
 
 const withPostcheck = (next) => async (args, inv) => {
-  const result = await next(args, inv)
-  check(result, 'postcheck', ['schema', 'call'], inv)
+  const result = check(await next(args, inv), 'postcheck', 'schema', inv)
+  check(result, 'postcheck', 'call', inv)
   return result
 }
+
+// Runs a call on resources outside the Query in turn with the Run's other
+// calls on the same handles, given the handles the scope answers in place of
+// their names (see handles.js).
+const withHandles = (next) => (args, inv) =>
+  onHandles(inv.run.handles, inv.call, args, inv.run.scope, (given) => next(given, inv))
 
 const hasChecks = (validators, order) => Object.values(validators?.[order] ?? {}).some(Boolean)
 
@@ -251,6 +262,7 @@ function wrappersFor(call, run) {
     withRunState,
     settings.cache && withCache,
     hasChecks(validators, 'precheck') && withPrecheck,
+    call.declaration.handles.length > 0 && withHandles,
     run.rateLimiters[call.parts.service] && withRateLimit,
     run.limit && !holdsCalls(call) && withConcurrency,
     settings.retry > 0 && withRetry,

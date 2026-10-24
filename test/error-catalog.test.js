@@ -32,6 +32,9 @@ const WORDING = [
   ['circular-dependency', {phases: ['a', 'b']}, 'Phases \'a\', \'b\' depend on each other.'],
   ['malformed-schema', {validation: 'Service Call Validation', order: 'precheck', details: 'Unknown type name \'nope\''}, 'The Service Call Validation precheck schema is malformed:\nUnknown type name \'nope\''],
   ['no-target', {key: '[util]/when'}, 'Method syntax was used for [util]/when, which declares no target field.'],
+  ['shared-handle', {key: '[scraper]/open', field: 'session', value: 'default', phases: ['$a', '$b']}, 'session \'default\' of [scraper]/open is in $a and $b: what it names belongs to one phase.\n\nA phase replays as a whole, so a later one can\'t count on the state an earlier one left: give each phase its own.'],
+  ['unknown-field', {key: '[echo]/echo', field: 'extra', declared: ['on']}, '\'extra\' is not a field of [echo]/echo.\n\nIt takes \'on\'.'],
+  ['unknown-field', {key: '[echo]/none', field: 'extra', declared: []}, '\'extra\' is not a field of [echo]/none.\n\nIt takes no fields.'],
 
   // compile: references
   ['invalid-reference', {reference: '$5.00'}, '\'$5.00\' is not a reference.\n\nA literal string beginning with $ or @ must be supplied through given.'],
@@ -47,6 +50,7 @@ const WORDING = [
   ['unknown-service', {service: 'nope'}, 'Service \'nope\' is not registered in this scope.'],
   ['not-a-service', {service: 'plain'}, 'Service \'plain\' lacks lookup(key), supportedCalls() or init(env).\n\nA service definition gets them from defineService.'],
   ['missing-capability', {service: 'browser', capability: 'chrome'}, 'Service \'browser\' requires env.chrome, which this runtime doesn\'t provide.'],
+  ['missing-capability', {service: 'scraper', capability: 'browser', handle: true}, 'Service \'scraper\' works on handles of kind browser, which this runtime doesn\'t offer.'],
   ['unknown-resource', {key: '[echo]/nope'}, '[echo]/nope is not a resource of this service.'],
   ['confined-key', {key: '[@util]/each'}, '[@util]/each is confined, and this service answers no confined calls.'],
   ['unconfined-key', {key: '[shop]/secret', confinedKey: '[@shop]/secret'}, '[shop]/secret isn\'t confined, and this service answers only confined calls.\n\nUse [@shop]/secret.'],
@@ -60,6 +64,7 @@ const WORDING = [
   ['malformed-document', {document: 'input', reason: 'Unknown type name \'nope\''}, 'Unknown type name \'nope\', in input'],
   ['function-type', {}, 'A service call is typed \'call\', not \'function\''],
   ['unknown-tag', {tag: 'targte', path: 'on'}, 'Unknown tag \'targte\' on \'on\'.'],
+  ['unnamed-handle', {path: 'session'}, '\'session\' is a handle without a kind.\n\nA handle names the kind of resource it is, one a runtime offers: [\'handle\', \'browser\'].'],
   ['multiple-targets', {paths: ['a', 'b']}, 'Fields \'a\', \'b\' are each tagged target.\n\nOnly one field can be the target.'],
   ['malformed-source', {source: '{fromWhere: "a"}', kinds: ['fromField', 'fromList']}, '{fromWhere: "a"} is not a source, which has exactly one of fromField, fromList'],
   ['malformed-source-operand', {kind: 'merged', takes: 'a pair of sources'}, 'merged takes a pair of sources'],
@@ -87,7 +92,8 @@ const WORDING = [
   ['invalid-ttl', {ttl: 'soon'}, 'Cache ttl \'soon\' is not a duration.\n\nWrite a number and a unit, s, m, h, D or M, as in \'7D\'.'],
   ['precheck-failed', {validation: 'Service Call Validation', details: 'on: Too small'}, 'Service Call Validation precheck failed:\non: Too small'],
   ['postcheck-failed', {validation: 'Service Defined Validation', details: 'images: Too small'}, 'Service Defined Validation postcheck failed:\nimages: Too small'],
-  ['timeout', {timeout: 5}, 'Timed out after 5ms.']
+  ['timeout', {timeout: 5}, 'Timed out after 5ms.'],
+  ['gave-up', {tries: 3, miss: '- n: 1 => Too small'}, 'Gave up after 3 tries. The last:\n- n: 1 => Too small']
 ]
 
 describe('the catalog\'s wording', () => {

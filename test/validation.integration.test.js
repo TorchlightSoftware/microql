@@ -482,4 +482,25 @@ describe('Validation Integration Tests', () => {
       )
     })
   })
+
+  // The service's own declaration parses what it checks: the call receives,
+  // and the Query gets back, the parsed value, with its defaults filled in.
+  // The Query's own precheck and postcheck only check.
+  describe('Parsed values', () => {
+    // [description, declaration, call, fields, expected result]
+    const cases = [
+      ['an input default reaches the call', {input: {mode: ['string', {default: 'keep'}]}}, async ({mode}) => mode, {}, 'keep'],
+      ['a given input wins over its default', {input: {mode: ['string', {default: 'keep'}]}}, async ({mode}) => mode, {mode: 'remove'}, 'remove'],
+      ['an input transform reaches the call', {input: {name: ['string', 'trim']}}, async ({name}) => name, {name: '  Ada  '}, 'Ada'],
+      ['an output default reaches the Query', {output: {status: ['string', {default: 'done'}]}}, async () => ({}), {}, {status: 'done'}],
+      ['a Query precheck keeps the fields it does not name', {}, async (args) => args, {a: 1, b: 2, precheck: {a: ['number']}}, {a: 1, b: 2}],
+      ['a Query postcheck keeps the fields it does not name', {}, async () => ({a: 1, b: 2}), {postcheck: {a: ['number']}}, {a: 1, b: 2}]
+    ]
+
+    for (const [description, declaration, call, fields, expected] of cases) {
+      it(description, async () => {
+        assert.deepEqual(await runValidationTest(processor(call, declaration), fields), expected)
+      })
+    }
+  })
 })

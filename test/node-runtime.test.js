@@ -118,3 +118,37 @@ describe('the node runtime', () => {
     assert.deepEqual(planned.calls.map(call => call.key), ['[shop]/total'])
   })
 })
+
+// env.log's level is an OpenTelemetry severity: trace, debug, info, warn,
+// error or fatal. The node runtime writes warnings and worse to stderr, in
+// their colour unless the log names one, and the rest to stdout.
+describe('the node runtime\'s log', () => {
+  // What the log writes for these options: the stream and the text.
+  const written = async (options) => {
+    const lines = []
+    const writes = {stdout: process.stdout.write, stderr: process.stderr.write}
+    for (const stream of ['stdout', 'stderr']) process[stream].write = (text) => lines.push({stream, text})
+    try {
+      await nodeRuntime.env.log('hello', options)
+    } finally {
+      for (const stream of ['stdout', 'stderr']) process[stream].write = writes[stream]
+    }
+    return lines
+  }
+
+  // [options, stream, text]
+  const cases = [
+    [{}, 'stdout', 'hello\n'],
+    [{level: 'info'}, 'stdout', 'hello\n'],
+    [{color: 'blue'}, 'stdout', '\x1b[34mhello\x1b[0m\n'],
+    [{level: 'warn'}, 'stderr', '\x1b[33mhello\x1b[0m\n'],
+    [{level: 'error'}, 'stderr', '\x1b[31mhello\x1b[0m\n'],
+    [{level: 'fatal', color: 'magenta'}, 'stderr', '\x1b[35mhello\x1b[0m\n']
+  ]
+
+  for (const [options, stream, text] of cases) {
+    it(`writes ${JSON.stringify(options)} to ${stream}`, async () => {
+      assert.deepEqual(await written(options), [{stream, text}])
+    })
+  }
+})

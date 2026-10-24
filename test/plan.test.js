@@ -14,7 +14,7 @@ const branch = defineService({
     call: async ({on, pass, fail}) => on ? pass(on) : fail(on)
   },
   '/extract': {
-    input: {url: ['string']},
+    input: {url: ['string'], '@type': ['string', 'optional']},
     output: {url: ['string'], images: ['array', [{src: ['string']}], 'optional']},
     call: async ({url}) => ({url})
   },

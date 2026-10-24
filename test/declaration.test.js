@@ -22,6 +22,19 @@ describe('readDeclaration', () => {
     assert.deepEqual(declaration.settings.map(f => f.path), ['settings'])
   })
 
+  it('reads handle fields and their kind, written as a handle or as zod meta', () => {
+    const {handles} = readDeclaration({
+      input: {session: ['handle', 'browser', {default: 'default'}], page: z.string().meta({handle: 'browser'}), url: ['string']}
+    })
+    assert.deepEqual(handles.map(({path, handle}) => [path, handle.kind]), [['session', 'browser'], ['page', 'browser']])
+  })
+
+  it('checks a handle\'s value as the name it is', () => {
+    const {inputSchema} = readDeclaration({input: {session: ['handle', 'browser', {default: 'default'}]}})
+    const fits = [{}, {session: 'a'}, {session: ''}, {session: 1}].map(fields => inputSchema.safeParse(fields).success)
+    assert.deepEqual(fits, [true, true, false, false])
+  })
+
   it('writes a dot inside a field\'s name as .. in its path', () => {
     const {calls} = readDeclaration({input: {'a.b': ['call']}})
     assert.deepEqual([calls[0].path, calls[0].segments], ['a..b', ['a.b']])
@@ -94,6 +107,9 @@ describe('readDeclaration', () => {
   const malformed = [
     ['an unknown tag', {input: {on: ['any', 'optional', {tags: ['targte']}]}}, {code: 'unknown-tag', tag: 'targte', path: 'on'}],
     ['the retired reserve tag', {input: {skip: ['any', {tags: ['reserve']}]}}, {code: 'unknown-tag', tag: 'reserve', path: 'skip'}],
+    ['the retired handle tag', {input: {session: ['string', {tags: ['handle']}]}}, {code: 'unknown-tag', tag: 'handle', path: 'session'}],
+    ['a handle without a kind', {input: {session: 'handle'}}, {code: 'unnamed-handle', path: 'session'}],
+    ['a handle whose kind isn\'t a name', {input: {session: z.string().meta({handle: true})}}, {code: 'unnamed-handle', path: 'session'}],
     ['two targets', {input: {a: ['any', 'optional', {tags: ['target']}], b: ['any', 'optional', {tags: ['target']}]}}, {code: 'multiple-targets', paths: ['a', 'b']}],
     ['the retired tag lists', {input: {on: ['target']}}, inDocument('input', /Unknown type name 'target' on \["target"\], at on$/)],
     ['type without a source', {input: {on: ['type']}}, inDocument('input', malformedSource(undefined))],

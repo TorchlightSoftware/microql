@@ -84,7 +84,7 @@ describe('MicroQL Comprehensive Tests', () => {
       const onTarget = {on: ['any', 'optional', {tags: ['target']}]}
       const services = servicesFromTables({
         transform: {
-          '/filter': {input: onTarget, call: async ({on, fn}) => on.filter((item) => item.includes(fn))},
+          '/filter': {input: {...onTarget, fn: ['string']}, call: async ({on, fn}) => on.filter((item) => item.includes(fn))},
           '/upper': {input: onTarget, call: async ({on}) => on.map((item) => item.toUpperCase())},
           '/count': {input: onTarget, call: async ({on}) => on.length}
         }

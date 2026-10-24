@@ -46,11 +46,19 @@ const stubServices = () => {
   })
 
   const assistant = defineService({
-    '/filter': onTarget(async ({on}) => record('filter', on.filter(g => g.text !== 'Gift shop'))),
-    '/classify': onTarget(async ({on}) =>
-      record('classify', on.map(g => ({...g, period: g.text === 'Sculpture' ? 'modern' : 'early', medium: g.text})))),
+    '/filter': {
+      input: {on: ['any', 'optional', {tags: ['target']}], criteria: ['string']},
+      call: async ({on}) => record('filter', on.filter(g => g.text !== 'Gift shop'))
+    },
+    '/classify': {
+      input: {on: ['any', 'optional', {tags: ['target']}], periods: ['array', ['string']]},
+      call: async ({on}) => record('classify', on.map(g => ({...g, period: g.text === 'Sculpture' ? 'modern' : 'early', medium: g.text})))
+    },
     async '/readCaption'({imageUrl}) { return record('readCaption', {name: imageUrl.replace(/^img\/|\.png$/g, '')}) },
-    '/readWebsite': onTarget(async ({on}) => record('readWebsite', {name: new URL(on).hostname, website: on}))
+    '/readWebsite': {
+      input: {on: ['any', 'optional', {tags: ['target']}], lookFor: ['array', ['string']]},
+      call: async ({on}) => record('readWebsite', {name: new URL(on).hostname, website: on})
+    }
   })
 
   const catalogue = defineService({

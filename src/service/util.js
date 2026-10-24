@@ -13,7 +13,7 @@ import {defineService} from './define-service.js'
 import {errorOf} from '../common/error-catalog.js'
 import {format} from '../common/format.js'
 import {isErrorData, fromErrorData} from '../execute/errors.js'
-import {parseSchema} from '@tlsft/zodly'
+import {parseSchema, formatError} from '@tlsft/zodly'
 
 // A copy of plain data: arrays and plain objects are rebuilt, everything else
 // (dates, errors, instances) is shared.
@@ -45,13 +45,47 @@ function mergeValues(on, withValue) {
   return copyPlain(withValue)
 }
 
-const eachItem = ({on, service}) => Promise.all(on.map(item => service(item)))
+// The call's results for every item, in order: all run at once, or one at a
+// time when sequential.
+const eachItem = ({on, service, sequential}) => sequential ? inSequence(on, service) : Promise.all(on.map(item => service(item)))
+
+const inSequence = (items, service) =>
+  items.reduce(async (done, item) => [...await done, await service(item)], Promise.resolve([]))
 
 // The list without the items that fit the skip schema, if there is one.
 function leaveOut(list, skip) {
   if (skip === undefined) return list
   const schema = parseSchema(skip)
   return list.filter(item => !schema.safeParse(item).success)
+}
+
+const pause = (ms) => new Promise(resolve => setTimeout(resolve, ms))
+
+// Runs a pass up to `times` times, `interval` ms apart, until one is done:
+// every pass's outcome, and what stopped them (until or times).
+async function runPasses({pass, done, times, interval = 0}) {
+  const outcomes = []
+  while (outcomes.length < times) {
+    if (outcomes.length) await pause(interval)
+    const outcome = await pass()
+    outcomes.push(outcome)
+    if (done(outcome)) return {outcomes, stoppedBy: 'until'}
+  }
+  return {outcomes, stoppedBy: 'times'}
+}
+
+// Why a waitFor attempt missed: its error, or how its result misses expect;
+// nothing when it passed.
+function missOf(expected, {result, error}) {
+  if (error) return error.message
+  const parsed = expected?.safeParse(result)
+  return parsed && !parsed.success ? formatError(parsed.error, result) : undefined
+}
+
+// One waitFor attempt: the call's result, or how it failed, and why it missed.
+async function attempt(service, expected) {
+  const outcome = await service().then(result => ({result}), error => ({error}))
+  return {...outcome, miss: missOf(expected, outcome)}
 }
 
 // A value as an Error: error data as the error it describes, anything else
@@ -80,11 +114,12 @@ const serviceDefinition = {
   },
 
   '/each': {
-    description: 'Run a call for every item of a list, returning their results in order, less those that fit skip',
+    description: 'Run a call for every item of a list, all at once or one at a time (sequential), returning their results in order, less those that fit skip',
     input: {
       on: ['array', {tags: ['target']}],
       service: ['call', {input: ['type', {fromList: 'on'}]}],
-      skip: ['any', 'optional']
+      skip: ['any', 'optional'],
+      sequential: ['boolean', {default: false}]
     },
     // a list of what the call returns, less what fits the schema written in skip
     output: ['array', ['type', {without: [{fromField: 'service'}, {fromZodly: {fromValue: 'skip'}}]}]],
@@ -92,15 +127,55 @@ const serviceDefinition = {
   },
 
   '/flattenEach': {
-    description: 'Run a call that returns a list for every item of a list, returning one list of all their items, less those that fit skip',
+    description: 'Run a call that returns a list for every item of a list, all at once or one at a time (sequential), returning one list of all their items, less those that fit skip',
     input: {
       on: ['array', {tags: ['target']}],
       service: ['call', {input: ['type', {fromList: 'on'}], output: ['array']}],
-      skip: ['any', 'optional']
+      skip: ['any', 'optional'],
+      sequential: ['boolean', {default: false}]
     },
     // a list of the items of the lists the call returns, less what fits the schema written in skip
     output: ['array', ['type', {without: [{fromList: 'service'}, {fromZodly: {fromValue: 'skip'}}]}]],
     call: async (args) => leaveOut((await eachItem(args)).flat(), args.skip)
+  },
+
+  '/waitFor': {
+    description: 'Run a call until it succeeds and its result fits expect, every interval, at most tries times; its passing result',
+    input: {
+      service: ['call'],
+      expect: ['any', 'optional'],
+      tries: ['number', 'int', {min: 1}, {default: 10}],
+      interval: ['number', {min: 0}, {default: 200}]
+    },
+    output: ['type', {fromField: 'service'}],
+    async call({service, expect, tries, interval}) {
+      const expected = expect === undefined ? undefined : parseSchema(expect)
+      const {outcomes, stoppedBy} = await runPasses({
+        pass: () => attempt(service, expected),
+        done: ({miss}) => miss === undefined,
+        times: tries,
+        interval
+      })
+      const last = outcomes.at(-1)
+      if (stoppedBy === 'until') return last.result
+      throw errorOf('gave-up', {tries: outcomes.length, miss: last.miss})
+    }
+  },
+
+  '/repeat': {
+    description: 'Run a call times times, every interval, or until its result fits until; every pass\'s result, and what stopped them',
+    input: {
+      service: ['call'],
+      until: ['any', 'optional'],
+      times: ['number', 'int', {min: 1}, {default: 10}],
+      interval: ['number', {min: 0}, 'optional']
+    },
+    output: {passes: ['array', ['type', {fromField: 'service'}]], stoppedBy: ['enum', ['until', 'times']]},
+    async call({service, until, times, interval}) {
+      const fits = until === undefined ? () => false : (result) => parseSchema(until).safeParse(result).success
+      const {outcomes, stoppedBy} = await runPasses({pass: () => service(), done: fits, times, interval})
+      return {passes: outcomes, stoppedBy}
+    }
   },
 
   '/try': {
@@ -124,10 +199,10 @@ const serviceDefinition = {
     input: {
       on: ['array', {tags: ['target']}],
       service: ['call', {input: ['type', {fromList: 'on'}], output: ['boolean']}],
-      mode: ['enum', ['keep', 'remove'], 'optional']
+      mode: ['enum', ['keep', 'remove'], {default: 'keep'}]
     },
     output: ['type', {fromField: 'on'}],
-    async call({on, service, mode = 'keep'}) {
+    async call({on, service, mode}) {
       const tests = await Promise.all(on.map(item => service(item)))
       const keep = mode === 'keep'
       return on.filter((_, index) => Boolean(tests[index]) === keep)
@@ -235,7 +310,8 @@ const serviceDefinition = {
 
   '/template': {
     description: 'Its own fields, with every reference resolved',
-    input: {on: ['any', 'optional', {tags: ['target']}]},
+    // any fields at all: they're what it returns
+    input: [{on: ['any', 'optional', {tags: ['target']}]}, 'loose'],
     call: async (args) => args
   }
 }

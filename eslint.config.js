@@ -26,7 +26,8 @@ const nodeGlobals = {
   __filename: 'readonly',
   global: 'readonly',
   setImmediate: 'readonly',
-  clearImmediate: 'readonly'
+  clearImmediate: 'readonly',
+  WebSocket: 'readonly'
 }
 
 export default [

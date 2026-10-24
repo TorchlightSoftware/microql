@@ -58,6 +58,33 @@ describe('Util Service Tests', () => {
   }
 
   describe('Direct Service Usage', () => {
+    // How many of a call's runs were in flight at once, with the results in order.
+    const inFlight = async (resource, fields) => {
+      let running = 0
+      let most = 0
+      const service = async (item) => {
+        most = Math.max(most, ++running)
+        await new Promise(resolve => setTimeout(resolve, 5))
+        running--
+        return [item]
+      }
+      return {result: await callUtil(resource, {on: [1, 2, 3], service, ...fields}), most}
+    }
+
+    // [resource, fields, the most runs in flight at once, the result]
+    const iterations = [
+      ['/each', {}, 3, [[1], [2], [3]]],
+      ['/each', {sequential: true}, 1, [[1], [2], [3]]],
+      ['/flattenEach', {}, 3, [1, 2, 3]],
+      ['/flattenEach', {sequential: true}, 1, [1, 2, 3]]
+    ]
+
+    for (const [resource, fields, most, result] of iterations) {
+      it(`${resource} ${JSON.stringify(fields)} runs ${most} at once, keeping the items' order`, async () => {
+        assert.deepEqual(await inFlight(resource, fields), {result, most})
+      })
+    }
+
     it('should map with function', async () => {
       const result = await callUtil('/each', {
         on: testData.people,
@@ -223,7 +250,7 @@ describe('Util Service Tests', () => {
   describe('Declarations', () => {
     it('lists every supported call, each with no method, and described', () => {
       const supported = util.supportedCalls()
-      const resources = ['/concat', '/each', '/eq', '/exists', '/filter', '/flattenEach', '/format', '/gt', '/inspect', '/length', '/log', '/lt', '/merge', '/partitionErrors', '/pick', '/template', '/throw', '/try', '/when']
+      const resources = ['/concat', '/each', '/eq', '/exists', '/filter', '/flattenEach', '/format', '/gt', '/inspect', '/length', '/log', '/lt', '/merge', '/partitionErrors', '/pick', '/repeat', '/template', '/throw', '/try', '/waitFor', '/when']
       assert.deepStrictEqual(supported.map(({resource}) => resource).sort(), resources)
       for (const {resource, method, description} of supported) {
         assert.strictEqual(method, null, `${resource} takes no method`)
