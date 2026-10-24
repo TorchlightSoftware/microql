@@ -14,11 +14,50 @@
  *   Page        a browser session, the resource of a handle of kind browser:
  *               a page of its own, in a browser context of its own (its own
  *               cookies and storage), attached flat, so its commands and
- *               events carry its session id. Plain data: its ids
+ *               events carry its session id. Plain data: its ids, and the
+ *               sessions of its frames that run out of its process
+ *   Frame       a document within a page, in an iframe. Chrome runs a
+ *               cross-site one in a process of its own, reached through a
+ *               session of its own, whose target id is its frame id; any
+ *               other runs in the process of the frame holding it
  */
 
-// Where an event's handlers are kept: by the session it's for, and its method.
-const eventKey = (sessionId, method) => `${sessionId ?? ''} ${method}`
+/**
+ * The handlers of a connection's events, by the session they're for and
+ * their method. A session's handlers go when it's detached, with those of
+ * the sessions attached through it, since no more of their events will come.
+ */
+export function sessionHandlers() {
+  const bySession = new Map()
+  const attachedThrough = new Map()
+
+  const drop = (sessionId) => {
+    bySession.delete(sessionId)
+    for (const child of attachedThrough.get(sessionId) ?? []) drop(child)
+    attachedThrough.delete(sessionId)
+  }
+
+  return {
+    add(sessionId, method, handler) {
+      if (!bySession.has(sessionId)) bySession.set(sessionId, new Map())
+      const methods = bySession.get(sessionId)
+      if (!methods.has(method)) methods.set(method, new Set())
+      methods.get(method).add(handler)
+      return () => methods.get(method).delete(handler)
+    },
+    deliver({sessionId, method, params}) {
+      for (const handler of bySession.get(sessionId)?.get(method) ?? []) handler(params)
+      if (method === 'Target.attachedToTarget') {
+        if (!attachedThrough.has(sessionId)) attachedThrough.set(sessionId, new Set())
+        attachedThrough.get(sessionId).add(params.sessionId)
+      }
+      if (method === 'Target.detachedFromTarget') {
+        attachedThrough.get(sessionId)?.delete(params.sessionId)
+        drop(params.sessionId)
+      }
+    }
+  }
+}
 
 /**
  * The CDP connection to a browser, over the transport `dial()` opens: dialled
@@ -31,7 +70,7 @@ const eventKey = (sessionId, method) => `${sessionId ?? ''} ${method}`
  */
 export function cdpConnection(dial) {
   const waiting = new Map()
-  const handlers = new Map()
+  const handlers = sessionHandlers()
   let lastId = 0
   let transport
 
@@ -46,7 +85,7 @@ export function cdpConnection(dial) {
     opened.onmessage = (text) => {
       const message = JSON.parse(text)
       if (message.id !== undefined) return answer(message)
-      for (const handler of handlers.get(eventKey(message.sessionId, message.method)) ?? []) handler(message.params)
+      handlers.deliver(message)
     }
     opened.onclose = () => {
       transport = undefined
@@ -74,10 +113,7 @@ export function cdpConnection(dial) {
       })
     },
     on(method, handler, sessionId) {
-      const key = eventKey(sessionId, method)
-      if (!handlers.has(key)) handlers.set(key, new Set())
-      handlers.get(key).add(handler)
-      return () => handlers.get(key).delete(handler)
+      return handlers.add(sessionId, method, handler)
     },
     async close() {
       const opened = transport
@@ -88,15 +124,33 @@ export function cdpConnection(dial) {
 }
 
 /**
+ * Attaches, flat, each frame Chrome runs out of a session's process as it
+ * starts, and those out of each one's process in turn, keeping each one's
+ * session by its frame id until it's detached.
+ */
+async function attachFrames(connection, sessionId, frames) {
+  connection.on('Target.attachedToTarget', ({sessionId: frame, targetInfo}) => {
+    frames.set(targetInfo.targetId, frame)
+    // a frame detached before it's answered has no frames left to attach
+    attachFrames(connection, frame, frames).catch(() => {})
+  }, sessionId)
+  connection.on('Target.detachedFromTarget', ({targetId}) => frames.delete(targetId), sessionId)
+  await connection.send('Target.setAutoAttach', {autoAttach: true, waitForDebuggerOnStart: false, flatten: true, filter: [{type: 'iframe'}]}, sessionId)
+}
+
+/**
  * A browser session, opened on a connection: a page of its own, in a browser
  * context of its own, attached flat. Its ids: the session's, which its
- * commands carry, and the page's and context's, which close it.
+ * commands carry, and the page's and context's, which close it; and its
+ * frames' sessions, by frame id, for those Chrome runs out of its process.
  */
 export async function openPage(connection) {
   const {browserContextId} = await connection.send('Target.createBrowserContext')
   const {targetId} = await connection.send('Target.createTarget', {url: 'about:blank', browserContextId})
   const {sessionId} = await connection.send('Target.attachToTarget', {targetId, flatten: true})
-  return {sessionId, targetId, browserContextId}
+  const frames = new Map()
+  await attachFrames(connection, sessionId, frames)
+  return {sessionId, targetId, browserContextId, frames}
 }
 
 // Closes a browser session's page, and disposes of its context, with its
@@ -106,9 +160,15 @@ export async function closePage(connection, {targetId, browserContextId}) {
   await connection.send('Target.disposeBrowserContext', {browserContextId})
 }
 
-// CDP confined to one session: what a browser handle gives its service.
-// `send(method, params)` and `on(method, handler)` speak to that session only.
-export const confinedTo = (connection, sessionId) => ({
+/**
+ * CDP confined to one session of a page: what a browser handle gives its
+ * service. `send(method, params)` and `on(method, handler)` speak to that
+ * session only; `frame(frameId)` is CDP confined to the session a frame
+ * within it runs in: the frame's own, when Chrome runs it out of this
+ * session's process, or else this one.
+ */
+export const confinedTo = (connection, {sessionId, frames}) => ({
   send: (method, params) => connection.send(method, params, sessionId),
-  on: (method, handler) => connection.on(method, handler, sessionId)
+  on: (method, handler) => connection.on(method, handler, sessionId),
+  frame: (frameId) => confinedTo(connection, {sessionId: frames.get(frameId) ?? sessionId, frames})
 })

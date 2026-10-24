@@ -40,7 +40,8 @@
  * a CDP transport to it (see cdp.js), whose closing lets go of the browser.
  * Each handle is a page of its own, in a browser context of its own, opened
  * on the scope's first request for it and kept until closeHandles(scope);
- * it gives its service `send` and `on`, CDP confined to that page.
+ * it gives its service `send` and `on`, CDP confined to that page, and
+ * `frame(frameId)`, CDP confined to a frame within it.
  *
  * Runtime is the base a runtime extends: it keeps the services and their
  * config (see service-registry.js and config.js), and makes each service's
@@ -195,7 +196,7 @@ export class Runtime {
   async #browserHandle(scope, {service, kind, name}) {
     const key = canonical([service, name])
     if (!this.#pages.get(scope, key)) this.#pages.set(scope, key, await openPage(this.#connected()))
-    return {service, kind, name, ...confinedTo(this.#connected(), this.#pages.get(scope, key).sessionId)}
+    return {service, kind, name, ...confinedTo(this.#connected(), this.#pages.get(scope, key))}
   }
 
   // The CDP connection to the runtime's browser: one, made on first use, and

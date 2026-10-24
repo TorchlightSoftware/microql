@@ -476,13 +476,13 @@ flowchart LR
   P[Platform] -- "a browser to connect to" --> R[Runtime]
   R -- "scope.handles" --> C[Core]
   C -- "request: service, kind, name, phase" --> R
-  R -- "handle: service, kind, name, send, on" --> C
+  R -- "handle: service, kind, name, send, on, frame" --> C
   C -- "the handle, in place of its name" --> S[Service]
   C -- "progress updates" --> O["the runtime's owner"]
   O -- "closeHandles(scope)" --> R
 ```
 
-**Browser sessions are the handles `Runtime` offers, of kind `browser`, when a runtime has a browser** (`browser()`, in [The runtime API](#the-runtime-api)). `Runtime` keeps one Chrome DevTools Protocol connection to it, dialled on its first command, and each handle is a page of its own, in a browser context of its own (its own cookies and storage), opened on its scope's first request for it and kept until `closeHandles(scope)`. A browser handle gives its service `send(method, params)` and `on(method, handler)`: CDP confined to its page, with no library between, so a service that speaks it runs wherever a runtime offers a browser. The connection stays the runtime's.
+**Browser sessions are the handles `Runtime` offers, of kind `browser`, when a runtime has a browser** (`browser()`, in [The runtime API](#the-runtime-api)). `Runtime` keeps one Chrome DevTools Protocol connection to it, dialled on its first command, and each handle is a page of its own, in a browser context of its own (its own cookies and storage), opened on its scope's first request for it and kept until `closeHandles(scope)`. A browser handle gives its service `send(method, params)` and `on(method, handler)`: CDP confined to its page, with no library between, so a service that speaks it runs wherever a runtime offers a browser; and `frame(frameId)`, the same confined to a frame within the page. `Runtime` attaches, flat, to each frame Chrome runs out of its holder's process (a cross-site iframe) as it starts, and to those within it in turn, and `frame` answers with that frame's session, or its holder's for a frame in the same process. The connection stays the runtime's.
 
 **The node runtime's browser is the one at the CDP endpoint it's given**, `new NodeRuntime({browser: 'ws://…'})`: a Chrome started with `--remote-debugging-port`, a container, a hosted browser. Given none, it's a headless Chrome that Puppeteer launches on first use, when Puppeteer is installed (an optional peer dependency), and `tearDown()` closes. Its `query()` closes a Run's sessions once the Run is done, whether the caller named the Run or not, so a Run resumed starts on fresh pages. A platform supplies `browser` from whatever it reaches a browser with, such as a hosted browser's binding, or offers kinds of its own by overriding `handlesOf(scope)`.
 
