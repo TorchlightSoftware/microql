@@ -74,8 +74,9 @@ function checkFields(site, args, declaration, key) {
 }
 
 // A compile-time error at its site: its message starts with the address, and
-// the error carries it (see docs/runtime-integration.md § Errors).
-const atSite = (site, error) => Object.assign(locate(error, `[${site.address}]`), {address: site.address})
+// the error carries it, with the JSON path of what's at fault (see
+// docs/runtime-integration.md § Compile errors).
+const atSite = (site, error) => Object.assign(locate(error, `[${site.address}]`), {address: site.address, path: site.path})
 
 // Fails at a site with the catalog's error for a code.
 const fail = (site, code, details, cause) => {
@@ -364,7 +365,7 @@ function compileCall(descriptor, site, context, query) {
 }
 
 function compilePhase(name, descriptor, query) {
-  if (ROOT_NODES.includes(name)) fail({address: `$${name}`}, 'reserved-name', {reserved: name, naming: 'a phase'})
+  if (ROOT_NODES.includes(name)) fail({address: `$${name}`, path: ['phases', name]}, 'reserved-name', {reserved: name, naming: 'a phase'})
   const steps = compileSteps(descriptor, sitesAt(`$${name}.@`, ['phases', name]), {bindings: [], errors: 0}, false, query)
   return {
     name,
@@ -382,7 +383,7 @@ function compileGlobalCatch(value, query) {
 // `select` names what the Query returns: one reference, or a list of phases.
 function compileSelect(select, query) {
   if (select === undefined) return undefined
-  const site = {address: 'select'}
+  const site = {address: 'select', path: ['select']}
   const refs = [].concat(select).map(text => {
     const ref = isReference(text) ? parseWithSite(site, text) : fail(site, 'invalid-select', {select: text})
     if (ref.sigil !== '$' || !query.nodeNames.has(ref.name)) fail(site, 'unknown-reference', {reference: text})
@@ -400,7 +401,7 @@ function compileSelect(select, query) {
 export function compile(config) {
   const {phases = {}, given, trigger, settings = {}, scope} = config
   if (!scope) throw errorOf('missing-scope', {}, {where: 'compile:'})
-  checkRetired({address: 'settings'}, Object.keys(settings))
+  checkRetired({address: 'settings', path: ['settings']}, Object.keys(settings))
 
   const query = {
     scope,
@@ -421,7 +422,7 @@ export function compile(config) {
     calls: query.calls,
     given,
     trigger,
-    triggerSchema: trigger?.schema && parseSchemaAt({address: '$trigger'}, 'trigger', 'schema', trigger.schema),
+    triggerSchema: trigger?.schema && parseSchemaAt({address: '$trigger', path: ['trigger', 'schema']}, 'trigger', 'schema', trigger.schema),
     select: compileSelect(config.select, query),
     settings: {
       ...settings,

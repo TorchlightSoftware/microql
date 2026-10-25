@@ -158,6 +158,23 @@ describe('Compile-time errors', () => {
     assert.throws(() => compileQuery({phases: {a: ['[echo]/echo', {on: '$missing'}]}}), {message: /^\[\$a\.@1\] '\$missing'/})
   })
 
+  // [query, the error's address and the JSON path of what's at fault]: an
+  // editor places the error by its path, since a Query that doesn't compile
+  // has no plan to look its address up in
+  const located = [
+    [{phases: {a: ['[echo]/echo', {on: '$missing'}]}}, {address: '$a.@1', path: ['phases', 'a']}],
+    [{phases: {a: [['[echo]/echo', {on: 1}], ['[echo]/nope', {}]]}}, {address: '$a.@2', path: ['phases', 'a', 1]}],
+    [{given: {xs: [1]}, phases: {a: ['$given.xs', '[util]/each', {service: ['[echo]/echo', {on: '@item'}]}]}}, {address: '$a.@1a1', path: ['phases', 'a', 2, 'service']}],
+    [{phases: {given: ['[echo]/echo', {on: 1}]}}, {address: '$given', path: ['phases', 'given']}],
+    [{phases: {a: ['[echo]/echo', {on: 1}]}, select: 'a'}, {address: 'select', path: ['select']}],
+    [{phases: {}, settings: {onError: []}}, {address: 'settings', path: ['settings']}],
+    [{trigger: {schema: ['nope']}, phases: {}}, {address: '$trigger', path: ['trigger', 'schema']}]
+  ]
+
+  for (const [query, error] of located) {
+    it(`gives the path of ${error.address}`, () => assert.throws(() => compileQuery(query), error))
+  }
+
   // [description, query]: the fields a call may be given
   const fieldsTaken = [
     ['reserve args beside the declared fields', {phases: {a: ['[echo]/echo', {on: 1, timeout: 5, retry: 1, debug: false, cache: false, precheck: {on: ['number']}}]}}],

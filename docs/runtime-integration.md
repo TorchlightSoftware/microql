@@ -8,7 +8,7 @@ Three parties take part in running a Query, and each owns different things:
 
 | Party | Is | Owns |
 |---|---|---|
-| **Core** | `compile`, `plan` and `execute`, imported as `microql/core` | Query intepretation: references, chains, `each`, retries, timeouts, error handling, scheduling, and which results to reuse |
+| **Core** | `compile`, `plan` and `execute`, imported as `microql/core` | Query interpretation: references, chains, `each`, retries, timeouts, error handling, scheduling, and which results to reuse |
 | **Runtime** | one object for the whole process, usually extending MicroQL's `Runtime`, which gives each Query the [scope](#scopes) it runs in | how state is scoped: its services, their config and their [instances](#service-instances); the [Cache](#the-cache) and [Run States](#storage); and `env`, the environment's utilities, such as output |
 | **Platform** | whatever calls core: a node script, a server, an editor | [Runs](#runs): which scope each runs in, and so which [Run State](#storage); where results are shown, and when stores are cleared |
 
@@ -252,7 +252,7 @@ A form is a subtree of the Query, beginning at one service call. It holds the ca
 - `@`, `@name` and `@err` count as the form of what flows in, which inside an iteration is "the input of the call that owns it";
 - a call's `timeout`, `retry`, `debug` and `cache` settings don't count. They change how a call runs, not what it returns, so editing them keeps its results.
 
-Hashes are SHA-256 over canonical JSON, computed synchronously in pure JS (`@noble/hashes`), so they cost the same everywhere and `plan()` is synchronous.
+Hashes are SHA-256 over canonical JSON, computed synchronously in pure JS (`@noble/hashes`), so they cost the same everywhere and `plan()` is synchronous. Core exports both: `canonical(value)` is the canonical JSON text, and `hashOf(value)` its SHA-256 in hex, for a platform that stores Queries or results under the same hashes.
 
 ### Types
 
@@ -296,7 +296,7 @@ It is zodly's `error` type: a JSON-LD node of type Error, recognised by `@type`,
 
 ### Compile errors
 
-`compile()`, `plan()` and `query()` throw on a Query that can't run. The error's `address` is the [Service Call Address](#service-call-addresses) of the call or node at fault (`$a.@1`, `$trigger`, `select`). A cycle between phases has no single address, so it carries `phases`, the phases in the cycle, instead; `plan()` and `execute` find it.
+`compile()`, `plan()` and `query()` throw on a Query that can't run. The error's `address` is the [Service Call Address](#service-call-addresses) of the call or node at fault (`$a.@1`, `$trigger`, `select`), and its `path` is where that is in the Query document (`['phases', 'a']`, `['trigger', 'schema']`, `['select']`): a Query that doesn't compile has no plan to look an address up in, so an editor places the error by its path. A cycle between phases has no single address, so it carries `phases`, the phases in the cycle, instead; `plan()` and `execute` find it.
 
 | Code | Status | Means |
 |---|---|---|

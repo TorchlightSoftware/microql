@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import {describe, it} from 'node:test'
 import {compile} from '../index.js'
-import {canonical, hashOf, formsOf} from '../src/query/forms.js'
+import {canonical, hashOf} from '../core.js'
+import {formsOf} from '../src/query/forms.js'
 import {defineService} from '../src/service/define-service.js'
 
 describe('canonical serialization', () => {

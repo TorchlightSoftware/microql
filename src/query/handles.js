@@ -74,7 +74,7 @@ export function claimWritten(calls, atSite) {
       try {
         claim(handles, call, field, name)
       } catch (error) {
-        throw atSite({address: call.address}, error)
+        throw atSite(call, error)
       }
     }
   }
